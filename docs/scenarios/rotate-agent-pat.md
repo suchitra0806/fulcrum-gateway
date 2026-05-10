@@ -1,109 +1,124 @@
-# Rotate an Agent PAT
-
-Replace an agent's PAT without downtime by minting the new token first,
-verifying it works, then revoking the old one.
-
-> **Scope:** this page documents the current PAT-based rotation path for
-> existing agent credentials. Gateway's intended direction is OAuth/device
-> login plus Gateway-brokered credentials — normal onboarding should not
-> require operators or agents to copy PATs manually. See
-> [DEVICE-TRUST-001](../../specs/DEVICE-TRUST-001/spec.md) and
-> [GATEWAY-AUTH-TIERS-001](../../specs/GATEWAY-AUTH-TIERS-001/spec.md) for
-> the trust-boundary direction.
-
-Background: [`docs/credential-security.md`](../credential-security.md#agent-pat-rotation)
-and [`docs/agent-authentication.md`](../agent-authentication.md#rotation-with-existing-cli-commands)
-explain the policy. This page is the operator runbook.
+# Scenario: Rotate an Agent's PAT
 
 ## Goal
 
-Cut over `<agent>` to a fresh PAT with no failed requests in between. The
-old credential keeps working until the new one verifies; only then do you
-revoke it.
+Replace a managed agent's PAT credential with a fresh one, verify the
+replacement works, then revoke the old credential.
 
 ## Prerequisites
 
-- A user bootstrap login — `axctl auth whoami` returns your user, not the
-  agent.
-- The agent already exists and you know its name and audience (`cli`,
-  `mcp`, or `both`).
-- The agent's existing profile is already registered. If not, register it
-  first with `axctl profile add` so you have a baseline to compare against.
+- Gateway running and logged in (`ax gateway status` shows running)
+- Agent registered and working (`ax gateway agents show <agent>`)
+- User PAT with permission to mint and revoke credentials
 
 ## Steps
 
-1. **Inventory current credentials.**
+### 1. Inventory existing credentials
 
-   ```bash
-   axctl credentials list --json
-   axctl credentials audit
-   ```
+```bash
+axctl credentials list --json
+```
 
-   Note the `credential_id` of the PAT you intend to replace and confirm
-   the agent has exactly one active PAT today. In automation use
-   `axctl credentials audit --strict` to make policy violations fail loudly.
+Find the credential entry for your agent. Note the `credential_id` of the
+current active key.
 
-2. **Mint the replacement.** Match the audience and expiry of the old
-   token. Save to a separate directory so the old token file is untouched.
+### 2. Audit the key state
 
-   ```bash
-   axctl token mint <agent> \
-       --audience <cli|mcp|both> \
-       --expires <days> \
-       --save-to <new-token-dir> \
-       --profile <new-profile> \
-       --no-print-token
-   ```
+```bash
+axctl credentials audit
+```
 
-   `--save-to` takes a directory (typically the agent's `.ax/` directory,
-   e.g. `/home/agent/.ax`); the token file and `config.toml` are written
-   inside it. `--no-print-token` keeps the secret out of your shell
-   history. The token file is mode `0600`, and `<new-profile>` is
-   registered against it.
+**Expected:** One active key per agent. If you see two active keys for the same
+agent, clean up the stale key before proceeding — having more than two active
+PATs for one agent is a security hygiene issue.
 
-3. **Verify the new profile.**
+For stricter checking in automation:
 
-   ```bash
-   axctl profile verify <new-profile>
-   axctl auth whoami --json
-   ```
+```bash
+axctl credentials audit --strict
+```
 
-   `profile verify` re-checks the token fingerprint, hostname, and workdir
-   hash. `auth whoami` proves the new PAT actually exchanges for a JWT
-   end-to-end. Both must succeed before continuing.
+### 3. Mint a replacement PAT
 
-4. **Revoke the old credential.** Use the `credential_id` recorded in
-   step 1, not the new one.
+```bash
+axctl token mint <agent-name> \
+  --audience <cli|mcp|both> \
+  --expires 90 \
+  --save-to ~/.ax/gateway/agents/<agent-name>/token.new \
+  --profile <profile-name> \
+  --no-print-token
+```
 
-   ```bash
-   axctl credentials revoke <old-credential-id>
-   ```
+This creates a new agent-scoped PAT and saves it to a file. The
+`--no-print-token` flag keeps the raw token out of terminal history and logs.
 
-5. **Confirm cleanup.**
+**Expected:** Confirmation that the token was minted and saved.
 
-   ```bash
-   axctl credentials list --json
-   ```
+> **Important:** Do NOT revoke the old credential yet. You now have two active
+> PATs for this agent — this is acceptable only during the rotation window.
 
-   The old `credential_id` should now show `lifecycle_state: revoked`. The
-   agent should have exactly one active PAT — the replacement.
+### 4. Verify the new credential
+
+```bash
+axctl profile verify <profile-name>
+```
+
+Check that the new profile passes all three verifications (token SHA-256,
+hostname, workdir):
+
+```bash
+axctl auth whoami --json
+```
+
+**Expected:** The output shows the correct agent name and space.
+
+### 5. Test the agent with the new credential
+
+```bash
+ax send "rotation test" --to <agent-name> --skip-ax
+ax gateway agents inbox <agent-name>
+```
+
+Verify messages flow correctly using the new credential.
+
+### 6. Revoke the old credential
+
+Only after confirming the new credential works:
+
+```bash
+axctl credentials revoke <old-credential-id>
+```
+
+**Expected:** Confirmation that the old credential was revoked.
+
+### 7. Final audit
+
+```bash
+axctl credentials audit
+```
+
+**Expected:** Exactly one active key for the agent (the new one).
 
 ## Verify
 
-After the rotation:
-
-- `axctl credentials list` shows one active PAT for the agent.
-- `axctl credentials audit` reports no policy violations.
-- The agent's normal workflow (send / listen / mcp call, whatever it does
-  in production) succeeds with the new profile.
-- The old token file can be deleted.
+- `credentials audit` shows one active key per agent
+- Agent continues to process messages after the old key is revoked
+- No errors in `gateway.log` related to authentication
 
 ## What can go wrong
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| Agent fails right after step 4. | Revoked the old credential before the new one was actually serving traffic. | Re-run step 2 to mint another replacement, verify, then revoke. The originally-revoked id stays revoked. |
-| `credentials list` shows 3+ active PATs for the agent. | A previous rotation aborted between mint and revoke. | Stop. Identify each `credential_id`, decide which is current, and revoke the rest before issuing more. More than two active PATs per agent is a security hygiene issue. |
-| `profile verify` fails on the new profile. | Token file moved, host/workdir changed since `axctl token mint` ran, or the file was tampered with. | Inspect the token file inside `<new-token-dir>` (permissions and contents). If intentional (e.g. rotated to a new host), re-run `axctl profile add` from the new location. |
-| `auth whoami` returns the user, not the agent. | Wrong audience minted, or the new profile isn't active yet. | Check that step 2 used the same audience as the old PAT, and that `axctl profile use <new-profile>` (or the appropriate env vars) selected the agent profile. |
-| Honeypot / fingerprint alert fires during step 3. | The new token was used from a different machine or workspace than where it was minted. | Treat as a security event, not a rotation problem. See [`docs/credential-security.md`](../credential-security.md). |
+| Problem | Cause | Fix |
+| --- | --- | --- |
+| Agent stops working after revoke | Revoked the new key instead of the old one | Mint another replacement immediately |
+| "Two active PATs" warning persists | Forgot to revoke the old key | Complete step 6 |
+| More than two active PATs | Multiple incomplete rotations | `credentials list --json` to identify and revoke all stale keys, keep only the newest |
+| Wrong audience on new token | Mismatched `--audience` flag | Revoke the bad token, re-mint with correct audience (`cli`, `mcp`, or `both`) |
+| Profile verification fails | Token file path or workdir mismatch | Re-run `ax profile add` to rebind the profile to the new token file |
+
+## Learning goal
+
+Understanding the credential rotation lifecycle: the safe order is always
+**mint → verify → test → revoke**. Never revoke first. A rotation is complete
+only when the replacement token works and the previous credential is revoked.
+See [Credential Security](../credential-security.md) for the full security
+model.
