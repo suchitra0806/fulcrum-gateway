@@ -679,3 +679,46 @@ def test_mistral_sdk_per_tool_deadline_aborts_remaining_tools(monkeypatch):
     assert executed == ["ls"]
     assert result.exit_reason == "timeout"
     assert result.tool_count == 1
+
+
+# ── Real-package integration tests ────────────────────────────────────────
+#
+# The unit tests above stub `mistralai.client.sdk` and `mistralai.client.errors`
+# via sys.modules, so they would keep passing even if Mistral renamed or
+# reshuffled those internal paths in a future release. The runtime relies on
+# those exact paths because mistralai 2.x's top-level `__init__.py` does not
+# re-export Mistral — see the import block in the runtime module's `execute`.
+#
+# These tests import the real installed package and assert the layout matches
+# what the runtime expects. Skipped when `mistralai` is not installed (bare
+# `pip install .` CI); run when `pip install '.[mistral]'` has pulled the SDK.
+
+
+def test_mistralai_real_package_exposes_runtime_import_paths():
+    """The runtime's typed imports must resolve against the installed package."""
+    pytest.importorskip("mistralai")
+    from mistralai.client.errors import MistralError, SDKError
+    from mistralai.client.sdk import Mistral
+
+    assert isinstance(Mistral, type)
+    assert issubclass(MistralError, Exception)
+    # Catch order in the runtime depends on SDKError being a subclass of
+    # MistralError, so the SDKError arm fires before the MistralError arm.
+    assert issubclass(SDKError, MistralError)
+
+
+def test_mistralai_real_package_chat_stream_accepts_runtime_kwargs():
+    """The kwargs the runtime passes to chat.stream must exist in the SDK signature."""
+    import inspect
+
+    pytest.importorskip("mistralai")
+    from mistralai.client.sdk import Mistral
+
+    client = Mistral(api_key="not-a-real-key")
+    params = inspect.signature(client.chat.stream).parameters
+    # `timeout_ms` is the load-bearing one: Speakeasy SDKs take milliseconds,
+    # not OpenAI/Groq's seconds. If Mistral renames it back to `timeout`, the
+    # runtime's `int(remaining * 1000)` conversion becomes wrong and this test
+    # surfaces the drift.
+    for kw in ("model", "messages", "tools", "tool_choice", "timeout_ms"):
+        assert kw in params, f"mistralai chat.stream is missing expected kwarg: {kw}"

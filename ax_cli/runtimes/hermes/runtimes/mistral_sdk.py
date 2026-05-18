@@ -12,6 +12,12 @@ shape (flat `name` field). Mistral speaks chat completions, which
 expects the nested `function: { name, ... }` shape, so we adapt on
 the way out.
 
+SDK version: targets `mistralai>=2.0,<3.0` (verified against 2.4.5).
+The Speakeasy-generated 2.x layout puts the client at
+`mistralai.client.sdk.Mistral` and uses `timeout_ms` (milliseconds)
+rather than OpenAI/Groq's `timeout` (seconds) for per-request budget
+overrides. The optional install extra is `axctl[mistral]`.
+
 Auth: MISTRAL_API_KEY environment variable.
 Models: https://docs.mistral.ai/getting-started/models/models_overview/
         (default: mistral-large-latest)
@@ -183,10 +189,16 @@ class MistralSDKRuntime(BaseRuntime):
             log.info(f"mistral_sdk: turn {turn + 1}, {len(history)} messages")
 
             try:
-                # NOTE: mistralai 1.x uses `client.chat.stream(...)` rather than
+                # NOTE: mistralai 2.x uses `client.chat.stream(...)` rather than
                 # `client.chat.completions.create(stream=True)`. The stream
                 # yields wrapper events whose `.data` attribute holds the
                 # OpenAI-shaped chunk. See the stream iteration below.
+                #
+                # Per-request budget: Speakeasy-generated SDKs take `timeout_ms`
+                # in milliseconds, not OpenAI/Groq's `timeout` in seconds.
+                # Passing `timeout=remaining` would raise TypeError on this
+                # signature, so we convert explicitly. `remaining` is guaranteed
+                # > 0 by the wall-clock check above.
                 stream = client.chat.stream(
                     model=model,
                     messages=[
@@ -195,6 +207,7 @@ class MistralSDKRuntime(BaseRuntime):
                     ],
                     tools=tools,
                     tool_choice="auto",
+                    timeout_ms=max(1, int(remaining * 1000)),
                 )
             except SDKError as e:
                 # Mistral's catch-all HTTP error class. Has .status_code,
@@ -315,7 +328,7 @@ class MistralSDKRuntime(BaseRuntime):
 
             try:
                 for event in stream:
-                    # mistralai 1.x wraps each chunk in an event object; the
+                    # mistralai 2.x wraps each chunk in an event object; the
                     # OpenAI-shaped chunk is under `.data`. Unwrap defensively
                     # so we keep working if a future SDK version yields the
                     # chunk directly.

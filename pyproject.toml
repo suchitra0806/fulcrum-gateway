@@ -49,6 +49,9 @@ dev = [
     "ruff>=0.15.12",
     "twine>=6.2.0",
 ]
+mistral = [
+    "mistralai>=2.0,<3.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
