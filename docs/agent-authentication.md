@@ -346,9 +346,9 @@ before issuing more.
 
 ## Trust Boundary Model
 
-![Trust boundary model](images/trust-boundary-model.png)
+![Trust boundary model](images/trust-boundary-model.svg)
 
-![Credential brokering](images/credential-brokering.png)
+![Credential brokering](images/credential-brokering.svg)
 
 Gateway is the trust boundary between operators and agents. Understanding this
 boundary is critical for security.
@@ -364,7 +364,7 @@ boundary is critical for security.
 
 ### The proxy allowlist
 
-The proxy dispatcher (`_LOCAL_PROXY_METHODS` in `ax_cli/commands/gateway.py:782`)
+The proxy dispatcher (`_LOCAL_PROXY_METHODS` in `ax_cli/commands/gateway.py`)
 is the enforcement mechanism. It controls which `AxClient` methods an agent
 session can call through Gateway's `/local/proxy` endpoint.
 
@@ -382,9 +382,9 @@ endpoints (`/local/send`, `/local/tasks`) with additional validation — they
 are not in the generic proxy.
 
 `upload_file` is in the proxy allowlist but restricted to the `admin` tier
-(see `_LOCAL_PROXY_METHODS` at `commands/gateway.py:803`). It is additionally
+(see `_LOCAL_PROXY_METHODS` in `commands/gateway.py`). It is additionally
 sandboxed to the agent's configured workdir — uploads outside that directory
-are rejected (lines 833–840). This prevents untrusted agents from writing
+are rejected. This prevents untrusted agents from writing
 arbitrary files through the operator's credentials while allowing trusted
 agents to upload from their own workspace.
 

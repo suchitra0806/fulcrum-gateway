@@ -218,7 +218,7 @@ cold-started per message or messages are reaching multiple receive paths.
 
 ## Space Resolution
 
-![Space resolution cascade](images/space-resolution-cascade.png)
+![Space resolution cascade](images/space-resolution-cascade.svg)
 
 Space resolution is how Gateway determines which space an agent belongs to.
 Understanding the cascade prevents the most common operator confusion: seeing a
@@ -268,7 +268,7 @@ model.
 
 ## Agent Lifecycle
 
-![Agent lifecycle states](images/agent-lifecycle-states.png)
+![Agent lifecycle states](images/agent-lifecycle-states.svg)
 
 Every managed agent has three layers of state. Understanding how they interact
 is key to debugging agent issues.
@@ -282,13 +282,16 @@ is key to debugging agent issues.
 | **Presence** | What Gateway derives locally | `_derive_presence()` | `IDLE`, `OFFLINE`, `STALE`, `WORKING`, `QUEUED`, `BLOCKED`, `ERROR` |
 
 The reconcile loop bridges desired to effective. It runs every ~1 second
-(`GatewayDaemon.run()` at `ax_cli/gateway.py:6334`, default `poll_interval=1.0`)
-and for each agent:
+(default `poll_interval=1.0`) and for each agent:
 
 1. Compares `desired_state` to `effective_state`
 2. If they differ, takes action (start process, stop process, restart)
 3. Checks health and updates annotations
-4. Reports presence upstream
+4. Signals liveness transitions upstream when a delta is detected
+
+Heartbeats originate from the agent runtimes themselves, not from the
+daemon sweep. The sweep observes liveness state and reports deltas
+upstream, but does not drive the heartbeat cadence.
 
 Presence is informational — Gateway does not use presence to make lifecycle
 decisions. An agent can be `effective_state: running` locally but
@@ -298,7 +301,7 @@ decisions. An agent can be `effective_state: running` locally but
 
 For attached-session agents (Claude Code channels), `agents mark-attached`
 forces both `desired_state` and `effective_state` to `running` immediately
-(see `_mark_attached_agent_session()` at `commands/gateway.py:1772`). This is
+(see `_mark_attached_agent_session()` in `commands/gateway.py`). This is
 the correct command for incident recovery of attached agents.
 
 `agents attach` is the setup command — it writes MCP/channel config, sets
@@ -321,7 +324,7 @@ unparseable, see the [recovery scenario](scenarios/recover-corrupted-registry.md
 
 ## Inbox and Mailbox Semantics
 
-![Inbox vs channel delivery](images/inbox-vs-channel.png)
+![Inbox vs channel delivery](images/inbox-vs-channel.svg)
 
 Gateway supports two message delivery patterns: inbox (polling) and channel
 (live streaming). Understanding the difference prevents confusion about why
@@ -364,7 +367,7 @@ the local pending queue so the UI stops showing a new-mail indicator.
 
 | Function | Location | Purpose |
 | --- | --- | --- |
-| `append_agent_pending_message()` | `ax_cli/gateway.py:3046` | Adds message to pending queue |
-| `remove_agent_pending_message()` | `ax_cli/gateway.py:3069` | Removes message (mark_read) |
-| `load_agent_pending_messages()` | `ax_cli/gateway.py:3029` | Reads pending queue from disk |
-| `_local_session_inbox()` | `ax_cli/commands/gateway.py:860` | HTTP handler for `/local/inbox` |
+| `append_agent_pending_message()` | `ax_cli/gateway.py` | Adds message to pending queue |
+| `remove_agent_pending_message()` | `ax_cli/gateway.py` | Removes message (mark_read) |
+| `load_agent_pending_messages()` | `ax_cli/gateway.py` | Reads pending queue from disk |
+| `_local_session_inbox()` | `ax_cli/commands/gateway.py` | HTTP handler for `/local/inbox` |
