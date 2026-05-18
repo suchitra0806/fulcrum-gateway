@@ -182,10 +182,19 @@ def test_langgraph_bridge_emits_lifecycle_events(monkeypatch, capsys) -> None:
     )
 
 
+def _make_stream_chunk(content):
+    """Build a single streaming-mode chunk shaped like the Groq SDK yields."""
+    import types as _types
+
+    delta = _types.SimpleNamespace(content=content)
+    choice = _types.SimpleNamespace(delta=delta)
+    return _types.SimpleNamespace(choices=[choice])
+
+
 def test_langgraph_bridge_calls_groq_llm_when_configured(monkeypatch, capsys) -> None:
     """When GROQ_API_KEY is set AND the groq SDK is importable, the
-    bridge's LangGraph node should call Groq's chat completions and
-    return the model's response.
+    bridge's LangGraph node should stream a Groq chat completion and
+    return the joined model response.
 
     The groq SDK is stubbed via sys.modules so this test runs offline
     and does not consume API credits. Same pattern as the merged Groq
@@ -203,18 +212,19 @@ def test_langgraph_bridge_calls_groq_llm_when_configured(monkeypatch, capsys) ->
 
     # Build a stub groq module with a mocked client. The bridge does
     # `from groq import Groq`, instantiates Groq(), and calls
-    # client.chat.completions.create(...). We intercept that final
-    # call and return a deterministic response whose shape matches
-    # what the bridge reads (.choices[0].message.content).
-    fake_response = _types.SimpleNamespace(
-        choices=[
-            _types.SimpleNamespace(
-                message=_types.SimpleNamespace(content="The speed of light is approximately 299,792 km/s.")
-            )
+    # client.chat.completions.create(stream=True, ...), then iterates
+    # the returned stream consuming `.choices[0].delta.content` per
+    # chunk. The fake returns an iterator of three streaming chunks
+    # that join into a recognizable answer.
+    fake_stream = iter(
+        [
+            _make_stream_chunk("The speed of light "),
+            _make_stream_chunk("is approximately "),
+            _make_stream_chunk("299,792 km/s."),
         ]
     )
     fake_client = MagicMock()
-    fake_client.chat.completions.create.return_value = fake_response
+    fake_client.chat.completions.create.return_value = fake_stream
 
     fake_groq = _types.ModuleType("groq")
     fake_groq.Groq = MagicMock(return_value=fake_client)
@@ -231,12 +241,15 @@ def test_langgraph_bridge_calls_groq_llm_when_configured(monkeypatch, capsys) ->
 
     assert rc == 0, f"bridge main() returned {rc}; expected 0"
 
-    # Groq was called exactly once with the configured model and the
-    # prompt as the user message.
+    # Groq was called exactly once with the configured model, stream=True,
+    # and the prompt as the user message.
     assert fake_client.chat.completions.create.call_count == 1
     call_kwargs = fake_client.chat.completions.create.call_args.kwargs
     assert call_kwargs["model"] == "test-model-x", (
         f"bridge should forward AX_BRIDGE_LLM_MODEL to Groq. got model={call_kwargs.get('model')!r}"
+    )
+    assert call_kwargs.get("stream") is True, (
+        "bridge must request streaming so the activity feed stays live during the call"
     )
     messages = call_kwargs["messages"]
     assert messages[0]["role"] == "system"
@@ -246,7 +259,7 @@ def test_langgraph_bridge_calls_groq_llm_when_configured(monkeypatch, capsys) ->
     assert messages[-1]["role"] == "user"
     assert messages[-1]["content"] == "what is the speed of light in km/s"
 
-    # Completion event reports used_llm=True.
+    # Completion event reports used_llm=True (and back-compat stub=False).
     event_lines = [line for line in captured.out.splitlines() if line.startswith(bridge.EVENT_PREFIX)]
     completed_detail = None
     for line in event_lines:
@@ -257,12 +270,137 @@ def test_langgraph_bridge_calls_groq_llm_when_configured(monkeypatch, capsys) ->
     assert completed_detail.get("used_llm") is True, (
         f"LLM path should report used_llm=True in the completed event detail. got: {completed_detail!r}"
     )
+    assert completed_detail.get("stub") is False, (
+        "stub flag is kept for back-compat with the pre-LLM-validation schema; "
+        f"LLM path should report stub=False. got: {completed_detail!r}"
+    )
 
-    # The model's response (not a synthetic ack) lands on stdout.
+    # The joined streamed response (not a synthetic ack) lands on stdout.
     reply_lines = [line for line in captured.out.splitlines() if line and not line.startswith(bridge.EVENT_PREFIX)]
     assert reply_lines, "bridge did not print a reply line on stdout"
     assert "299,792" in reply_lines[-1], (
-        f"bridge reply should be the model's response, not a stub ack. last line: {reply_lines[-1]!r}"
+        f"bridge reply should be the joined streamed response, not a stub ack. last line: {reply_lines[-1]!r}"
+    )
+
+
+def test_langgraph_bridge_streams_activity_events_during_llm_call(monkeypatch, capsys) -> None:
+    """Streaming path should emit a `processing` status when the first
+    token arrives and at least one throttled `activity` event with a
+    rolling preview. This locks in the chatty-observability contract
+    Andrew's review called out: a synchronous Groq call would leave
+    the activity feed silent for the duration of the call.
+
+    Time is faked so the heartbeat fires deterministically without
+    sleeping.
+    """
+    import types as _types
+    from unittest.mock import MagicMock
+
+    _install_fake_langgraph(monkeypatch)
+    sys.path.insert(0, str(BRIDGE_PATH.parent))
+    try:
+        import langgraph_bridge as bridge
+    finally:
+        sys.path.pop(0)
+
+    # Drive time.monotonic deterministically so each yielded chunk
+    # advances the clock past the ACTIVITY_HEARTBEAT_SECONDS threshold.
+    # Each call to monotonic() returns the next value in the list.
+    fake_now = iter([0.0, 0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0])
+
+    def _next_monotonic() -> float:
+        try:
+            return next(fake_now)
+        except StopIteration:
+            return 99.0
+
+    monkeypatch.setattr(bridge.time, "monotonic", _next_monotonic)
+
+    fake_stream = iter(
+        [
+            _make_stream_chunk("Light "),
+            _make_stream_chunk("travels at "),
+            _make_stream_chunk("about "),
+            _make_stream_chunk("299,792 km/s."),
+        ]
+    )
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = fake_stream
+
+    fake_groq = _types.ModuleType("groq")
+    fake_groq.Groq = MagicMock(return_value=fake_client)
+    monkeypatch.setitem(sys.modules, "groq", fake_groq)
+
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.setattr(sys, "argv", ["langgraph_bridge.py", "tell me about light"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    monkeypatch.setenv("AX_GATEWAY_AGENT_NAME", "langgraph-test")
+
+    rc = bridge.main()
+    captured = capsys.readouterr()
+    assert rc == 0, f"bridge main() returned {rc}; expected 0"
+
+    event_lines = [line for line in captured.out.splitlines() if line.startswith(bridge.EVENT_PREFIX)]
+    processing_messages: list[str] = []
+    streaming_activities: list[str] = []
+    for line in event_lines:
+        payload = json.loads(line[len(bridge.EVENT_PREFIX) :])
+        if payload.get("kind") == "status" and payload.get("status") == "processing":
+            processing_messages.append(str(payload.get("message") or ""))
+        if payload.get("kind") == "activity":
+            activity = str(payload.get("activity") or "")
+            if "test-model" in activity or "Streaming response" in activity or "Light" in activity:
+                streaming_activities.append(activity)
+
+    assert any("Groq is responding" in m for m in processing_messages), (
+        "bridge should emit a `Groq is responding` processing status on first streamed token. "
+        f"got processing messages: {processing_messages!r}"
+    )
+    assert streaming_activities, (
+        "bridge should emit at least one throttled activity event with rolling preview "
+        f"during streaming. all events: {event_lines!r}"
+    )
+
+
+def test_langgraph_bridge_honors_ax_bridge_system_prompt(monkeypatch, capsys) -> None:
+    """AX_BRIDGE_SYSTEM_PROMPT overrides the default system-prompt tail
+    ("Reply concisely.") that follows the agent-name framing.
+    """
+    import types as _types
+    from unittest.mock import MagicMock
+
+    _install_fake_langgraph(monkeypatch)
+    sys.path.insert(0, str(BRIDGE_PATH.parent))
+    try:
+        import langgraph_bridge as bridge
+    finally:
+        sys.path.pop(0)
+
+    fake_stream = iter([_make_stream_chunk("ok.")])
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = fake_stream
+
+    fake_groq = _types.ModuleType("groq")
+    fake_groq.Groq = MagicMock(return_value=fake_client)
+    monkeypatch.setitem(sys.modules, "groq", fake_groq)
+
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.setenv("AX_BRIDGE_SYSTEM_PROMPT", "Answer in formal English only.")
+    monkeypatch.setattr(sys, "argv", ["langgraph_bridge.py", "hello"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    monkeypatch.setenv("AX_GATEWAY_AGENT_NAME", "langgraph-test")
+
+    rc = bridge.main()
+    capsys.readouterr()
+    assert rc == 0
+
+    call_kwargs = fake_client.chat.completions.create.call_args.kwargs
+    system_content = call_kwargs["messages"][0]["content"]
+    assert "Answer in formal English only." in system_content, (
+        f"AX_BRIDGE_SYSTEM_PROMPT should be threaded into the system message. got: {system_content!r}"
+    )
+    assert "Reply concisely." not in system_content, (
+        "default tail should be replaced, not appended, when AX_BRIDGE_SYSTEM_PROMPT is set"
     )
 
 
