@@ -117,12 +117,16 @@ runtime_app = typer.Typer(
     name="runtime", help="Install and inspect runtime templates (Hermes, etc.)", no_args_is_help=True
 )
 local_app = typer.Typer(name="local", help="Connect local pass-through agents to Gateway", no_args_is_help=True)
+connectors_app = typer.Typer(name="connectors", help="Manage outbound tool connectors", no_args_is_help=True)
+connectors_auth_app = typer.Typer(name="auth", help="Manage connector credentials", no_args_is_help=True)
 _ATTACHED_SESSION_PROCESSES: list[subprocess.Popen[bytes]] = []
 app.add_typer(agents_app, name="agents")
 app.add_typer(spaces_app, name="spaces")
 app.add_typer(approvals_app, name="approvals")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(local_app, name="local")
+app.add_typer(connectors_app, name="connectors")
+connectors_app.add_typer(connectors_auth_app, name="auth")
 
 _STATE_STYLES = {
     "running": "green",
@@ -2750,8 +2754,22 @@ def _status_payload(*, activity_limit: int = 10, include_hidden: bool = False) -
         if space_counts:
             fallback_space_id = max(space_counts.items(), key=lambda item: item[1])[0]
 
+    from ..connectors.storage import connectors_registry_path
+    from ..connectors.storage import list_connectors as _list_connectors
+
+    try:
+        _all_connectors = _list_connectors()
+        _connectors_count = len(_all_connectors)
+        _enabled_connectors = sum(1 for c in _all_connectors if c.enabled)
+    except Exception:
+        _connectors_count = 0
+        _enabled_connectors = 0
+
     payload = {
         "gateway_dir": str(gateway_dir()),
+        "connectors_registry_path": str(connectors_registry_path()),
+        "connectors_count": _connectors_count,
+        "enabled_connectors": _enabled_connectors,
         "gateway_environment": gateway_environment(),
         "connected": bool(session),
         "base_url": session.get("base_url") if session else None,
@@ -9040,3 +9058,293 @@ def remove_agent(name: str = typer.Argument(..., help="Managed agent name")):
         err_console.print(f"[red]Managed agent not found:[/red] {name}")
         raise typer.Exit(1)
     err_console.print(f"[green]Removed managed agent:[/green] @{name}")
+
+
+# ── Connector commands ────────────────────────────────────────────────────────
+
+
+@connectors_app.command("list")
+def connectors_list(as_json: bool = JSON_OPTION):
+    """List registered outbound tool connectors."""
+    from ..connectors import list_connectors
+
+    rows = list_connectors()
+    if as_json:
+        print_json([r.to_dict() for r in rows])
+        return
+    if not rows:
+        err_console.print("No connectors registered. Run: ax gateway connectors add <name> --provider composio --managed-auth")
+        return
+    print_table(
+        ["Name", "Provider", "Enabled", "Auth", "ID"],
+        [r.to_dict() for r in rows],
+        keys=["name", "provider", "enabled", "auth_ref", "id"],
+    )
+
+
+@connectors_app.command("show")
+def connectors_show(
+    ref: str = typer.Argument(..., help="Connector name or ID"),
+    as_json: bool = JSON_OPTION,
+):
+    """Show connector details (auth key names only, never values)."""
+    from ..connectors import ConnectorNotFoundError, auth_status, find_connector
+
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError:
+        err_console.print(f"[red]Connector not found:[/red] {ref}")
+        raise typer.Exit(1)
+    payload = row.to_dict()
+    if row.auth_ref:
+        payload["auth_status"] = auth_status(row.id, row.name)
+    if as_json:
+        print_json(payload)
+        return
+    err_console.print(f"[bold]{row.name}[/bold]  ({row.provider})")
+    err_console.print(f"  id       = {row.id}")
+    err_console.print(f"  enabled  = {row.enabled}")
+    err_console.print(f"  auth_ref = {row.auth_ref or '(none)'}")
+    if row.config:
+        err_console.print("  config:")
+        for k, v in sorted(row.config.items()):
+            err_console.print(f"    {k} = {v}")
+    if "auth_status" in payload:
+        a = payload["auth_status"]
+        if a.get("exists"):
+            err_console.print(f"  auth keys = {', '.join(a['keys']) or '(empty)'}")
+            err_console.print(f"  auth permissions = {a.get('permissions', '?')}")
+        else:
+            err_console.print("  auth = [yellow]not configured[/yellow]")
+
+
+@connectors_app.command("add")
+def connectors_add(
+    name: str = typer.Argument(..., help="Connector name (human-readable, unique)"),
+    provider: str = typer.Option(..., "--provider", "-p", help="Provider type (e.g. composio)"),
+    managed_auth: bool = typer.Option(False, "--managed-auth", help="Create managed auth env file"),
+    as_json: bool = JSON_OPTION,
+):
+    """Register a new outbound tool connector."""
+    from ..connectors import ConnectorRow, add_connector, validate_new_connector
+    from ..connectors.errors import ConnectorError
+    from ..connectors.providers.registry import get_provider
+
+    provider_info = get_provider(provider)
+    config = dict(provider_info["default_config"]) if provider_info else {}
+    row = ConnectorRow.create(name, provider, managed_auth=managed_auth, config=config)
+    try:
+        validate_new_connector(row)
+    except ConnectorError as e:
+        err_console.print(f"[red]Validation error:[/red] {e}")
+        raise typer.Exit(1)
+    add_connector(row)
+    if as_json:
+        print_json(row.to_dict())
+        return
+    err_console.print(f"[green]Added connector:[/green] {row.name} (provider={row.provider}, id={row.id})")
+    if managed_auth:
+        err_console.print(f"  Next: ax gateway connectors auth write {name} COMPOSIO_API_KEY=<key>")
+
+
+@connectors_app.command("remove")
+def connectors_remove(
+    ref: str = typer.Argument(..., help="Connector name or ID"),
+    as_json: bool = JSON_OPTION,
+):
+    """Remove a connector and clean up its auth file."""
+    from ..connectors import ConnectorNotFoundError, cleanup_auth, remove_connector
+
+    try:
+        removed = remove_connector(ref)
+    except ConnectorNotFoundError:
+        err_console.print(f"[red]Connector not found:[/red] {ref}")
+        raise typer.Exit(1)
+    if removed.auth_ref:
+        cleanup_auth(removed.id)
+    if as_json:
+        print_json({"removed": removed.to_dict()})
+        return
+    err_console.print(f"[green]Removed connector:[/green] {removed.name}")
+
+
+@connectors_app.command("set")
+def connectors_set(
+    ref: str = typer.Argument(..., help="Connector name or ID"),
+    key: str = typer.Argument(..., help="Configuration key (e.g. entity_id, composio_base_url)"),
+    value: str = typer.Argument(..., help="Configuration value"),
+    as_json: bool = JSON_OPTION,
+):
+    """Set a connector configuration value."""
+    from ..connectors import ConnectorNotFoundError, find_connector, update_connector
+
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError:
+        err_console.print(f"[red]Connector not found:[/red] {ref}")
+        raise typer.Exit(1)
+    config = dict(row.config)
+    config[key] = value
+    updated = update_connector(ref, {"config": config})
+    if as_json:
+        print_json(updated.to_dict())
+        return
+    err_console.print(f"[green]Updated:[/green] {updated.name} config.{key} = {value}")
+
+
+@connectors_app.command("call")
+def connectors_call(
+    ref: str = typer.Argument(..., help="Connector name or ID"),
+    tool: str = typer.Option(..., "--tool", "-t", help="Tool slug (e.g. GITHUB_LIST_PRS)"),
+    args_json: str = typer.Option("{}", "--args-json", "-a", help="Tool arguments as JSON string"),
+    as_json: bool = JSON_OPTION,
+):
+    """Execute a tool via a connector's provider."""
+    import json as _json
+
+    from ..connectors import (
+        ConnectorAuthError,
+        ConnectorNotFoundError,
+        ConnectorProviderError,
+        execute_tool,
+        find_connector,
+        read_auth,
+    )
+
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError:
+        err_console.print(f"[red]Connector not found:[/red] {ref}")
+        raise typer.Exit(1)
+    if not row.enabled:
+        err_console.print(f"[red]Connector {row.name!r} is disabled[/red]")
+        raise typer.Exit(1)
+    try:
+        args = _json.loads(args_json)
+    except _json.JSONDecodeError as e:
+        err_console.print(f"[red]Invalid JSON in --args-json:[/red] {e}")
+        raise typer.Exit(1)
+    try:
+        auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
+    except ConnectorAuthError as e:
+        err_console.print(f"[red]Auth error:[/red] {e}")
+        raise typer.Exit(1)
+    try:
+        result = execute_tool(row, tool, args, auth_env)
+    except ConnectorProviderError as e:
+        err_console.print(f"[red]Provider error:[/red] {e}")
+        raise typer.Exit(1)
+    if as_json:
+        print_json(result)
+        return
+    err_console.print(f"[bold]Result from {row.provider}/{tool}:[/bold]")
+    print_json(result)
+
+
+@connectors_app.command("providers")
+def connectors_providers(as_json: bool = JSON_OPTION):
+    """List available connector provider types."""
+    from ..connectors.providers.registry import list_providers
+
+    providers = list_providers()
+    if as_json:
+        print_json(providers)
+        return
+    for p in providers:
+        err_console.print(f"[bold]{p['name']}[/bold] — {p['description']}")
+        err_console.print(f"  Required auth: {', '.join(p['required_auth_keys'])}")
+        if p.get("optional_auth_keys"):
+            err_console.print(f"  Optional auth: {', '.join(p['optional_auth_keys'])}")
+
+
+@connectors_auth_app.command("write")
+def connectors_auth_write(
+    ref: str = typer.Argument(..., help="Connector name or ID"),
+    kvs: list[str] = typer.Argument(..., help="KEY=VALUE pairs (e.g. COMPOSIO_API_KEY=ak_xxx)"),
+    as_json: bool = JSON_OPTION,
+):
+    """Write or overwrite managed auth credentials for a connector."""
+    from ..connectors import ConnectorNotFoundError, auth_status, find_connector, write_auth
+    from ..connectors.errors import ConnectorAuthError
+
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError:
+        err_console.print(f"[red]Connector not found:[/red] {ref}")
+        raise typer.Exit(1)
+    if not row.auth_ref:
+        err_console.print(f"[red]Connector {row.name!r} does not use managed auth.[/red] Re-create with --managed-auth.")
+        raise typer.Exit(1)
+    parsed: dict[str, str] = {}
+    for kv in kvs:
+        if "=" not in kv:
+            err_console.print(f"[red]Invalid format:[/red] {kv!r} — expected KEY=VALUE")
+            raise typer.Exit(1)
+        k, _, v = kv.partition("=")
+        k = k.strip()
+        if not k:
+            err_console.print(f"[red]Empty key in:[/red] {kv!r}")
+            raise typer.Exit(1)
+        parsed[k] = v
+    try:
+        write_auth(row.id, row.name, parsed)
+    except ConnectorAuthError as e:
+        err_console.print(f"[red]Auth write error:[/red] {e}")
+        raise typer.Exit(1)
+    status = auth_status(row.id, row.name)
+    if as_json:
+        print_json(status)
+        return
+    err_console.print(f"[green]Auth written for {row.name}:[/green] {', '.join(sorted(parsed.keys()))}")
+    err_console.print(f"  Permissions: {status.get('permissions', '?')}")
+
+
+@connectors_auth_app.command("status")
+def connectors_auth_status(
+    ref: str = typer.Argument(..., help="Connector name or ID"),
+    as_json: bool = JSON_OPTION,
+):
+    """Show managed auth status (key names only, never values)."""
+    from ..connectors import ConnectorNotFoundError, auth_status, find_connector
+
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError:
+        err_console.print(f"[red]Connector not found:[/red] {ref}")
+        raise typer.Exit(1)
+    status = auth_status(row.id, row.name)
+    if as_json:
+        print_json(status)
+        return
+    if status.get("exists"):
+        err_console.print(f"[bold]{row.name}[/bold] auth status:")
+        err_console.print(f"  Keys: {', '.join(status['keys']) or '(empty)'}")
+        err_console.print(f"  Permissions: {status.get('permissions', '?')}")
+        err_console.print(f"  Last modified: {status.get('last_modified', '?')}")
+        err_console.print(f"  Size: {status.get('size_bytes', '?')} bytes")
+    else:
+        err_console.print(f"[yellow]No auth configured for {row.name}.[/yellow]")
+        err_console.print(f"  Run: ax gateway connectors auth write {row.name} COMPOSIO_API_KEY=<key>")
+
+
+@connectors_auth_app.command("clear")
+def connectors_auth_clear(
+    ref: str = typer.Argument(..., help="Connector name or ID"),
+    as_json: bool = JSON_OPTION,
+):
+    """Remove managed auth credentials for a connector."""
+    from ..connectors import ConnectorNotFoundError, cleanup_auth, find_connector
+
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError:
+        err_console.print(f"[red]Connector not found:[/red] {ref}")
+        raise typer.Exit(1)
+    removed = cleanup_auth(row.id)
+    if as_json:
+        print_json({"connector": row.name, "auth_removed": removed})
+        return
+    if removed:
+        err_console.print(f"[green]Auth removed for {row.name}[/green]")
+    else:
+        err_console.print(f"[yellow]No auth file found for {row.name}[/yellow]")
