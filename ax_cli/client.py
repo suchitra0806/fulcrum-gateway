@@ -1006,7 +1006,12 @@ class AxClient:
 
         params = {"space_id": space_id} if space_id else None
 
-        # Try /state first (AVAIL-CONTRACT-001). If 404, fall back to /presence.
+        # Try /state first (AVAIL-CONTRACT-001). If the endpoint is not
+        # available, fall back to /presence. The "not available" signal is
+        # normally 404, but on deployments where missing API paths fall
+        # through to a SPA frontend (e.g. current paxai.app prod — see #59)
+        # the response is 200 HTML instead, with the same "endpoint isn't
+        # there" semantics. Treat both as fallback-eligible. See #60.
         try:
             r = self._http.get(f"/api/v1/agents/{identifier}/state", params=params)
             r.raise_for_status()
@@ -1022,7 +1027,7 @@ class AxClient:
                 return resolved
             return envelope
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 404:
+            if exc.response.status_code != 404 and not self._is_html_response(exc.response):
                 raise
             # /state not available yet — fall back to /presence.
         r = self._http.get(f"/api/v1/agents/{identifier}/presence", params=params)
