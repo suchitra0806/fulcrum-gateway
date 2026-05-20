@@ -167,7 +167,7 @@ reply. This is how operators know work did not disappear into a black hole.
 
 Minimum signals:
 
-- `picked_up` or `working`: the runtime received the message.
+- `accepted` or `working`: the runtime received the message.
 - `thinking`: the model/runtime started processing.
 - `tool_call`: the runtime is using a tool, with a useful tool name or summary
   when available.
@@ -223,3 +223,161 @@ Expected result:
 
 If the second reply has no memory of the first, the agent is still being
 cold-started per message or messages are reaching multiple receive paths.
+
+---
+
+## Space Resolution
+
+![Space resolution cascade](images/space-resolution-cascade.svg)
+
+Space resolution is how Gateway determines which space an agent belongs to.
+Understanding the cascade prevents the most common operator confusion: seeing a
+UUID where a space name should be.
+
+### The resolution cascade
+
+When Gateway needs a space name for an agent, it checks three sources in order:
+
+1. **Per-agent `allowed_spaces` cache** — in-memory, stored in the registry
+   entry. Fastest. Populated when the agent first connects or when the operator
+   switches spaces.
+2. **Global disk cache** (`~/.ax/gateway/spaces.cache.json`) — shared across all
+   agents. Falls back here when the per-agent cache is empty. Populated by
+   `save_space_cache()` and `upsert_space_cache_entry()` after upstream space
+   resolution calls.
+3. **Upstream `list_spaces` API call** — slowest, requires network. Used when
+   both caches miss.
+
+The key function is `space_name_from_cache(space_id)` in `ax_cli/gateway.py`.
+It does id-to-name lookup against the global disk cache.
+`lookup_space_in_cache()` handles slug-to-UUID resolution separately.
+`_fallback_allowed_spaces()` synthesizes per-agent space rows from
+entry/session fields — it does not populate the global disk cache.
+
+### Common failure: UUID-as-name
+
+If the upstream API returns a space record where `name` is a UUID string (a
+platform bug or data inconsistency), the per-agent cache stores that UUID as the
+"name." The operator then sees a UUID in `agents show`, the UI agent table, and
+log messages — confusing but not a functional failure.
+
+**Status:** The `_UUID_RE` guard now validates that a name doesn't look like a
+UUID before caching, preventing this at the storage layer.
+
+### Space state storage
+
+Active space state lives in `session.json`, not `registry.json`. This separation
+was made in PR #172 to prevent the reconcile loop from racing with operator
+space switches. See [ADR-004](adr/ADR-004-space-state-in-session.md).
+
+The auto-migration in the reconcile loop strips stale `space_id`/`space_name`
+from the registry gateway block, pushing operators toward the session-based
+model.
+
+---
+
+## Agent Lifecycle
+
+![Agent lifecycle states](images/agent-lifecycle-states.svg)
+
+Every managed agent has three layers of state. Understanding how they interact
+is key to debugging agent issues.
+
+### Three-layer state model
+
+| Layer | What it represents | Who sets it | Example values |
+| --- | --- | --- | --- |
+| **Desired state** | What the operator wants | `agents start`, `agents stop` | `running`, `stopped` |
+| **Effective state** | What Gateway observes locally | Reconcile loop | `running`, `stopped`, `error`, `starting`, `reconnecting` |
+| **Presence** | What Gateway derives locally | `_derive_presence()` | `IDLE`, `OFFLINE`, `STALE`, `WORKING`, `QUEUED`, `BLOCKED`, `ERROR` |
+
+The reconcile loop bridges desired to effective. It runs every ~1 second
+(default `poll_interval=1.0`) and for each agent:
+
+1. Compares `desired_state` to `effective_state`
+2. If they differ, takes action (start process, stop process, restart)
+3. Checks health and updates annotations
+4. Signals liveness transitions upstream when a delta is detected
+
+Heartbeats originate from the agent runtimes themselves, not from the
+daemon sweep. The sweep observes liveness state and reports deltas
+upstream, but does not drive the heartbeat cadence.
+
+Presence is informational — Gateway does not use presence to make lifecycle
+decisions. An agent can be `effective_state: running` locally but
+`presence: offline` upstream if the heartbeat hasn't propagated yet.
+
+### Manual attach
+
+For attached-session agents (Claude Code channels), `agents mark-attached`
+forces both `desired_state` and `effective_state` to `running` immediately
+(see `_mark_attached_agent_session()` in `commands/gateway.py`). This is
+the correct command for incident recovery of attached agents.
+
+`agents attach` is the setup command — it writes MCP/channel config, sets
+`desired_state` to `running`, and prints the attach command, but does not force
+`effective_state`. Use `mark-attached` when:
+- The reconcile loop hasn't caught up yet
+- The agent's runtime is managed externally (e.g., systemd) and Gateway just
+  needs to know it's alive
+- Testing without waiting for the full reconcile cycle
+
+### Corruption repair
+
+The reconcile loop includes a corruption repair step. If it detects
+inconsistencies in `registry.json` (e.g., missing fields, invalid state
+values), it resets the affected entry to a safe default state and logs a
+warning. This is a best-effort recovery — if the registry file itself is
+unparseable, see the [recovery scenario](scenarios/recover-corrupted-registry.md).
+
+---
+
+## Inbox and Mailbox Semantics
+
+![Inbox vs channel delivery](images/inbox-vs-channel.svg)
+
+Gateway supports two message delivery patterns: inbox (polling) and channel
+(live streaming). Understanding the difference prevents confusion about why
+messages appear differently for different agent types.
+
+### Inbox agents (polling)
+
+Inbox and pass-through agents check for messages periodically. When a message
+arrives:
+
+1. Gateway appends it to the agent's pending queue at
+   `~/.ax/gateway/agents/<name>/pending.json`
+2. The agent calls `/local/inbox` (or `ax gateway agents inbox <name>`)
+3. Gateway returns messages from the upstream API via `client.list_messages()`
+4. The agent processes messages and calls `mark_read` to clear pending state
+
+The pending queue (`pending.json`) is a local bookkeeping file — it powers the
+Gateway UI unread badge and `mark_read` cleanup, but `/local/inbox` returns
+messages from the upstream API, not from the local queue.
+
+### Channel agents (live streaming)
+
+Claude Code Channel agents maintain a live SSE connection. Messages are
+delivered in real-time through the channel — there is no local pending queue.
+The channel handles message acknowledgment through processing signals
+(`accepted`, `working`, `completed`).
+
+### `unread_only` filtering
+
+When an agent requests `/local/inbox?unread_only=true`, the `unread_only` flag
+is passed through to the upstream `list_messages()` API call — Gateway does not
+perform a local intersection with pending IDs. The upstream API handles unread
+filtering based on its own read-state tracking.
+
+The local pending queue serves a different purpose: it powers the Gateway UI
+unread badge and `mark_read` bookkeeping. When `mark_read=true`, Gateway clears
+the local pending queue so the UI stops showing a new-mail indicator.
+
+### Key functions
+
+| Function | Location | Purpose |
+| --- | --- | --- |
+| `append_agent_pending_message()` | `ax_cli/gateway.py` | Adds message to pending queue |
+| `remove_agent_pending_message()` | `ax_cli/gateway.py` | Removes message (mark_read) |
+| `load_agent_pending_messages()` | `ax_cli/gateway.py` | Reads pending queue from disk |
+| `_local_session_inbox()` | `ax_cli/commands/gateway.py` | HTTP handler for `/local/inbox` |

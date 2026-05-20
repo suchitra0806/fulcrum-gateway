@@ -1,0 +1,102 @@
+<svg width="1200" height="620" viewBox="0 0 1200 620" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Space resolution cascade</title>
+  <desc id="desc">Three-level waterfall showing how Gateway resolves a space name: per-agent cache, then global disk cache, then upstream API call, with miss/hit arrows at each level.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="620" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#60A5FA"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#22C55E"/>
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#F59E0B"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Inter, system-ui, sans-serif; fill: #F8FAFC; }
+      .subtitle { font: 500 16px Inter, system-ui, sans-serif; fill: #94A3B8; }
+      .label { font: 700 22px Inter, system-ui, sans-serif; fill: #E2E8F0; }
+      .body { font: 500 16px Inter, system-ui, sans-serif; fill: #CBD5E1; }
+      .small { font: 600 14px Inter, system-ui, sans-serif; fill: #93C5FD; letter-spacing: 0.06em; }
+      .mono { font: 600 15px 'SFMono-Regular', Consolas, monospace; fill: #DBEAFE; }
+      .hit { font: 700 16px Inter, system-ui, sans-serif; fill: #22C55E; }
+      .miss { font: 700 16px Inter, system-ui, sans-serif; fill: #F59E0B; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="620" rx="28" fill="url(#bg)"/>
+  <text x="72" y="72" class="title">Space Resolution Cascade</text>
+  <text x="72" y="104" class="subtitle">Gateway resolves a space name by checking three sources in order. First hit wins.</text>
+
+  <!-- Step indicator -->
+  <rect x="72" y="144" width="36" height="36" rx="18" fill="#1D4ED8"/>
+  <text x="84" y="168" class="label" style="font-size:18px; fill:#DBEAFE;">1</text>
+
+  <!-- Level 1: Per-agent cache -->
+  <rect x="124" y="136" width="420" height="120" rx="24" fill="#0F172A" stroke="#2563EB" stroke-width="2"/>
+  <text x="160" y="176" class="label">Per-agent cache</text>
+  <text x="160" y="204" class="mono">allowed_spaces dict from registry entry</text>
+  <text x="160" y="232" class="body">Stored in registry entry, checked first</text>
+
+  <!-- Hit arrow from level 1 -->
+  <path d="M544 196H700" stroke="#22C55E" stroke-width="3" marker-end="url(#arrowGreen)"/>
+  <text x="586" y="186" class="hit">HIT</text>
+
+  <!-- Hit result box -->
+  <rect x="720" y="162" width="260" height="68" rx="18" fill="#0B1220" stroke="#22C55E" stroke-width="2"/>
+  <text x="752" y="196" class="label" style="fill:#22C55E;">Return space name</text>
+  <text x="752" y="218" class="body">Fastest path, no I/O</text>
+
+  <!-- Miss arrow from level 1 to level 2 -->
+  <path d="M334 256V290" stroke="#F59E0B" stroke-width="3" marker-end="url(#arrowAmber)"/>
+  <text x="346" y="280" class="miss">MISS</text>
+
+  <!-- Step 2 indicator -->
+  <rect x="72" y="300" width="36" height="36" rx="18" fill="#1D4ED8"/>
+  <text x="83" y="324" class="label" style="font-size:18px; fill:#DBEAFE;">2</text>
+
+  <!-- Level 2: Global disk cache -->
+  <rect x="124" y="292" width="420" height="120" rx="24" fill="#0F172A" stroke="#334155" stroke-width="2"/>
+  <text x="160" y="332" class="label">Global disk cache</text>
+  <text x="160" y="360" class="mono">spaces.cache.json</text>
+  <text x="160" y="388" class="body">Shared across all agents, persisted to disk</text>
+
+  <!-- Hit arrow from level 2 -->
+  <path d="M544 352H700" stroke="#22C55E" stroke-width="3" marker-end="url(#arrowGreen)"/>
+  <text x="586" y="342" class="hit">HIT</text>
+
+  <!-- Hit result box 2 -->
+  <rect x="720" y="318" width="260" height="68" rx="18" fill="#0B1220" stroke="#22C55E" stroke-width="2"/>
+  <text x="752" y="352" class="label" style="fill:#22C55E;">Return space name</text>
+  <text x="752" y="374" class="body">Disk read, no network</text>
+
+  <!-- Miss arrow from level 2 to level 3 -->
+  <path d="M334 412V446" stroke="#F59E0B" stroke-width="3" marker-end="url(#arrowAmber)"/>
+  <text x="346" y="436" class="miss">MISS</text>
+
+  <!-- Step 3 indicator -->
+  <rect x="72" y="456" width="36" height="36" rx="18" fill="#1D4ED8"/>
+  <text x="83" y="480" class="label" style="font-size:18px; fill:#DBEAFE;">3</text>
+
+  <!-- Level 3: Upstream API -->
+  <rect x="124" y="448" width="420" height="120" rx="24" fill="#0F172A" stroke="#334155" stroke-width="2"/>
+  <text x="160" y="488" class="label">Upstream API</text>
+  <text x="160" y="516" class="mono">list_spaces API call</text>
+  <text x="160" y="544" class="body">Network round-trip to paxai.app</text>
+
+  <!-- Hit arrow from level 3 -->
+  <path d="M544 508H700" stroke="#22C55E" stroke-width="3" marker-end="url(#arrowGreen)"/>
+  <text x="586" y="498" class="hit">HIT</text>
+
+  <!-- Hit result box 3 -->
+  <rect x="720" y="474" width="260" height="68" rx="18" fill="#0B1220" stroke="#22C55E" stroke-width="2"/>
+  <text x="752" y="508" class="label" style="fill:#22C55E;">Return + populate caches</text>
+  <text x="752" y="530" class="body">Slowest, requires network</text>
+
+  <!-- Warning box -->
+  <rect x="720" y="560" width="420" height="44" rx="14" fill="#3F1D1D" stroke="#7F1D1D"/>
+  <text x="748" y="588" class="body" style="fill:#FCA5A5;">Historical failure: UUID as name — now guarded by _UUID_RE validation before caching</text>
+</svg>

@@ -1,0 +1,110 @@
+<svg width="1200" height="600" viewBox="0 0 1200 600" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Agent lifecycle states</title>
+  <desc id="desc">State machine diagram showing desired state, effective state, and presence layers with the reconcile loop driving transitions between stopped, running, and error states.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="600" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#60A5FA"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#22C55E"/>
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#F59E0B"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Inter, system-ui, sans-serif; fill: #F8FAFC; }
+      .subtitle { font: 500 16px Inter, system-ui, sans-serif; fill: #94A3B8; }
+      .label { font: 700 22px Inter, system-ui, sans-serif; fill: #E2E8F0; }
+      .body { font: 500 16px Inter, system-ui, sans-serif; fill: #CBD5E1; }
+      .small { font: 600 13px Inter, system-ui, sans-serif; fill: #93C5FD; letter-spacing: 0.08em; text-transform: uppercase; }
+      .state { font: 700 18px 'SFMono-Regular', Consolas, monospace; }
+      .note { font: 500 14px Inter, system-ui, sans-serif; fill: #94A3B8; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="600" rx="28" fill="url(#bg)"/>
+  <text x="72" y="72" class="title">Agent Lifecycle States</text>
+  <text x="72" y="104" class="subtitle">Three layers of state. The reconcile loop bridges desired to effective every ~1 second.</text>
+
+  <!-- DESIRED STATE LAYER -->
+  <rect x="60" y="140" width="340" height="400" rx="24" fill="#0F172A" stroke="#2563EB" stroke-width="2"/>
+  <text x="92" y="176" class="small">Desired state</text>
+  <text x="92" y="206" class="body">What the operator wants</text>
+
+  <!-- Stopped state -->
+  <rect x="110" y="240" width="160" height="56" rx="16" fill="#0B1220" stroke="#94A3B8" stroke-width="2"/>
+  <text x="150" y="274" class="state" style="fill:#94A3B8;">stopped</text>
+
+  <!-- Running state -->
+  <rect x="110" y="340" width="160" height="56" rx="16" fill="#0B1220" stroke="#22C55E" stroke-width="2"/>
+  <text x="147" y="374" class="state" style="fill:#22C55E;">running</text>
+
+  <!-- Arrows between desired states -->
+  <path d="M190 296V330" stroke="#60A5FA" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="200" y="318" class="note">agents start</text>
+
+  <path d="M230 340V306" stroke="#60A5FA" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="240" y="328" class="note">agents stop</text>
+
+  <text x="92" y="464" class="note">Set by CLI commands</text>
+  <text x="92" y="490" class="note">approval_state is a separate field</text>
+
+  <!-- RECONCILE LOOP (center) -->
+  <rect x="440" y="200" width="280" height="280" rx="28" fill="#111827" stroke="#60A5FA" stroke-width="2.5" stroke-dasharray="0"/>
+
+  <!-- Loop arrows -->
+  <ellipse cx="580" cy="340" rx="80" ry="80" fill="none" stroke="#60A5FA" stroke-width="2.5" stroke-dasharray="10 8"/>
+  <path d="M660 340L650 330L650 350Z" fill="#60A5FA"/>
+
+  <text x="480" y="240" class="small" style="fill:#60A5FA;">Reconcile loop</text>
+  <text x="480" y="268" class="label" style="font-size:18px;">Every ~1s</text>
+
+  <text x="505" y="330" class="body" style="font-size:14px;">Compare desired</text>
+  <text x="515" y="350" class="body" style="font-size:14px;">vs effective</text>
+
+  <text x="480" y="410" class="note">Start/stop/restart</text>
+  <text x="480" y="432" class="note">Update health</text>
+  <text x="480" y="454" class="note">Fix corruption</text>
+
+  <!-- Arrow from desired to reconcile -->
+  <path d="M400 340H430" stroke="#60A5FA" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- Arrow from reconcile to effective -->
+  <path d="M730 340H760" stroke="#60A5FA" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- EFFECTIVE STATE LAYER -->
+  <rect x="770" y="140" width="370" height="400" rx="24" fill="#0F172A" stroke="#334155" stroke-width="2"/>
+  <text x="802" y="176" class="small">Effective state</text>
+  <text x="802" y="206" class="body">What Gateway actually observes</text>
+
+  <!-- Effective stopped -->
+  <rect x="820" y="240" width="160" height="56" rx="16" fill="#0B1220" stroke="#94A3B8" stroke-width="2"/>
+  <text x="860" y="274" class="state" style="fill:#94A3B8;">stopped</text>
+
+  <!-- Effective running -->
+  <rect x="820" y="320" width="160" height="56" rx="16" fill="#0B1220" stroke="#22C55E" stroke-width="2"/>
+  <text x="857" y="354" class="state" style="fill:#22C55E;">running</text>
+
+  <!-- Effective error -->
+  <rect x="820" y="400" width="160" height="56" rx="16" fill="#0B1220" stroke="#EF4444" stroke-width="2"/>
+  <text x="872" y="434" class="state" style="fill:#EF4444;">error</text>
+
+  <!-- Presence info box -->
+  <rect x="1010" y="250" width="110" height="120" rx="16" fill="#0B1220" stroke="#334155" stroke-width="1.5"/>
+  <text x="1028" y="278" class="small" style="font-size:11px;">Presence</text>
+  <text x="1028" y="304" class="note" style="fill:#22C55E;">IDLE</text>
+  <text x="1028" y="328" class="note" style="fill:#94A3B8;">OFFLINE</text>
+  <text x="1028" y="352" class="note" style="fill:#F59E0B;">STALE</text>
+
+  <text x="802" y="490" class="note">May lag desired state</text>
+  <text x="802" y="512" class="note">Presence is informational only</text>
+  <text x="802" y="534" class="note">Derived locally by Gateway</text>
+
+  <!-- Bottom note -->
+  <rect x="60" y="558" width="740" height="30" rx="12" fill="#0B1220" stroke="#1E293B"/>
+  <text x="84" y="578" class="note">Operator controls desired. Reconcile loop drives effective. Presence reflects upstream. They may disagree temporarily.</text>
+</svg>

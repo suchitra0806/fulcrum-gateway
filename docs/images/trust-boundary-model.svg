@@ -1,0 +1,109 @@
+<svg width="1200" height="680" viewBox="0 0 1200 680" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Trust boundary model</title>
+  <desc id="desc">Diagram showing the operator side (user PAT, full access) and agent side (session token, limited proxy) with the Gateway proxy allowlist as the enforcement gate between them.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="680" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#60A5FA"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#F87171"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Inter, system-ui, sans-serif; fill: #F8FAFC; }
+      .subtitle { font: 500 16px Inter, system-ui, sans-serif; fill: #94A3B8; }
+      .label { font: 700 22px Inter, system-ui, sans-serif; fill: #E2E8F0; }
+      .body { font: 500 16px Inter, system-ui, sans-serif; fill: #CBD5E1; }
+      .small { font: 600 13px Inter, system-ui, sans-serif; fill: #93C5FD; letter-spacing: 0.08em; text-transform: uppercase; }
+      .mono { font: 600 14px 'SFMono-Regular', Consolas, monospace; fill: #DBEAFE; }
+      .allowed { font: 600 14px 'SFMono-Regular', Consolas, monospace; fill: #86EFAC; }
+      .blocked { font: 600 14px 'SFMono-Regular', Consolas, monospace; fill: #FCA5A5; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="680" rx="28" fill="url(#bg)"/>
+  <text x="72" y="72" class="title">Trust Boundary Model</text>
+  <text x="72" y="104" class="subtitle">Gateway is the gate between operator authority and agent access. The proxy allowlist enforces what crosses.</text>
+
+  <!-- OPERATOR SIDE -->
+  <rect x="60" y="140" width="380" height="480" rx="28" fill="#0F172A" stroke="#22C55E" stroke-width="2"/>
+  <text x="92" y="180" class="small" style="fill:#86EFAC;">Operator side</text>
+  <text x="92" y="216" class="label">Trusted Terminal</text>
+
+  <!-- User PAT box -->
+  <rect x="92" y="240" width="316" height="80" rx="18" fill="#0B1220" stroke="#22C55E" stroke-width="1.5"/>
+  <text x="120" y="272" class="label" style="font-size:18px;">User PAT</text>
+  <text x="120" y="298" class="mono">axp_u_... in ~/.ax/user.toml</text>
+
+  <!-- Operator capabilities -->
+  <text x="92" y="350" class="body">Full authority:</text>
+  <text x="112" y="378" class="allowed">create agents</text>
+  <text x="112" y="402" class="allowed">mint agent PATs</text>
+  <text x="112" y="426" class="allowed">manage spaces</text>
+  <text x="112" y="450" class="allowed">revoke credentials</text>
+  <text x="112" y="474" class="allowed">start/stop Gateway</text>
+
+  <text x="92" y="510" class="body">Auth: ax login</text>
+  <text x="92" y="540" class="body">Stored separately from agent config</text>
+
+  <!-- TRUST BOUNDARY (center) -->
+  <line x1="600" y1="140" x2="600" y2="620" stroke="#F59E0B" stroke-width="3" stroke-dasharray="12 8"/>
+  <rect x="536" y="130" width="128" height="36" rx="18" fill="#78350F" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="553" y="154" class="label" style="font-size:14px; fill:#FDE68A;">TRUST BOUNDARY</text>
+
+  <!-- PROXY GATE (center box) -->
+  <rect x="496" y="240" width="240" height="380" rx="22" fill="#111827" stroke="#F59E0B" stroke-width="2"/>
+  <text x="528" y="280" class="small" style="fill:#FDE68A;">Proxy allowlist</text>
+  <text x="528" y="310" class="label" style="font-size:16px;">Allowed methods</text>
+
+  <text x="520" y="336" class="allowed">whoami</text>
+  <text x="520" y="354" class="allowed">list_spaces</text>
+  <text x="520" y="372" class="allowed">list_agents</text>
+  <text x="520" y="390" class="allowed">list_agents_availability</text>
+  <text x="520" y="408" class="allowed">list_context</text>
+  <text x="520" y="426" class="allowed">get_context</text>
+  <text x="520" y="444" class="allowed">list_messages</text>
+  <text x="520" y="462" class="allowed">get_message</text>
+  <text x="520" y="480" class="allowed">search_messages</text>
+  <text x="520" y="498" class="allowed">list_tasks</text>
+  <text x="520" y="516" class="allowed">get_task</text>
+
+  <line x1="516" y1="530" x2="716" y2="530" stroke="#334155"/>
+  <text x="520" y="548" class="allowed">update_task</text>
+  <text x="636" y="548" class="mono" style="fill:#FDE68A;">ADMIN</text>
+  <text x="520" y="566" class="allowed">upload_file</text>
+  <text x="636" y="566" class="mono" style="fill:#FDE68A;">ADMIN</text>
+  <line x1="516" y1="580" x2="716" y2="580" stroke="#334155"/>
+  <text x="520" y="598" class="blocked">send_message</text>
+  <text x="660" y="598" class="body" style="font-size:12px;">/local/send</text>
+
+  <!-- AGENT SIDE -->
+  <rect x="760" y="140" width="380" height="480" rx="28" fill="#0F172A" stroke="#EF4444" stroke-width="2"/>
+  <text x="792" y="180" class="small" style="fill:#FCA5A5;">Agent side</text>
+  <text x="792" y="216" class="label">Local Process</text>
+
+  <!-- Session token box -->
+  <rect x="792" y="240" width="316" height="80" rx="18" fill="#0B1220" stroke="#EF4444" stroke-width="1.5"/>
+  <text x="820" y="272" class="label" style="font-size:18px;">Session Token</text>
+  <text x="820" y="298" class="mono">axgw_s_... short-lived, per-connect</text>
+
+  <!-- Agent capabilities -->
+  <text x="792" y="350" class="body">Limited access:</text>
+  <text x="812" y="378" class="allowed">read messages</text>
+  <text x="812" y="402" class="allowed">list agents</text>
+  <text x="812" y="426" class="allowed">update tasks</text>
+  <text x="812" y="450" class="mono" style="fill:#FDE68A;">upload files (admin tier)</text>
+  <text x="812" y="474" class="blocked">create agents (blocked)</text>
+  <text x="812" y="498" class="blocked">mint tokens (blocked)</text>
+
+  <text x="792" y="534" class="body">Auth: /local/connect</text>
+  <text x="792" y="562" class="body">Untrusted by default</text>
+  <text x="792" y="590" class="body">Credential never on disk in workspace</text>
+
+  <!-- Arrows -->
+  <path d="M440 280H490" stroke="#22C55E" stroke-width="3" marker-end="url(#arrow)" style="--arrow-fill:#22C55E;"/>
+  <path d="M740 280H754" stroke="#F87171" stroke-width="3" marker-end="url(#arrowRed)"/>
+</svg>

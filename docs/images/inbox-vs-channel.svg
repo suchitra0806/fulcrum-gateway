@@ -1,0 +1,110 @@
+<svg width="1200" height="620" viewBox="0 0 1200 620" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Inbox vs Channel delivery</title>
+  <desc id="desc">Side-by-side comparison of inbox agents (polling with a pending queue) and channel agents (live SSE stream with real-time delivery).</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="620" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#60A5FA"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#22C55E"/>
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10V0Z" fill="#F59E0B"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Inter, system-ui, sans-serif; fill: #F8FAFC; }
+      .subtitle { font: 500 16px Inter, system-ui, sans-serif; fill: #94A3B8; }
+      .label { font: 700 22px Inter, system-ui, sans-serif; fill: #E2E8F0; }
+      .body { font: 500 16px Inter, system-ui, sans-serif; fill: #CBD5E1; }
+      .small { font: 600 13px Inter, system-ui, sans-serif; fill: #93C5FD; letter-spacing: 0.08em; text-transform: uppercase; }
+      .mono { font: 600 14px 'SFMono-Regular', Consolas, monospace; fill: #DBEAFE; }
+      .note { font: 500 14px Inter, system-ui, sans-serif; fill: #94A3B8; }
+      .step { font: 600 15px Inter, system-ui, sans-serif; fill: #CBD5E1; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="620" rx="28" fill="url(#bg)"/>
+  <text x="72" y="72" class="title">Inbox vs Channel Delivery</text>
+  <text x="72" y="104" class="subtitle">Two message delivery patterns. Inbox agents poll; channel agents stream. Both use Gateway identity.</text>
+
+  <!-- DIVIDER -->
+  <line x1="600" y1="130" x2="600" y2="600" stroke="#1E293B" stroke-width="2"/>
+
+  <!-- ==================== LEFT: INBOX ==================== -->
+  <text x="72" y="156" class="small" style="fill:#F59E0B;">Inbox / pass-through agent</text>
+  <text x="72" y="184" class="label">Polling Pattern</text>
+
+  <!-- Platform box -->
+  <rect x="72" y="210" width="200" height="72" rx="18" fill="#0F172A" stroke="#2563EB" stroke-width="2"/>
+  <text x="100" y="244" class="label" style="font-size:16px;">aX Platform</text>
+  <text x="100" y="264" class="note">New message arrives</text>
+
+  <!-- Arrow: Platform → Gateway -->
+  <path d="M272 246H330" stroke="#60A5FA" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- Gateway + Pending queue -->
+  <rect x="340" y="200" width="220" height="160" rx="20" fill="#111827" stroke="#7CE7DD" stroke-width="2"/>
+  <text x="370" y="234" class="label" style="font-size:16px;">Gateway</text>
+
+  <rect x="370" y="252" width="160" height="44" rx="12" fill="#0B1220" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="390" y="280" class="mono" style="fill:#FDE68A;">pending.json</text>
+
+  <text x="370" y="330" class="step">Tracks in pending queue</text>
+  <text x="370" y="350" class="note">Badge/bookkeeping only</text>
+
+  <!-- Arrow: Agent polls Gateway -->
+  <path d="M410 420V370" stroke="#F59E0B" stroke-width="3" marker-end="url(#arrowAmber)"/>
+
+  <!-- Agent box -->
+  <rect x="72" y="420" width="488" height="160" rx="20" fill="#0F172A" stroke="#334155" stroke-width="2"/>
+  <text x="100" y="456" class="label" style="font-size:16px;">Inbox Agent</text>
+
+  <text x="100" y="488" class="step">1. Poll /local/inbox on own schedule</text>
+  <text x="100" y="512" class="step">2. Gateway fetches from upstream API</text>
+  <text x="100" y="536" class="step">3. Process and mark_read</text>
+  <text x="100" y="560" class="step">4. Pending badge cleared locally</text>
+
+  <!-- Poll label -->
+  <text x="420" y="404" class="note" style="fill:#FDE68A;">polls periodically</text>
+
+  <!-- ==================== RIGHT: CHANNEL ==================== -->
+  <text x="640" y="156" class="small" style="fill:#22C55E;">Claude code channel agent</text>
+  <text x="640" y="184" class="label">Streaming Pattern</text>
+
+  <!-- Platform box -->
+  <rect x="640" y="210" width="200" height="72" rx="18" fill="#0F172A" stroke="#2563EB" stroke-width="2"/>
+  <text x="668" y="244" class="label" style="font-size:16px;">aX Platform</text>
+  <text x="668" y="264" class="note">New message arrives</text>
+
+  <!-- Arrow: Platform → Gateway -->
+  <path d="M840 246H898" stroke="#60A5FA" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- Gateway with SSE -->
+  <rect x="908" y="200" width="220" height="160" rx="20" fill="#111827" stroke="#7CE7DD" stroke-width="2"/>
+  <text x="938" y="234" class="label" style="font-size:16px;">Gateway</text>
+
+  <rect x="938" y="252" width="160" height="44" rx="12" fill="#0B1220" stroke="#22C55E" stroke-width="1.5"/>
+  <text x="960" y="280" class="mono" style="fill:#86EFAC;">SSE stream</text>
+
+  <text x="938" y="330" class="step">Delivers immediately</text>
+  <text x="938" y="350" class="note">No local queue</text>
+
+  <!-- Arrow: Gateway → Agent (live) -->
+  <path d="M988 360V410" stroke="#22C55E" stroke-width="3" marker-end="url(#arrowGreen)"/>
+
+  <!-- Agent box -->
+  <rect x="640" y="420" width="488" height="160" rx="20" fill="#0F172A" stroke="#334155" stroke-width="2"/>
+  <text x="668" y="456" class="label" style="font-size:16px;">Channel Agent (Claude Code)</text>
+
+  <text x="668" y="488" class="step">1. Maintains live SSE connection</text>
+  <text x="668" y="512" class="step">2. Receives messages in real-time</text>
+  <text x="668" y="536" class="step">3. Emits processing signals</text>
+  <text x="668" y="560" class="step">4. accepted → working → completed</text>
+
+  <!-- Live label -->
+  <text x="998" y="396" class="note" style="fill:#86EFAC;">real-time push</text>
+</svg>

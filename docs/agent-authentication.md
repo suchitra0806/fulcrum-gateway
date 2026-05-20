@@ -344,6 +344,86 @@ works and the previous credential is revoked. If an agent has two active PATs,
 show that as a warning; if it has more than two, stop and clean up stale keys
 before issuing more.
 
+## Trust Boundary Model
+
+![Trust boundary model](images/trust-boundary-model.svg)
+
+![Credential brokering](images/credential-brokering.svg)
+
+Gateway is the trust boundary between operators and agents. Understanding this
+boundary is critical for security.
+
+### Two sides of the boundary
+
+| | Operator side | Agent side |
+| --- | --- | --- |
+| **Credential** | User PAT (`axp_u_...`) in `~/.ax/user.toml` | Agent-scoped PAT (`axp_a_...`) brokered by Gateway |
+| **Access** | Full user authority — create agents, mint tokens, manage spaces | Limited to the proxy allowlist and dedicated endpoints |
+| **Authentication** | `ax login` → stored user credential | `/local/connect` → session token (`axgw_s_...`, 24h TTL) |
+| **Trust level** | Trusted operator in a trusted terminal | Untrusted-by-default local process |
+
+### The proxy allowlist
+
+The proxy dispatcher (`_LOCAL_PROXY_METHODS` in `ax_cli/commands/gateway.py`)
+is the enforcement mechanism. It controls which `AxClient` methods an agent
+session can call through Gateway's `/local/proxy` endpoint.
+
+Current allowlist:
+
+```
+whoami, list_spaces, list_agents, list_agents_availability,
+list_context, get_context, list_messages, get_message,
+search_messages, list_tasks, get_task,
+update_task (admin tier), upload_file (admin tier, workdir-sandboxed)
+```
+
+Write operations like `send_message` and `create_task` go through dedicated
+endpoints (`/local/send`, `/local/tasks`) with additional validation — they
+are not in the generic proxy.
+
+`upload_file` is in the proxy allowlist but restricted to the `admin` tier
+(see `_LOCAL_PROXY_METHODS` in `commands/gateway.py`). It is additionally
+sandboxed to the agent's configured workdir — uploads outside that directory
+are rejected. This prevents untrusted agents from writing
+arbitrary files through the operator's credentials while allowing trusted
+agents to upload from their own workspace.
+
+### Session tokens
+
+When a local agent calls `/local/connect`, Gateway issues a session token
+(`axgw_s_<payload>.<signature>`). These tokens are:
+
+- **TTL-bounded** — 24-hour expiry (no active session-end invalidation)
+- **Per-connect** — a new token is issued for each `/local/connect` call; the agent
+  reuses it across subsequent API calls within that connection via `X-Gateway-Session`
+- **HMAC-SHA256 signed** — using the secret at `~/.ax/gateway/local_secret.bin`
+- **Scoped** — the token identifies which agent it was issued for
+
+See [ADR-003](adr/ADR-003-session-tokens-per-connect.md) for the rationale.
+
+### Where the project is heading
+
+Issue #146 proposes a `use`/`admin` tier model that replaces the flat allowlist
+with per-method tier annotations. Agent registrations would declare their tier,
+and the proxy would check `agent_tier >= method_tier` before dispatching. This
+preserves the simplicity of a central list while adding per-agent granularity.
+See [ADR-006](adr/ADR-006-use-admin-proxy-tiers.md).
+
+### Trust boundary rules
+
+1. **Credentials are brokered, never copied.** Agent credentials live in
+   Gateway's state directory, not in workspace config, logs, or messages.
+   See [ADR-005](adr/ADR-005-credentials-never-in-workspace.md).
+2. **User PATs bootstrap, agent PATs operate.** The user PAT mints agent PATs
+   but is never used as an agent runtime credential.
+3. **The proxy is the gate.** Any method not in `_LOCAL_PROXY_METHODS` is
+   rejected. Write operations go through dedicated endpoints.
+4. **Session tokens are disposable.** Issued per-connect with a 24h TTL. Issued
+   sessions are recorded in `registry["local_sessions"]` for audit and status
+   checks. The token is reused within a connection but not across connections.
+5. **Gateway binds to localhost only.** The OS network stack is the first
+   access control layer. See [ADR-001](adr/ADR-001-gateway-localhost-only.md).
+
 ## Troubleshooting
 
 | Error | Fix |
