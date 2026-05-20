@@ -55,9 +55,9 @@ The message should appear with a file attachment reference.
 ## Learning goal
 
 Understanding the trust boundary around file upload. `upload_file` is in the
-proxy allowlist (`_LOCAL_PROXY_METHODS` at `commands/gateway.py:803`) but
-restricted to the `admin` tier and sandboxed to the agent's workdir (lines
-833–840). This prevents untrusted agents from writing arbitrary files through
-the operator's credentials while allowing trusted agents to upload from their
-own workspace. See [ADR-002](../adr/ADR-002-flat-proxy-allowlist.md)
+proxy allowlist (`_LOCAL_PROXY_METHODS`) but restricted to the `admin` tier
+and sandboxed to the agent's workdir by `_proxy_local_session_call()`. This
+prevents untrusted agents from writing arbitrary files through the operator's
+credentials while allowing trusted agents to upload from their own workspace.
+See [ADR-002](../adr/ADR-002-flat-proxy-allowlist.md)
 and [Agent Authentication — Trust Boundary](../agent-authentication.md#trust-boundary-model).
