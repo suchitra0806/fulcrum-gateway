@@ -1652,6 +1652,78 @@ class TestGetAgentPresence:
         with pytest.raises(httpx.HTTPStatusError):
             client.get_agent_presence("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
 
+    def test_falls_back_to_presence_on_200_html_spa_shell(self):
+        """Regression for #60: on SPA-fallback deployments (current paxai.app
+        prod, see #59), missing API paths return 200 HTML instead of 404. The
+        fallback to /presence must still fire — same "endpoint isn't there"
+        semantics, just a different status code shape."""
+        client = AxClient("https://example.com", "legacy-token")
+        state_spa = _make_response(
+            "GET",
+            "https://example.com/api/v1/agents/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/state",
+            200,
+            text="<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <title>aX Platform</title>\n  </head>\n</html>",
+        )
+        presence_ok = _make_response(
+            "GET",
+            "https://example.com/api/v1/agents/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/presence",
+            200,
+            json_body={"status": "online", "responsive": True},
+        )
+        client._http.get = MagicMock(side_effect=[state_spa, presence_ok])
+        result = client.get_agent_presence("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+        assert result["status"] == "online"
+        assert result["responsive"] is True
+        # Both endpoints were tried, in order: /state then /presence.
+        assert client._http.get.call_count == 2
+        first_call_url, second_call_url = (
+            client._http.get.call_args_list[0][0][0],
+            client._http.get.call_args_list[1][0][0],
+        )
+        assert first_call_url.endswith("/state")
+        assert second_call_url.endswith("/presence")
+
+    def test_falls_back_to_presence_on_text_html_content_type(self):
+        """Sibling guard for #60: the SPA-fallback detection should also fire
+        when the response has Content-Type: text/html but the body doesn't
+        start with <!DOCTYPE (e.g. unusual edge frameworks). Relies on
+        _is_html_response's content-type branch, not just the body sniff."""
+        client = AxClient("https://example.com", "legacy-token")
+        # text="..." in _make_response sets content-type: text/html. Body
+        # deliberately does NOT start with <! so the only HTML signal is the
+        # content-type header.
+        state_html = _make_response(
+            "GET",
+            "https://example.com/api/v1/agents/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/state",
+            200,
+            text="some non-doctype html body",
+        )
+        presence_ok = _make_response(
+            "GET",
+            "https://example.com/api/v1/agents/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/presence",
+            200,
+            json_body={"status": "online"},
+        )
+        client._http.get = MagicMock(side_effect=[state_html, presence_ok])
+        result = client.get_agent_presence("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+        assert result["status"] == "online"
+
+    def test_state_non_404_json_error_still_raises(self):
+        """Gating test for #60: a real 5xx with a JSON body must still raise,
+        not be silently fallen back over. The HTML-fallback exemption is
+        specifically for "endpoint not implemented" cases, not for "server
+        error on the implemented endpoint."""
+        client = AxClient("https://example.com", "legacy-token")
+        state_500_json = _make_response(
+            "GET",
+            "https://example.com/api/v1/agents/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/state",
+            500,
+            json_body={"detail": "internal server error"},
+        )
+        client._http.get = MagicMock(return_value=state_500_json)
+        with pytest.raises(httpx.HTTPStatusError):
+            client.get_agent_presence("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+
     def test_resolves_name_to_uuid(self):
         client = AxClient("https://example.com", "legacy-token")
         list_response = _make_response(
