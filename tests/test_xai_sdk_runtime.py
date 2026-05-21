@@ -201,6 +201,37 @@ def test_xai_sdk_streams_chunks_and_accumulates_history(monkeypatch):
     assert fake_client.chat.completions.create.call_args.kwargs["stream"] is True
 
 
+def test_xai_sdk_constructs_openai_client_with_xai_base_url(monkeypatch):
+    """The xAI runtime is an openai-SDK fork pointed at xAI's
+    OpenAI-compatible endpoint. The critical diff vs groq_sdk.py is
+    the base_url, not the underlying SDK. This test locks in that
+    OpenAI(...) is constructed with base_url="https://api.x.ai/v1"
+    and api_key=XAI_API_KEY so a future refactor cannot silently
+    revert to OpenAI's default api.openai.com endpoint or to a
+    different env var.
+    """
+    from ax_cli.runtimes.hermes.runtimes import get_runtime
+
+    monkeypatch.setenv("XAI_API_KEY", "xai_test")
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = iter([_fake_chunk("ok")])
+    fake_module = _install_fake_openai(monkeypatch, fake_client)
+
+    rt = get_runtime("xai_sdk")
+    rt.execute("hello", workdir="/tmp")
+
+    assert fake_module.OpenAI.call_count == 1, "OpenAI client should be constructed exactly once per execute() call"
+    call_kwargs = fake_module.OpenAI.call_args.kwargs
+    assert call_kwargs.get("base_url") == "https://api.x.ai/v1", (
+        "OpenAI client must be pointed at xAI's OpenAI-compatible endpoint, "
+        "not openai's default api.openai.com. "
+        f"got base_url={call_kwargs.get('base_url')!r}"
+    )
+    assert call_kwargs.get("api_key") == "xai_test", (
+        f"OpenAI client must receive the XAI_API_KEY value verbatim, got api_key={call_kwargs.get('api_key')!r}"
+    )
+
+
 def test_xai_sdk_threads_system_prompt_into_messages(monkeypatch):
     """The system_prompt arg should become the first message with role=system."""
     from ax_cli.runtimes.hermes.runtimes import get_runtime

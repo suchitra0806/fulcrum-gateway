@@ -17,7 +17,7 @@ first turn, rate-limit backoff polish.
 
 Auth: XAI_API_KEY environment variable.
 Models: https://docs.x.ai/docs/models
-        (default: grok-2-latest)
+        (default: grok-4-latest)
 
 Wire shape: xAI is OpenAI-compatible at https://api.x.ai/v1. We use the
 official `openai` Python SDK against that base_url rather than the
