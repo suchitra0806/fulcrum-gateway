@@ -389,6 +389,44 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
                 "supports_command_override": True,
             },
         },
+        "autogen": {
+            "id": "autogen",
+            "label": "AutoGen",
+            "description": "AutoGen (autogen-agentchat) agent runtime managed by Gateway.",
+            "availability": "ready",
+            "launchable": True,
+            "runtime_type": "exec",
+            "asset_class": "interactive_agent",
+            "intake_model": "launch_on_send",
+            "trigger_sources": ["direct_message"],
+            "return_paths": ["inline_reply"],
+            "telemetry_shape": "basic",
+            "suggested_name": "autogen-bot",
+            "operator_summary": (
+                "Gateway-managed AutoGen (autogen-agentchat) bridge. Real LLM path via Groq "
+                "over the OpenAI-compatible endpoint when configured, stub agent otherwise."
+            ),
+            "recommended_test_message": "Reply with: AutoGen round trip OK.",
+            "what_you_need": [
+                "Python 3.11+ on this machine (the bridge runs as a Gateway-managed subprocess).",
+                (
+                    "For real agent execution, install autogen-agentchat and autogen-ext, "
+                    "and set GROQ_API_KEY. The stub bridge runs without them."
+                ),
+            ],
+            "setup_skill": "gateway-agent-setup",
+            "setup_skill_path": str(skill_path),
+            "defaults": {
+                "runtime_type": "exec",
+                "exec_command": "python3 examples/gateway_autogen/autogen_bridge.py",
+                "workdir": str(repo_root),
+            },
+            "signals": runtime_signals["exec"],
+            "advanced": {
+                "adapter_label": "Gateway-managed AutoGen bridge",
+                "supports_command_override": True,
+            },
+        },
         "strands": {
             "id": "strands",
             "label": "Strands",
@@ -638,6 +676,7 @@ def agent_template_list(*, include_advanced: bool = False) -> list[dict[str, Any
         "hermes",
         "ollama",
         "langgraph",
+        "autogen",
         "strands",
         "echo_test",
         "service_account",

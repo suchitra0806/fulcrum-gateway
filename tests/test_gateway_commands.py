@@ -2364,10 +2364,22 @@ def test_runtime_sends_connected_heartbeat_on_first_sse_event(tmp_path, monkeypa
     monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
     token_file = tmp_path / "token"
     token_file.write_text("axp_a_agent.secret")
-    payload = {"id": "msg-hb", "content": "ping", "author": {"id": "u1", "name": "u", "type": "user"}, "mentions": ["hb-bot"]}
+    payload = {
+        "id": "msg-hb",
+        "content": "ping",
+        "author": {"id": "u1", "name": "u", "type": "user"},
+        "mentions": ["hb-bot"],
+    }
     shared = _SharedRuntimeClient(payload)
     runtime = gateway_core.ManagedAgentRuntime(
-        {"name": "hb-bot", "agent_id": "agent-hb", "space_id": "s1", "base_url": "https://paxai.app", "runtime_type": "echo", "token_file": str(token_file)},
+        {
+            "name": "hb-bot",
+            "agent_id": "agent-hb",
+            "space_id": "s1",
+            "base_url": "https://paxai.app",
+            "runtime_type": "echo",
+            "token_file": str(token_file),
+        },
         client_factory=lambda **kwargs: shared,
     )
     runtime.start()
@@ -2395,7 +2407,14 @@ def test_runtime_sends_stale_heartbeat_on_sse_disconnect(tmp_path, monkeypatch):
 
     shared = _FailOnSecondConnect({})
     runtime = gateway_core.ManagedAgentRuntime(
-        {"name": "stale-bot", "agent_id": "agent-stale", "space_id": "s1", "base_url": "https://paxai.app", "runtime_type": "echo", "token_file": str(token_file)},
+        {
+            "name": "stale-bot",
+            "agent_id": "agent-stale",
+            "space_id": "s1",
+            "base_url": "https://paxai.app",
+            "runtime_type": "echo",
+            "token_file": str(token_file),
+        },
         client_factory=lambda **kwargs: shared,
     )
     runtime.start()
@@ -2415,7 +2434,14 @@ def test_runtime_sends_offline_heartbeat_on_stop(tmp_path, monkeypatch):
     token_file.write_text("axp_a_agent.secret")
     shared = _SharedRuntimeClient({})
     runtime = gateway_core.ManagedAgentRuntime(
-        {"name": "offline-bot", "agent_id": "agent-off", "space_id": "s1", "base_url": "https://paxai.app", "runtime_type": "echo", "token_file": str(token_file)},
+        {
+            "name": "offline-bot",
+            "agent_id": "agent-off",
+            "space_id": "s1",
+            "base_url": "https://paxai.app",
+            "runtime_type": "echo",
+            "token_file": str(token_file),
+        },
         client_factory=lambda **kwargs: shared,
     )
     runtime.stop()
@@ -2431,7 +2457,14 @@ def test_runtime_sends_setup_error_heartbeat_on_error_state(tmp_path, monkeypatc
     token_file.write_text("axp_a_agent.secret")
     shared = _SharedRuntimeClient({})
     runtime = gateway_core.ManagedAgentRuntime(
-        {"name": "err-bot", "agent_id": "agent-err", "space_id": "s1", "base_url": "https://paxai.app", "runtime_type": "echo", "token_file": str(token_file)},
+        {
+            "name": "err-bot",
+            "agent_id": "agent-err",
+            "space_id": "s1",
+            "base_url": "https://paxai.app",
+            "runtime_type": "echo",
+            "token_file": str(token_file),
+        },
         client_factory=lambda **kwargs: shared,
     )
     runtime._update_state(effective_state="error", last_error="test error")
@@ -3531,10 +3564,11 @@ def test_gateway_templates_command_json():
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     ids = [item["id"] for item in payload["templates"]]
-    assert ids[:9] == [
+    assert ids[:10] == [
         "hermes",
         "ollama",
         "langgraph",
+        "autogen",
         "strands",
         "echo_test",
         "service_account",
@@ -3543,7 +3577,7 @@ def test_gateway_templates_command_json():
         "claude_code_channel",
     ]
     assert "inbox" not in ids
-    assert payload["count"] == 9
+    assert payload["count"] == 10
     ollama = next(item for item in payload["templates"] if item["id"] == "ollama")
     assert ollama["runtime_type"] == "exec"
     assert ollama["launchable"] is True
@@ -3686,13 +3720,14 @@ def test_gateway_ui_handler_serves_status_and_agent_detail(monkeypatch, tmp_path
             template_payload = templates.json()
             assert template_payload["templates"][0]["id"] == "hermes"
             assert template_payload["templates"][2]["id"] == "langgraph"
-            assert template_payload["templates"][3]["id"] == "strands"
-            assert template_payload["templates"][5]["id"] == "service_account"
+            assert template_payload["templates"][3]["id"] == "autogen"
+            assert template_payload["templates"][4]["id"] == "strands"
+            assert template_payload["templates"][6]["id"] == "service_account"
             channel_template = next(
                 item for item in template_payload["templates"] if item["id"] == "claude_code_channel"
             )
             assert channel_template["runtime_type"] == "claude_code_channel"
-            assert template_payload["count"] == 9
+            assert template_payload["count"] == 10
 
             detail = client.get("/api/agents/echo-bot")
             assert detail.status_code == 200
