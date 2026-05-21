@@ -9355,13 +9355,20 @@ def connectors_apps(
         err_console.print(f"[red]Provider error:[/red] {e}")
         raise typer.Exit(1)
     if as_json:
-        print_json([{"app": a.get("appName"), "status": a.get("status"), "entity_id": a.get("clientUniqueUserId")} for a in items])
+        print_json(
+            [
+                {"app": a.get("appName"), "status": a.get("status"), "entity_id": a.get("clientUniqueUserId")}
+                for a in items
+            ]
+        )
         return
     if not items:
         err_console.print("No connected apps. Run: ax gateway connectors connect <ref> --app <app_name>")
         return
     for a in items:
-        err_console.print(f"  [bold]{a.get('appName', '?')}[/bold]  status={a.get('status', '?')}  entity={a.get('clientUniqueUserId', '?')}")
+        err_console.print(
+            f"  [bold]{a.get('appName', '?')}[/bold]  status={a.get('status', '?')}  entity={a.get('clientUniqueUserId', '?')}"
+        )
 
 
 @connectors_app.command("connect")

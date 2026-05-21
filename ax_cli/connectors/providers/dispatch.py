@@ -37,7 +37,11 @@ def initiate_connection(
 ) -> dict[str, Any]:
     adapter = _get_adapter(connector.provider)
     return adapter.initiate_connection(
-        app_name, entity_id, auth_env, connector.config, connector.name,
+        app_name,
+        entity_id,
+        auth_env,
+        connector.config,
+        connector.name,
     )
 
 

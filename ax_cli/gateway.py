@@ -4203,6 +4203,7 @@ def _gateway_environment_context(entry: dict[str, Any]) -> str:
     # Append connector context if any connectors are registered.
     try:
         from .connectors import list_connectors
+
         connectors = list_connectors()
         enabled = [c for c in connectors if c.enabled]
         if enabled:

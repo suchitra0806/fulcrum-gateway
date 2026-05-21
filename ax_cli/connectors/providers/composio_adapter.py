@@ -136,7 +136,8 @@ def initiate_connection(
     # Look up the app to get its supported auth scheme
     app_resp = httpx.get(
         f"https://backend.composio.dev/api/v1/apps/{app_name}",
-        headers=hdrs, timeout=timeout,
+        headers=hdrs,
+        timeout=timeout,
     )
     _handle_error_response(app_resp, f"Look up app {app_name}")
     app_data = app_resp.json()
@@ -151,7 +152,8 @@ def initiate_connection(
     integrations_resp = httpx.get(
         "https://backend.composio.dev/api/v1/integrations",
         params={"appName": app_name},
-        headers=hdrs, timeout=timeout,
+        headers=hdrs,
+        timeout=timeout,
     )
     _handle_error_response(integrations_resp, "List integrations")
     items = integrations_resp.json().get("items", [])
@@ -166,7 +168,8 @@ def initiate_connection(
         create_resp = httpx.post(
             "https://backend.composio.dev/api/v1/integrations",
             json=integration_body,
-            headers=hdrs, timeout=timeout,
+            headers=hdrs,
+            timeout=timeout,
         )
         _handle_error_response(create_resp, f"Create integration for {app_name}")
         integration_id = create_resp.json().get("id")
@@ -193,10 +196,9 @@ def initiate_connection(
                 f"  ax gateway connectors auth write {connector_name} {app_key_var}=<your key>",
             )
         # Composio expects the key fields from the auth scheme
-        field_names = [
-            f.get("name") for f in auth_schemes[0].get("fields", [])
-            if f.get("name")
-        ] if auth_schemes else []
+        field_names = (
+            [f.get("name") for f in auth_schemes[0].get("fields", []) if f.get("name")] if auth_schemes else []
+        )
         if field_names:
             account_body["data"] = {field_names[0]: app_key}
         else:
@@ -206,7 +208,8 @@ def initiate_connection(
         resp = httpx.post(
             "https://backend.composio.dev/api/v1/connectedAccounts",
             json=account_body,
-            headers=hdrs, timeout=timeout,
+            headers=hdrs,
+            timeout=timeout,
         )
     except httpx.HTTPError as e:
         raise ConnectorProviderError("composio", f"HTTP error initiating connection: {e!r}") from e
