@@ -25,6 +25,13 @@ def _base_url(config: dict[str, Any]) -> str:
     return url
 
 
+def _base_url_v1(config: dict[str, Any]) -> str:
+    v2 = _base_url(config)
+    if v2.endswith("/v2"):
+        return v2[:-3] + "/v1"
+    return v2
+
+
 def _api_key(auth_env: dict[str, str], connector_name: str) -> str:
     key = auth_env.get("COMPOSIO_API_KEY", "").strip()
     if not key:
@@ -109,9 +116,10 @@ def list_apps(
     connector_name: str,
 ) -> list[dict[str, Any]]:
     key = _api_key(auth_env, connector_name)
+    base_v1 = _base_url_v1(config)
     try:
         resp = httpx.get(
-            "https://backend.composio.dev/api/v1/connectedAccounts",
+            f"{base_v1}/connectedAccounts",
             params={"showActiveOnly": "true"},
             headers=_headers(key),
             timeout=httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=READ_TIMEOUT, pool=CONNECT_TIMEOUT),
@@ -132,10 +140,11 @@ def initiate_connection(
     key = _api_key(auth_env, connector_name)
     hdrs = _headers(key)
     timeout = httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=READ_TIMEOUT, pool=CONNECT_TIMEOUT)
+    base_v1 = _base_url_v1(config)
 
     # Look up the app to get its supported auth scheme
     app_resp = httpx.get(
-        f"https://backend.composio.dev/api/v1/apps/{app_name}",
+        f"{base_v1}/apps/{app_name}",
         headers=hdrs,
         timeout=timeout,
     )
@@ -150,7 +159,7 @@ def initiate_connection(
 
     # Find or create an integration for this app
     integrations_resp = httpx.get(
-        "https://backend.composio.dev/api/v1/integrations",
+        f"{base_v1}/integrations",
         params={"appName": app_name},
         headers=hdrs,
         timeout=timeout,
@@ -166,7 +175,7 @@ def initiate_connection(
         if auth_mode == "OAUTH2":
             integration_body["useComposioAuth"] = True
         create_resp = httpx.post(
-            "https://backend.composio.dev/api/v1/integrations",
+            f"{base_v1}/integrations",
             json=integration_body,
             headers=hdrs,
             timeout=timeout,
@@ -206,7 +215,7 @@ def initiate_connection(
 
     try:
         resp = httpx.post(
-            "https://backend.composio.dev/api/v1/connectedAccounts",
+            f"{base_v1}/connectedAccounts",
             json=account_body,
             headers=hdrs,
             timeout=timeout,

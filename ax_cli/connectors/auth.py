@@ -78,8 +78,8 @@ def write_auth(connector_id: str, connector_name: str, kvs: dict[str, str]) -> P
     if path.exists():
         try:
             existing = _parse_env(path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except (OSError, UnicodeDecodeError) as exc:
+            log.warning("could not read existing auth file %s: %s", path, exc)
     merged = {**existing, **kvs}
     content = _serialize_env(merged)
 

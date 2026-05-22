@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .errors import ConnectorNotFoundError
+from .errors import ConnectorError, ConnectorNotFoundError
 from .types import ConnectorRow
 
 _REGISTRY_SCHEMA_VERSION = 1
@@ -90,9 +90,19 @@ def list_connectors() -> list[ConnectorRow]:
 
 def find_connector(ref: str) -> ConnectorRow:
     ref_lower = ref.lower()
+    matches: list[ConnectorRow] = []
     for row in list_connectors():
-        if row.name.lower() == ref_lower or row.id == ref:
+        if row.id == ref:
             return row
+        if row.name.lower() == ref_lower:
+            matches.append(row)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        ids = ", ".join(m.id for m in matches)
+        raise ConnectorError(
+            f"Ambiguous connector name {ref!r} matches {len(matches)} entries ({ids}). Use the connector ID instead."
+        )
     raise ConnectorNotFoundError(ref)
 
 
