@@ -26,10 +26,12 @@ from . import BaseRuntime, RuntimeResult, StreamCallback, register
 log = logging.getLogger("runtime.hermes_sdk")
 
 # Hermes repo path — must be on sys.path for AIAgent import
-HERMES_REPO = Path(os.environ.get(
-    "HERMES_REPO_PATH",
-    "/home/ax-agent/shared/repos/hermes-agent",
-))
+HERMES_REPO = Path(
+    os.environ.get(
+        "HERMES_REPO_PATH",
+        "/home/ax-agent/shared/repos/hermes-agent",
+    )
+)
 # Hermes venv python — used to verify the environment
 HERMES_VENV = HERMES_REPO / ".venv"
 
@@ -53,8 +55,9 @@ def _read_token_file(path: Path) -> str:
         if sys.platform != "win32":
             stat = path.stat()
             if stat.st_mode & 0o077:
-                log.warning("Token file %s has loose permissions (mode %o). "
-                            "Run: chmod 600 %s", path, stat.st_mode & 0o777, path)
+                log.warning(
+                    "Token file %s has loose permissions (mode %o). Run: chmod 600 %s", path, stat.st_mode & 0o777, path
+                )
         return path.read_text().strip()
     except OSError:
         return ""
@@ -248,7 +251,9 @@ def _secure_hermes_tools(workdir: str):
     """
     from tools.registry import registry
     from tools import (
-        _check_read_path, _check_write_path, _check_bash_command,
+        _check_read_path,
+        _check_write_path,
+        _check_bash_command,
         BLOCKED_READ_PATTERNS,
     )
     import json as _json
@@ -279,8 +284,7 @@ def _secure_hermes_tools(workdir: str):
 
     # File writes — only allow agent workspace, worktrees, /tmp
     _wrap("write_file", lambda a: _check_write_path(a.get("path", ""), workdir))
-    _wrap("patch", lambda a: _check_write_path(
-        a.get("file_path", a.get("path", "")), workdir))
+    _wrap("patch", lambda a: _check_write_path(a.get("file_path", a.get("path", "")), workdir))
 
     # Code execution — block any code referencing secret paths
     def _check_code(args):
@@ -289,7 +293,174 @@ def _secure_hermes_tools(workdir: str):
             if pat in code:
                 return f"Code blocked: references {pat}"
         return None
+
     _wrap("execute_code", _check_code)
+
+
+def _register_connector_tools(workdir: str) -> None:
+    """Register gateway connector tools into the hermes tool registry."""
+    from tools.registry import registry
+
+    _SCHEMAS = {
+        "connector_search": {
+            "name": "connector_search",
+            "description": (
+                "Search for available tools on a gateway connector "
+                "(e.g. Gmail, Slack, GitHub). Describe what you want in plain English."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "connector": {"type": "string", "description": "Connector reference name"},
+                    "query": {
+                        "type": "string",
+                        "description": "Natural-language description of the tool you need (e.g. 'send email')",
+                    },
+                    "app": {
+                        "type": "string",
+                        "description": "Filter results to a specific app (e.g. 'gmail', 'slack')",
+                    },
+                    "limit": {"type": "integer", "description": "Max results to return", "default": 5},
+                },
+                "required": ["connector", "query"],
+            },
+        },
+        "connector_call": {
+            "name": "connector_call",
+            "description": "Execute a tool on a gateway connector. Use connector_search first to find the tool slug.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "connector": {"type": "string", "description": "Connector reference name"},
+                    "tool": {
+                        "type": "string",
+                        "description": "Tool slug from connector_search (e.g. 'GMAIL_SEND_EMAIL')",
+                    },
+                    "args": {"type": "object", "description": "Tool-specific arguments as key-value pairs"},
+                },
+                "required": ["connector", "tool"],
+            },
+        },
+        "connector_apps": {
+            "name": "connector_apps",
+            "description": "List connected apps on a gateway connector. Shows which services (Gmail, Slack, etc.) are available.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "connector": {"type": "string", "description": "Connector reference name"},
+                },
+                "required": ["connector"],
+            },
+        },
+    }
+
+    # The sentinel overrides AX_CONFIG_DIR to the agent workspace dir, but
+    # connector state lives under the gateway's global config root.
+    # AX_GATEWAY_DIR survives the sentinel override and takes priority in
+    # gateway_dir(); derive the config root from it when available.
+    _gw_dir_env = os.environ.get("AX_GATEWAY_DIR", "").strip()
+    if _gw_dir_env:
+        _global_ax_dir = str(Path(_gw_dir_env).expanduser().parent)
+    else:
+        _global_ax_dir = str(Path.home() / ".ax")
+
+    def _do_connector_call(tool_name, args):
+        from ax_cli.connectors import ConnectorNotFoundError, find_connector, read_auth
+
+        ref = args.get("connector", "")
+        try:
+            row = find_connector(ref)
+        except ConnectorNotFoundError:
+            return json.dumps({"error": f"Connector not found: {ref}"})
+        if not row.enabled:
+            return json.dumps({"error": f"Connector {ref!r} is disabled"})
+        try:
+            auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
+        except Exception as e:
+            return json.dumps({"error": f"Auth error: {e}"})
+
+        if tool_name == "connector_apps":
+            from ax_cli.connectors import list_apps
+
+            try:
+                items = list_apps(row, auth_env)
+            except Exception as e:
+                return json.dumps({"error": f"Error listing apps: {e}"})
+            if not items:
+                return "No connected apps found"
+            return "\n".join(f"{a.get('appName', '?')}  status={a.get('status', '?')}" for a in items)
+
+        if tool_name == "connector_search":
+            from ax_cli.connectors import search_tools
+
+            query = args.get("query", "")
+            app = args.get("app")
+            limit = args.get("limit", 5)
+            try:
+                result = search_tools(row, query, auth_env, apps=app, limit=limit)
+            except Exception as e:
+                return json.dumps({"error": f"Search error: {e}"})
+            items = result.get("items", [])
+            if not items:
+                return f"No tools found for: {query}"
+            lines = []
+            for item in items:
+                slug = item.get("enum", item.get("name", "?"))
+                display = item.get("displayName") or item.get("display_name") or ""
+                app_id = item.get("appId", "")
+                lines.append(f"{slug}  app={app_id}\n  {display}")
+            return "\n".join(lines)
+
+        if tool_name == "connector_call":
+            from ax_cli.connectors import execute_tool as connector_execute
+
+            tool_slug = args.get("tool", "")
+            tool_args = args.get("args", {})
+            if isinstance(tool_args, str):
+                try:
+                    tool_args = json.loads(tool_args)
+                except json.JSONDecodeError:
+                    return json.dumps({"error": f"Invalid JSON in args: {tool_args}"})
+            try:
+                result = connector_execute(row, tool_slug, tool_args, auth_env)
+            except Exception as e:
+                return json.dumps({"error": f"Connector error: {e}"})
+            output = json.dumps(result, indent=2, default=str)
+            if len(output) > 20000:
+                output = output[:20000] + "\n...(truncated)..."
+            return output
+
+        return json.dumps({"error": f"Unknown connector tool: {tool_name}"})
+
+    def _make_handler(tool_name):
+        def handler(args, **kwargs):
+            saved = os.environ.get("AX_CONFIG_DIR")
+            os.environ["AX_CONFIG_DIR"] = _global_ax_dir
+            try:
+                return _do_connector_call(tool_name, args)
+            finally:
+                if saved is not None:
+                    os.environ["AX_CONFIG_DIR"] = saved
+                else:
+                    os.environ.pop("AX_CONFIG_DIR", None)
+
+        return handler
+
+    registered = 0
+    for name, schema in _SCHEMAS.items():
+        if registry.get_entry(name) is not None:
+            continue
+        registry.register(
+            name=name,
+            toolset="connectors",
+            schema=schema,
+            handler=_make_handler(name),
+            description=schema["description"],
+        )
+        registered += 1
+
+    if registered:
+        log.info("hermes_sdk: registered %d connector tools", registered)
 
 
 @register("hermes_sdk")
@@ -338,8 +509,9 @@ class HermesSDKRuntime(BaseRuntime):
 
         # Mask key in logs
         key_preview = provider_cfg["api_key"][:8] + "..." if len(provider_cfg["api_key"]) > 8 else "***"
-        log.info("hermes_sdk: provider=%s model=%s key=%s",
-                 provider_cfg["provider"], provider_cfg["model"], key_preview)
+        log.info(
+            "hermes_sdk: provider=%s model=%s key=%s", provider_cfg["provider"], provider_cfg["model"], key_preview
+        )
 
         # ── Callbacks bridge: hermes → aX SSE signals ──
         # Hermes passes (name, preview, args_dict) — accept all three
@@ -369,23 +541,37 @@ class HermesSDKRuntime(BaseRuntime):
         # Profiles define tools, access, budget per agent type.
         agent_name = os.environ.get("AX_AGENT_NAME", "")
         try:
-            from profiles import get_profile_for_agent, get_disabled_toolsets, \
-                get_enabled_toolsets, get_max_iterations
+            from profiles import get_profile_for_agent, get_disabled_toolsets, get_enabled_toolsets, get_max_iterations
+
             profile = get_profile_for_agent(agent_name)
             disabled = extra.get("disabled_toolsets", get_disabled_toolsets(profile))
             enabled = extra.get("enabled_toolsets", get_enabled_toolsets(profile))
-            max_iters = int(os.environ.get("HERMES_MAX_ITERATIONS",
-                                           str(get_max_iterations(profile))))
-            log.info("hermes_sdk: profile=%s agent=%s iters=%d",
-                     profile.get("name", "?"), agent_name, max_iters)
+            max_iters = int(os.environ.get("HERMES_MAX_ITERATIONS", str(get_max_iterations(profile))))
+            log.info("hermes_sdk: profile=%s agent=%s iters=%d", profile.get("name", "?"), agent_name, max_iters)
         except Exception as e:
             log.warning("hermes_sdk: profile load failed (%s), using defaults", e)
             enabled = extra.get("enabled_toolsets")
-            disabled = extra.get("disabled_toolsets", [
-                "web", "browser", "image_generation", "tts", "vision",
-                "cronjob", "rl_training", "homeassistant",
-            ])
+            disabled = extra.get(
+                "disabled_toolsets",
+                [
+                    "web",
+                    "browser",
+                    "image_generation",
+                    "tts",
+                    "vision",
+                    "cronjob",
+                    "rl_training",
+                    "homeassistant",
+                ],
+            )
             max_iters = int(os.environ.get("HERMES_MAX_ITERATIONS", "60"))
+
+        # ── Register connector tools into hermes registry ──
+        # Must happen BEFORE AIAgent() which snapshots tool definitions.
+        try:
+            _register_connector_tools(workdir)
+        except Exception as e:
+            log.warning("hermes_sdk: connector tool registration failed: %s", e)
 
         # ── Build the agent ──
         try:
@@ -481,8 +667,15 @@ class HermesSDKRuntime(BaseRuntime):
             else:
                 exit_reason = "crashed"
 
-        log.info("hermes_sdk: %s in %ds, %d tools, %d api_calls, %d tokens, %d chars",
-                 exit_reason, elapsed, tool_count, api_calls, total_tokens, len(final_text))
+        log.info(
+            "hermes_sdk: %s in %ds, %d tools, %d api_calls, %d tokens, %d chars",
+            exit_reason,
+            elapsed,
+            tool_count,
+            api_calls,
+            total_tokens,
+            len(final_text),
+        )
 
         return RuntimeResult(
             text=final_text,

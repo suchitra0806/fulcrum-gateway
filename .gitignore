@@ -25,3 +25,4 @@ gateway-hermes-sentinel.log
 .env
 .env.local
 .env.*
+.DS_Store

@@ -42,7 +42,7 @@ class TestToolResult:
 class TestToolDefinitions:
     def test_expected_tool_names(self):
         names = {t["name"] for t in TOOL_DEFINITIONS}
-        expected = {"read_file", "write_file", "edit_file", "bash", "grep", "glob_files"}
+        expected = {"read_file", "write_file", "edit_file", "bash", "grep", "glob_files", "connector_search", "connector_call", "connector_apps"}
         assert names == expected
 
     def test_all_have_type_function(self):

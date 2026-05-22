@@ -160,6 +160,47 @@ TOOL_DEFINITIONS = [
             "required": ["pattern"],
         },
     },
+    {
+        "type": "function",
+        "name": "connector_search",
+        "description": "Search for available tools on a gateway connector (e.g. Gmail, Slack, GitHub). Describe what you want in plain English.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "connector": {"type": "string", "description": "Connector reference name"},
+                "query": {"type": "string", "description": "Natural-language description of the tool you need (e.g. 'send email')"},
+                "app": {"type": "string", "description": "Filter results to a specific app (e.g. 'gmail', 'slack')"},
+                "limit": {"type": "integer", "description": "Max results to return", "default": 5},
+            },
+            "required": ["connector", "query"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "connector_call",
+        "description": "Execute a tool on a gateway connector. Use connector_search first to find the tool slug.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "connector": {"type": "string", "description": "Connector reference name"},
+                "tool": {"type": "string", "description": "Tool slug from connector_search (e.g. 'GMAIL_SEND_EMAIL')"},
+                "args": {"type": "object", "description": "Tool-specific arguments as key-value pairs"},
+            },
+            "required": ["connector", "tool"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "connector_apps",
+        "description": "List connected apps on a gateway connector. Shows which services (Gmail, Slack, etc.) are available.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "connector": {"type": "string", "description": "Connector reference name"},
+            },
+            "required": ["connector"],
+        },
+    },
 ]
 
 
@@ -285,6 +326,114 @@ def _glob_files(args: dict, workdir: str) -> ToolResult:
     return ToolResult(output="\n".join(matches) or "(no matches)")
 
 
+def _connector_search(args: dict, workdir: str) -> ToolResult:
+    try:
+        from ax_cli.connectors import (
+            ConnectorNotFoundError,
+            find_connector,
+            read_auth,
+            search_tools,
+        )
+    except ImportError:
+        return ToolResult(output="Connector module not available", is_error=True)
+    ref = args["connector"]
+    query = args["query"]
+    app = args.get("app")
+    limit = args.get("limit", 5)
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError:
+        return ToolResult(output=f"Connector not found: {ref}", is_error=True)
+    try:
+        auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
+    except Exception as e:
+        return ToolResult(output=f"Auth error: {e}", is_error=True)
+    try:
+        result = search_tools(row, query, auth_env, apps=app, limit=limit)
+    except Exception as e:
+        return ToolResult(output=f"Search error: {e}", is_error=True)
+    items = result.get("items", [])
+    if not items:
+        return ToolResult(output=f"No tools found for: {query}")
+    lines = []
+    for item in items:
+        slug = item.get("enum", item.get("name", "?"))
+        display = item.get("displayName") or item.get("display_name") or ""
+        app_id = item.get("appId", "")
+        tags = item.get("tags", [])
+        read_only = "readOnlyHint" in tags
+        lines.append(f"{slug}  app={app_id}  read_only={read_only}\n  {display}")
+    return ToolResult(output="\n".join(lines))
+
+
+def _connector_call(args: dict, workdir: str) -> ToolResult:
+    try:
+        from ax_cli.connectors import (
+            ConnectorNotFoundError,
+            find_connector,
+            read_auth,
+        )
+        from ax_cli.connectors import execute_tool as connector_execute
+    except ImportError:
+        return ToolResult(output="Connector module not available", is_error=True)
+    import json as _json
+    ref = args["connector"]
+    tool = args["tool"]
+    tool_args = args.get("args", {})
+    if isinstance(tool_args, str):
+        try:
+            tool_args = _json.loads(tool_args)
+        except _json.JSONDecodeError:
+            return ToolResult(output=f"Invalid JSON in args: {tool_args}", is_error=True)
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError:
+        return ToolResult(output=f"Connector not found: {ref}", is_error=True)
+    if not row.enabled:
+        return ToolResult(output=f"Connector {ref!r} is disabled", is_error=True)
+    try:
+        auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
+    except Exception as e:
+        return ToolResult(output=f"Auth error: {e}", is_error=True)
+    try:
+        result = connector_execute(row, tool, tool_args, auth_env)
+    except Exception as e:
+        return ToolResult(output=f"Connector error: {e}", is_error=True)
+    output = _json.dumps(result, indent=2, default=str)
+    if len(output) > 20000:
+        output = output[:20000] + "\n...(truncated)..."
+    return ToolResult(output=output)
+
+
+def _connector_apps(args: dict, workdir: str) -> ToolResult:
+    try:
+        from ax_cli.connectors import (
+            ConnectorNotFoundError,
+            find_connector,
+            list_apps,
+            read_auth,
+        )
+    except ImportError:
+        return ToolResult(output="Connector module not available", is_error=True)
+    ref = args["connector"]
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError:
+        return ToolResult(output=f"Connector not found: {ref}", is_error=True)
+    try:
+        auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
+    except Exception as e:
+        return ToolResult(output=f"Auth error: {e}", is_error=True)
+    try:
+        items = list_apps(row, auth_env)
+    except Exception as e:
+        return ToolResult(output=f"Error listing apps: {e}", is_error=True)
+    if not items:
+        return ToolResult(output="No connected apps found")
+    lines = [f"{a.get('appName', '?')}  status={a.get('status', '?')}" for a in items]
+    return ToolResult(output="\n".join(lines))
+
+
 _TOOL_FNS = {
     "read_file": _read_file,
     "write_file": _write_file,
@@ -292,4 +441,92 @@ _TOOL_FNS = {
     "bash": _bash,
     "grep": _grep,
     "glob_files": _glob_files,
+    "connector_search": _connector_search,
+    "connector_call": _connector_call,
+    "connector_apps": _connector_apps,
 }
+
+
+# ── Hermes registry bridge ────────────────────────────────────────────────
+# The hermes_sdk runtime uses hermes-agent's own tools.registry instead of
+# TOOL_DEFINITIONS.  This function registers our connector tools into that
+# registry so they appear alongside the built-in hermes tools.
+
+_CONNECTOR_TOOL_SCHEMAS = {
+    "connector_search": {
+        "name": "connector_search",
+        "description": "Search for available tools on a gateway connector (e.g. Gmail, Slack, GitHub). Describe what you want in plain English.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "connector": {"type": "string", "description": "Connector reference name"},
+                "query": {"type": "string", "description": "Natural-language description of the tool you need (e.g. 'send email')"},
+                "app": {"type": "string", "description": "Filter results to a specific app (e.g. 'gmail', 'slack')"},
+                "limit": {"type": "integer", "description": "Max results to return", "default": 5},
+            },
+            "required": ["connector", "query"],
+        },
+    },
+    "connector_call": {
+        "name": "connector_call",
+        "description": "Execute a tool on a gateway connector. Use connector_search first to find the tool slug.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "connector": {"type": "string", "description": "Connector reference name"},
+                "tool": {"type": "string", "description": "Tool slug from connector_search (e.g. 'GMAIL_SEND_EMAIL')"},
+                "args": {"type": "object", "description": "Tool-specific arguments as key-value pairs"},
+            },
+            "required": ["connector", "tool"],
+        },
+    },
+    "connector_apps": {
+        "name": "connector_apps",
+        "description": "List connected apps on a gateway connector. Shows which services (Gmail, Slack, etc.) are available.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "connector": {"type": "string", "description": "Connector reference name"},
+            },
+            "required": ["connector"],
+        },
+    },
+}
+
+
+def register_connector_tools_in_hermes(workdir: str) -> int:
+    """Register connector tools into the hermes-agent tools.registry.
+
+    Returns the number of tools registered.  Safe to call when hermes-agent
+    is not importable (returns 0).
+    """
+    try:
+        from tools.registry import registry
+    except ImportError:
+        return 0
+
+    import json as _json
+
+    registered = 0
+    for name, schema in _CONNECTOR_TOOL_SCHEMAS.items():
+        if registry.get_entry(name) is not None:
+            continue
+        impl_fn = _TOOL_FNS[name]
+
+        def _make_handler(fn):
+            def handler(args, **kwargs):
+                result = fn(args, workdir)
+                if result.is_error:
+                    return _json.dumps({"error": result.output})
+                return result.output
+            return handler
+
+        registry.register(
+            name=name,
+            toolset="connectors",
+            schema=schema,
+            handler=_make_handler(impl_fn),
+            description=schema["description"],
+        )
+        registered += 1
+    return registered

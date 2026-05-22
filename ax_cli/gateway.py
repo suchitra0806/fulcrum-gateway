@@ -73,6 +73,7 @@ ENV_DENYLIST = {
     "AX_SPACE_ID",
     "AX_TOKEN",
     "AX_TOKEN_FILE",
+    "AX_GATEWAY_CONNECTOR_REF",
     "AX_USER_BASE_URL",
     "AX_USER_ENV",
     "AX_USER_TOKEN",
@@ -3926,6 +3927,9 @@ def sanitize_exec_env(prompt: str, entry: dict[str, Any]) -> dict[str, str]:
     hermes_repo_path = str(entry.get("hermes_repo_path") or "").strip()
     if hermes_repo_path:
         env["HERMES_REPO_PATH"] = hermes_repo_path
+    connector_ref = str(entry.get("connector_ref") or "").strip()
+    if connector_ref:
+        env["AX_GATEWAY_CONNECTOR_REF"] = connector_ref
     return env
 
 
@@ -4195,6 +4199,29 @@ def _gateway_environment_context(entry: dict[str, Any]) -> str:
         "environment context. If a field above (space, base_url) is missing, fall",
         "back to the values in your local .ax/config.toml.",
     ]
+
+    # Append connector context if any connectors are registered.
+    try:
+        from .connectors import list_connectors
+
+        connectors = list_connectors()
+        enabled = [c for c in connectors if c.enabled]
+        if enabled:
+            names = ", ".join(c.name for c in enabled)
+            lines.append("")
+            lines.append(f"CONNECTORS: {names}")
+            lines.append("IMPORTANT — when users ask about connectors, use ONLY these facts:")
+            lines.append(f"- You have connector tools. Always use connector={enabled[0].name!r} unless told otherwise.")
+            lines.append("- connector_apps: shows currently connected apps")
+            lines.append("- connector_search: finds action tools by use case")
+            lines.append("- connector_call: executes an action")
+            lines.append("- 500+ apps supported (Gmail, Slack, GitHub, Jira, etc.)")
+            lines.append("- To connect a NEW app the user must run:")
+            lines.append("    ax gateway connectors connect demo --app <app_name>")
+            lines.append("  DO NOT guess other commands. This is the only correct command.")
+    except Exception:
+        pass
+
     return "\n".join(lines)
 
 
