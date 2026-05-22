@@ -68,11 +68,64 @@ def _tool_call_delta(*, index: int, call_id: str = "", name: str = "", arguments
     return types.SimpleNamespace(choices=[choice])
 
 
+# Stand-in typed exception classes for the openai SDK. These mirror the
+# names + minimal shape (status_code, message) the runtime's typed `except`
+# blocks expect. We define them locally instead of `import openai` so the
+# test suite can run in environments where the openai package isn't
+# installed (e.g. CI images, the operator-qa harness).
+class _FakeAPIStatusError(Exception):
+    def __init__(self, message="", *, status_code=400):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+
+
+class _FakeAPITimeoutError(_FakeAPIStatusError):
+    def __init__(self, message="timeout"):
+        super().__init__(message, status_code=408)
+
+
+class _FakeRateLimitError(_FakeAPIStatusError):
+    def __init__(self, message="rate limit exceeded"):
+        super().__init__(message, status_code=429)
+
+
+class _FakeAuthenticationError(_FakeAPIStatusError):
+    def __init__(self, message="invalid api key"):
+        super().__init__(message, status_code=401)
+
+
+class _FakePermissionDeniedError(_FakeAPIStatusError):
+    def __init__(self, message="permission denied"):
+        super().__init__(message, status_code=403)
+
+
+class _FakeInternalServerError(_FakeAPIStatusError):
+    def __init__(self, message="server error"):
+        super().__init__(message, status_code=500)
+
+
 def _install_fake_openai(monkeypatch, fake_client):
-    """Swap the `openai` module in sys.modules so `from openai import OpenAI`
-    inside the runtime returns our mock's `OpenAI` constructor."""
+    """Swap the `openai` module in sys.modules so `from openai import OpenAI,
+    APIStatusError, APITimeoutError, AuthenticationError, InternalServerError,
+    PermissionDeniedError, RateLimitError` inside the runtime returns our
+    mock's OpenAI constructor and stand-in typed exception classes.
+
+    Tests that want to trigger a typed exception path raise the stand-in
+    class (e.g. _FakeRateLimitError) from
+    fake_client.chat.completions.create.side_effect so the runtime's typed
+    `except` blocks dispatch correctly. Tests that want to trigger the
+    catch-all `except Exception` path raise something outside this hierarchy
+    (e.g. RuntimeError, ConnectionError).
+    """
     fake_openai = types.ModuleType("openai")
     fake_openai.OpenAI = MagicMock(return_value=fake_client)
+    fake_openai.APIStatusError = _FakeAPIStatusError
+    fake_openai.APITimeoutError = _FakeAPITimeoutError
+    fake_openai.AuthenticationError = _FakeAuthenticationError
+    fake_openai.InternalServerError = _FakeInternalServerError
+    fake_openai.PermissionDeniedError = _FakePermissionDeniedError
+    fake_openai.RateLimitError = _FakeRateLimitError
     monkeypatch.setitem(sys.modules, "openai", fake_openai)
     return fake_openai
 
@@ -464,17 +517,17 @@ def test_leapfrog_sdk_returns_iteration_limit_when_max_turns_exhausted(monkeypat
     assert "turn limit" in result.text.lower()
 
 
-def test_leapfrog_sdk_classifies_rate_limit_with_word_boundary(monkeypatch):
-    """Word-boundary regex must catch 'rate' as a whole word (real rate-limit)
-    but not 'generateContent' (404 false positive). Regression guard for the
-    classifier bug fixed in gemini_sdk on 2026-05-14."""
+def test_leapfrog_sdk_returns_rate_limited_on_RateLimitError(monkeypatch):
+    """openai.RateLimitError must map to exit_reason='rate_limited'. Replaces
+    the previous string-classifier test now that the runtime uses typed
+    exceptions (Avrohom's PR #41 review)."""
     from ax_cli.runtimes.hermes.runtimes import get_runtime
 
     _set_credentials(monkeypatch)
 
     fake_client = MagicMock()
-    fake_client.chat.completions.create.side_effect = RuntimeError(
-        "429 Resource exhausted: rate limit exceeded for model llama-3.3-70b-instruct"
+    fake_client.chat.completions.create.side_effect = _FakeRateLimitError(
+        "rate limit exceeded for model llama-3.3-70b-instruct"
     )
     _install_fake_openai(monkeypatch, fake_client)
 
@@ -484,16 +537,116 @@ def test_leapfrog_sdk_classifies_rate_limit_with_word_boundary(monkeypatch):
     assert result.exit_reason == "rate_limited"
 
 
-def test_leapfrog_sdk_does_not_misclassify_unrelated_substring_as_rate_limit(monkeypatch):
-    """An error that contains 'rate' only as a substring (e.g. 'generateContent')
-    must NOT trigger rate_limited — must be reported as crashed."""
+def test_leapfrog_sdk_returns_timeout_on_APITimeoutError(monkeypatch):
+    """openai.APITimeoutError (connection / read timeout from httpx-backed
+    SDK) must map to exit_reason='timeout'."""
+    from ax_cli.runtimes.hermes.runtimes import get_runtime
+
+    _set_credentials(monkeypatch)
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.side_effect = _FakeAPITimeoutError(
+        "read timeout after 30s"
+    )
+    _install_fake_openai(monkeypatch, fake_client)
+
+    rt = get_runtime("leapfrog_sdk")
+    result = rt.execute("hello", workdir="/tmp")
+
+    assert result.exit_reason == "timeout"
+
+
+def test_leapfrog_sdk_returns_auth_error_on_AuthenticationError(monkeypatch):
+    """openai.AuthenticationError (401) must map to exit_reason='auth_error'
+    so operators can rotate LEAPFROG_API_KEY rather than seeing a generic
+    'crashed'. Mirrors groq_sdk.py auth_error contract."""
+    from ax_cli.runtimes.hermes.runtimes import get_runtime
+
+    _set_credentials(monkeypatch)
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.side_effect = _FakeAuthenticationError(
+        "invalid api key"
+    )
+    _install_fake_openai(monkeypatch, fake_client)
+
+    rt = get_runtime("leapfrog_sdk")
+    result = rt.execute("hello", workdir="/tmp")
+
+    assert result.exit_reason == "auth_error"
+    assert "LEAPFROG_API_KEY" in result.text
+
+
+def test_leapfrog_sdk_returns_auth_error_on_PermissionDeniedError(monkeypatch):
+    """openai.PermissionDeniedError (403) must also map to exit_reason='auth_error'.
+    Companion to the 401 test — both are operator-actionable credential failures."""
+    from ax_cli.runtimes.hermes.runtimes import get_runtime
+
+    _set_credentials(monkeypatch)
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.side_effect = _FakePermissionDeniedError(
+        "deployment ACL denied request"
+    )
+    _install_fake_openai(monkeypatch, fake_client)
+
+    rt = get_runtime("leapfrog_sdk")
+    result = rt.execute("hello", workdir="/tmp")
+
+    assert result.exit_reason == "auth_error"
+
+
+def test_leapfrog_sdk_returns_server_error_on_InternalServerError(monkeypatch):
+    """openai.InternalServerError (5xx from the LeapfrogAI deployment) must
+    map to exit_reason='server_error' so operators know retry is plausible."""
+    from ax_cli.runtimes.hermes.runtimes import get_runtime
+
+    _set_credentials(monkeypatch)
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.side_effect = _FakeInternalServerError(
+        "backend unavailable"
+    )
+    _install_fake_openai(monkeypatch, fake_client)
+
+    rt = get_runtime("leapfrog_sdk")
+    result = rt.execute("hello", workdir="/tmp")
+
+    assert result.exit_reason == "server_error"
+
+
+def test_leapfrog_sdk_returns_api_error_on_other_APIStatusError(monkeypatch):
+    """Other 4xx status errors not matched by the more specific typed-exception
+    catches (e.g. 400 BadRequest, 404 NotFound) must map to exit_reason='api_error'
+    with the status surfaced in the user-visible text."""
+    from ax_cli.runtimes.hermes.runtimes import get_runtime
+
+    _set_credentials(monkeypatch)
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.side_effect = _FakeAPIStatusError(
+        "model not found", status_code=404
+    )
+    _install_fake_openai(monkeypatch, fake_client)
+
+    rt = get_runtime("leapfrog_sdk")
+    result = rt.execute("hello", workdir="/tmp")
+
+    assert result.exit_reason == "api_error"
+    assert "404" in result.text
+
+
+def test_leapfrog_sdk_returns_crashed_on_unexpected_exception(monkeypatch):
+    """Errors outside the openai SDK's typed exception hierarchy (network
+    adapter bugs, connection refused before an APIConnectionError, etc.)
+    must still hit the catch-all and report exit_reason='crashed'."""
     from ax_cli.runtimes.hermes.runtimes import get_runtime
 
     _set_credentials(monkeypatch)
 
     fake_client = MagicMock()
     fake_client.chat.completions.create.side_effect = RuntimeError(
-        "404 model not found; tried to call generateContent on missing endpoint"
+        "socket: connection refused before SDK could wrap it"
     )
     _install_fake_openai(monkeypatch, fake_client)
 
@@ -501,3 +654,85 @@ def test_leapfrog_sdk_does_not_misclassify_unrelated_substring_as_rate_limit(mon
     result = rt.execute("hello", workdir="/tmp")
 
     assert result.exit_reason == "crashed"
+
+
+def test_leapfrog_sdk_appends_truncation_marker_when_tool_output_exceeds_cap(monkeypatch):
+    """Tool output longer than TOOL_OUTPUT_CAP must be clipped AND get a
+    '[output truncated]' marker appended so the model can tell content was
+    clipped. Without the marker the model may reason as if it has the full
+    output (e.g. assume a large file was fully read). Mirrors groq_sdk.py
+    behavior (lines 411-427)."""
+    import tools as tools_mod
+
+    from ax_cli.runtimes.hermes.runtimes import get_runtime
+    from ax_cli.runtimes.hermes.runtimes.leapfrog_sdk import TOOL_OUTPUT_CAP
+
+    _set_credentials(monkeypatch)
+
+    # Turn 1: tool_call requesting a read.
+    turn1 = iter(
+        [
+            _tool_call_delta(index=0, call_id="call_big"),
+            _tool_call_delta(index=0, name="read_file"),
+            _tool_call_delta(index=0, arguments='{"path": "/big.txt"}'),
+        ]
+    )
+    # Turn 2: text-only finalization.
+    turn2 = iter([_text_delta("ok")])
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.side_effect = [turn1, turn2]
+    _install_fake_openai(monkeypatch, fake_client)
+
+    big_output = "A" * (TOOL_OUTPUT_CAP * 2)
+    monkeypatch.setattr(
+        tools_mod,
+        "execute_tool",
+        lambda name, args, workdir: tools_mod.ToolResult(output=big_output),
+    )
+
+    rt = get_runtime("leapfrog_sdk")
+    result = rt.execute("Read it.", workdir="/tmp")
+
+    tool_msg = next(h for h in result.history if h.get("role") == "tool")
+    content = tool_msg["content"]
+    assert content.endswith("\n[output truncated]")
+    assert len(content) == TOOL_OUTPUT_CAP + len("\n[output truncated]")
+    assert content.startswith("A" * TOOL_OUTPUT_CAP)
+
+
+def test_leapfrog_sdk_does_not_append_marker_when_tool_output_under_cap(monkeypatch):
+    """Marker must NOT appear when output is at or below the cap. Regression
+    guard against accidentally appending to every tool message (which would
+    confuse the model on small outputs)."""
+    import tools as tools_mod
+
+    from ax_cli.runtimes.hermes.runtimes import get_runtime
+
+    _set_credentials(monkeypatch)
+
+    turn1 = iter(
+        [
+            _tool_call_delta(index=0, call_id="call_tiny"),
+            _tool_call_delta(index=0, name="read_file"),
+            _tool_call_delta(index=0, arguments='{"path": "/tiny.txt"}'),
+        ]
+    )
+    turn2 = iter([_text_delta("ok")])
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.side_effect = [turn1, turn2]
+    _install_fake_openai(monkeypatch, fake_client)
+
+    monkeypatch.setattr(
+        tools_mod,
+        "execute_tool",
+        lambda name, args, workdir: tools_mod.ToolResult(output="small output"),
+    )
+
+    rt = get_runtime("leapfrog_sdk")
+    result = rt.execute("Read it.", workdir="/tmp")
+
+    tool_msg = next(h for h in result.history if h.get("role") == "tool")
+    assert tool_msg["content"] == "small output"
+    assert "[output truncated]" not in tool_msg["content"]

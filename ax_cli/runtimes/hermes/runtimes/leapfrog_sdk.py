@@ -39,7 +39,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import time
 
 from . import BaseRuntime, RuntimeResult, StreamCallback, register
@@ -151,7 +150,15 @@ class LeapfrogSDKRuntime(BaseRuntime):
         api_key, base_url = auth
 
         try:
-            from openai import OpenAI
+            from openai import (
+                OpenAI,
+                APIStatusError,
+                APITimeoutError,
+                AuthenticationError,
+                InternalServerError,
+                PermissionDeniedError,
+                RateLimitError,
+            )
         except ImportError as e:
             # pyproject.toml does not declare `openai` as a hard dep — the
             # sibling openai_sdk.py is also lazy-imported. Packaged axctl
@@ -230,45 +237,89 @@ class LeapfrogSDKRuntime(BaseRuntime):
                     stream=True,
                     timeout=remaining,
                 )
-            except Exception as e:
-                error_str = str(e)
-                log.error(f"leapfrog_sdk: API error opening stream: {error_str}")
-                lower_err = error_str.lower()
-                is_timeout = (
-                    "timeout" in lower_err
-                    or "deadline" in lower_err
-                    or "timed out" in lower_err
-                )
-                # Word-boundary regex matching for "rate" and "quota" so
-                # substrings inside unrelated tokens (e.g. "generateContent"
-                # contains "rate") don't trigger false positives. Same pattern
-                # as gemini_sdk's classifier post the 2026-05-14 live-smoke fix.
-                is_rate_limit = (
-                    "429" in error_str
-                    or "resourceexhausted" in lower_err
-                    or re.search(r"\brate\b", lower_err) is not None
-                    or re.search(r"\bquota\b", lower_err) is not None
-                )
-                if is_timeout:
-                    return RuntimeResult(
-                        text=(final_text or "Agent timed out while waiting for the model."),
-                        history=history,
-                        tool_count=tool_count,
-                        files_written=files_written,
-                        exit_reason="timeout",
-                        elapsed_seconds=int(time.time() - start_time),
-                    )
-                if is_rate_limit:
-                    return RuntimeResult(
-                        text="",
-                        history=history,
-                        tool_count=tool_count,
-                        files_written=files_written,
-                        exit_reason="rate_limited",
-                        elapsed_seconds=int(time.time() - start_time),
-                    )
+            except RateLimitError as e:
+                # 429. Throttle, surface the status code so the operator can
+                # tell rate-limit from auth-fail at a glance.
+                log.warning(f"leapfrog_sdk: rate limited (HTTP {e.status_code}): {e.message}")
                 return RuntimeResult(
-                    text=final_text or "Agent encountered an API error and could not complete the task.",
+                    text=(
+                        final_text
+                        or f"LeapfrogAI deployment rate-limited (HTTP {e.status_code}). Retry after a short delay."
+                    ),
+                    history=history,
+                    tool_count=tool_count,
+                    files_written=files_written,
+                    exit_reason="rate_limited",
+                    elapsed_seconds=int(time.time() - start_time),
+                )
+            except APITimeoutError as e:
+                # Connection or read timeout from the openai SDK (httpx-backed).
+                # Distinct from a sentinel-budget timeout, but maps to the same
+                # exit_reason since the user-visible cause is identical.
+                log.error(f"leapfrog_sdk: API timeout: {e}")
+                return RuntimeResult(
+                    text=(
+                        final_text
+                        or "Agent timed out while waiting for the model."
+                    ),
+                    history=history,
+                    tool_count=tool_count,
+                    files_written=files_written,
+                    exit_reason="timeout",
+                    elapsed_seconds=int(time.time() - start_time),
+                )
+            except (AuthenticationError, PermissionDeniedError) as e:
+                # 401 / 403. Operator-actionable — the user must see this in
+                # the chat reply so they can rotate LEAPFROG_API_KEY or fix
+                # deployment ACLs. Never silently swallow auth failures.
+                log.error(f"leapfrog_sdk: auth failed (HTTP {e.status_code}): {e.message}")
+                return RuntimeResult(
+                    text=f"LeapfrogAI authentication failed (HTTP {e.status_code}). Check LEAPFROG_API_KEY and deployment ACLs.",
+                    history=history,
+                    tool_count=tool_count,
+                    files_written=files_written,
+                    exit_reason="auth_error",
+                    elapsed_seconds=int(time.time() - start_time),
+                )
+            except InternalServerError as e:
+                # 5xx from the LeapfrogAI deployment. Retry is plausible;
+                # signal that to the operator.
+                log.error(f"leapfrog_sdk: server error (HTTP {e.status_code}): {e.message}")
+                return RuntimeResult(
+                    text=(
+                        final_text
+                        or f"LeapfrogAI deployment returned HTTP {e.status_code}. Retry may succeed."
+                    ),
+                    history=history,
+                    tool_count=tool_count,
+                    files_written=files_written,
+                    exit_reason="server_error",
+                    elapsed_seconds=int(time.time() - start_time),
+                )
+            except APIStatusError as e:
+                # Any other 4xx not matched above (e.g. 400 BadRequest,
+                # 422 UnprocessableEntity, 404 NotFound). Surface the status
+                # and the message so the operator knows what to fix.
+                log.error(f"leapfrog_sdk: API error (HTTP {e.status_code}): {e.message}")
+                return RuntimeResult(
+                    text=(
+                        final_text
+                        or f"LeapfrogAI API error (HTTP {e.status_code}): {e.message}"
+                    ),
+                    history=history,
+                    tool_count=tool_count,
+                    files_written=files_written,
+                    exit_reason="api_error",
+                    elapsed_seconds=int(time.time() - start_time),
+                )
+            except Exception as e:
+                # Catch-all for anything outside the openai SDK's typed
+                # exception hierarchy (network adapter bugs, connection
+                # refused before an APIConnectionError, etc.). Logged with
+                # full repr so the underlying type is visible in ops triage.
+                log.error(f"leapfrog_sdk: unexpected error opening stream: {e!r}")
+                return RuntimeResult(
+                    text=final_text or "Agent encountered an unexpected error and could not complete the task.",
                     history=history,
                     tool_count=tool_count,
                     files_written=files_written,
@@ -427,11 +478,21 @@ class LeapfrogSDKRuntime(BaseRuntime):
                     short = result.output[:200] if result.output else ""
                     cb.on_tool_end(name, short)
 
+                    # Cap tool output at TOOL_OUTPUT_CAP bytes to bound context
+                    # growth, and surface a truncation marker when we hit the
+                    # cap so the model can tell content was clipped (otherwise
+                    # it may reason as if it has the full output, e.g. assume a
+                    # large file was fully read). Mirrors groq_sdk.py 411-427.
+                    full_output = result.output or ""
+                    if len(full_output) > TOOL_OUTPUT_CAP:
+                        tool_content = full_output[:TOOL_OUTPUT_CAP] + "\n[output truncated]"
+                    else:
+                        tool_content = full_output
                     history.append(
                         {
                             "role": "tool",
                             "tool_call_id": tc["id"],
-                            "content": (result.output or "")[:TOOL_OUTPUT_CAP],
+                            "content": tool_content,
                         }
                     )
 
