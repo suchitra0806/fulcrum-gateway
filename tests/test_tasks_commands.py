@@ -577,3 +577,75 @@ def test_resolve_assignee_id_not_found():
     client.list_agents.return_value = [{"id": "agent-1", "name": "alice"}]
     with pytest.raises(Exit):
         _resolve_assignee_id(client, "ghost", space_id="s1")
+
+
+# Issue #64 — `tasks get` was rendering Python `dict.__str__` for the inner
+# task and `--json` was wrapping in `{"task": {...}}` while `tasks create
+# --json` returns a flat object. Both code paths should now unwrap.
+
+
+def test_tasks_get_json_unwraps_task_wrapper(monkeypatch):
+    """`tasks get --json` returns the flat task dict (not {"task": {...}})."""
+
+    class FakeClient:
+        def get_task(self, task_id):
+            return {"task": {"id": task_id, "title": "Demo", "status": "open"}}
+
+    monkeypatch.setattr("ax_cli.commands.tasks.get_client", lambda: FakeClient())
+    monkeypatch.setattr("ax_cli.commands.tasks.resolve_gateway_config", lambda: None)
+
+    result = runner.invoke(app, ["tasks", "get", "task-42", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert set(payload.keys()) == {"id", "title", "status"}
+    assert payload["id"] == "task-42"
+    assert payload["title"] == "Demo"
+    assert payload["status"] == "open"
+
+
+def test_tasks_get_default_renders_fields_not_dict_repr(monkeypatch):
+    """`tasks get` default output prints individual fields, not a Python
+    dict.__str__ of the wrapped payload.
+
+    Prior bug: print_kv received `{"task": {...}}` and rendered as
+    `task: {'id': '...', 'title': '...'}` — Python repr leaked into the
+    operator-facing terminal output. After the fix, print_kv sees the
+    unwrapped task dict and renders each field on its own line.
+    """
+
+    class FakeClient:
+        def get_task(self, task_id):
+            return {"task": {"id": task_id, "title": "Demo title", "status": "open"}}
+
+    monkeypatch.setattr("ax_cli.commands.tasks.get_client", lambda: FakeClient())
+    monkeypatch.setattr("ax_cli.commands.tasks.resolve_gateway_config", lambda: None)
+
+    result = runner.invoke(app, ["tasks", "get", "task-42"])
+    assert result.exit_code == 0, result.output
+    # No Python dict repr in the output.
+    assert "{'id'" not in result.output
+    assert '{"id"' not in result.output
+    # Each field on its own line.
+    assert "id" in result.output
+    assert "title" in result.output
+    assert "Demo title" in result.output
+    assert "status" in result.output
+
+
+def test_tasks_get_handles_flat_response(monkeypatch):
+    """When the upstream API returns the task at the top level (no
+    `{"task": {...}}` wrapper), the unwrap is a no-op and rendering
+    still works."""
+
+    class FakeClient:
+        def get_task(self, task_id):
+            return {"id": task_id, "title": "Flat", "status": "open"}
+
+    monkeypatch.setattr("ax_cli.commands.tasks.get_client", lambda: FakeClient())
+    monkeypatch.setattr("ax_cli.commands.tasks.resolve_gateway_config", lambda: None)
+
+    result = runner.invoke(app, ["tasks", "get", "task-42", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["id"] == "task-42"
+    assert payload["title"] == "Flat"

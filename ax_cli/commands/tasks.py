@@ -436,10 +436,11 @@ def get(
             data = client.get_task(task_id)
         except httpx.HTTPStatusError as e:
             handle_error(e)
+    task = data.get("task", data) if isinstance(data, dict) else data
     if as_json:
-        print_json(data)
+        print_json(task)
     else:
-        print_kv(data)
+        print_kv(task)
 
 
 @app.command("update")
