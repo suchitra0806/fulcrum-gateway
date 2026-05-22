@@ -68,8 +68,10 @@ AX_MENTION_CONTENT="Reply in one short sentence, what is the speed of light in k
 ```
 
 Without `GROQ_API_KEY` (or without `autogen-ext` installed), the bridge
-takes the stub agent path and echoes the prompt back, still emitting
-the full lifecycle event sequence.
+takes the stub-ack path and echoes the prompt back **without invoking
+AutoGen at all**. The full lifecycle event sequence still fires so the
+operator's activity feed looks consistent, but no LLM call is made and
+the AutoGen `AssistantAgent` is never constructed.
 
 ## Lifecycle events
 

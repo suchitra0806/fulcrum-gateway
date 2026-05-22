@@ -404,14 +404,18 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
             "suggested_name": "autogen-bot",
             "operator_summary": (
                 "Gateway-managed AutoGen (autogen-agentchat) bridge. Real LLM path via Groq "
-                "over the OpenAI-compatible endpoint when configured, stub agent otherwise."
+                "over the OpenAI-compatible endpoint when both autogen-agentchat and "
+                "autogen-ext are installed AND GROQ_API_KEY is set. Otherwise a stub ack "
+                "reply (AutoGen is not invoked) so the round trip still completes in "
+                "credential-less or partial-install environments."
             ),
             "recommended_test_message": "Reply with: AutoGen round trip OK.",
             "what_you_need": [
                 "Python 3.11+ on this machine (the bridge runs as a Gateway-managed subprocess).",
                 (
-                    "For real agent execution, install autogen-agentchat and autogen-ext, "
-                    "and set GROQ_API_KEY. The stub bridge runs without them."
+                    "For real agent execution: install autogen-agentchat and autogen-ext, "
+                    "and set GROQ_API_KEY. Without these the bridge returns a stub ack "
+                    "(AutoGen is not invoked)."
                 ),
             ],
             "setup_skill": "gateway-agent-setup",

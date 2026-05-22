@@ -113,8 +113,12 @@ def _build_model_client(model: str):
     declares it as a transitive dependency.
 
     The model_info dict tells AutoGen what capabilities to advertise
-    for this model. function_calling is enabled because Groq's Llama
-    models support tool use through the OpenAI-compatible API.
+    for this model. function_calling is False for V1 because this
+    bridge ships single-turn `on_messages()` with no tools exposed.
+    Flipping to True would advertise a capability the bridge does not
+    expose, which would surface as confusing errors if AutoGen tried
+    to route tool-call decisions through it. Tool calls are a planned
+    follow-up; the flag flips to True at the same time.
     """
     from autogen_ext.models.openai import OpenAIChatCompletionClient
 
@@ -124,7 +128,7 @@ def _build_model_client(model: str):
         api_key=os.environ["GROQ_API_KEY"],
         model_info={
             "vision": False,
-            "function_calling": True,
+            "function_calling": False,
             "json_output": False,
             "family": "unknown",
             "structured_output": False,
