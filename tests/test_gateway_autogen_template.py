@@ -7,7 +7,7 @@ should emit AX_GATEWAY_EVENT lines that map to the three signals
 operators rely on (online via heartbeat, accept-work via intake_model,
 response-path via return_paths).
 
-Mirrors test_gateway_langgraph_template.py — same shape, adapted for
+Mirrors test_gateway_langgraph_template.py with the same shape, adapted for
 the AutoGen bridge across all three execution tiers.
 
 This file locks the contract for:
@@ -17,8 +17,10 @@ This file locks the contract for:
   - the bridge emits a "processing" event and a "completed" event
     around a stub-path prompt round trip
   - the bridge wires an AutoGen AssistantAgent to a Groq-backed
-    OpenAIChatCompletionClient and runs on_messages() when
-    GROQ_API_KEY is set, returning the model's reply
+    OpenAIChatCompletionClient and runs on_messages_stream() when
+    GROQ_API_KEY is set, accumulating ModelClientStreamingChunkEvent
+    items into the final reply and emitting throttled rolling-preview
+    activity events during the call
   - AX_BRIDGE_SYSTEM_PROMPT threads into the Agent system_message
   - the bridge falls back to the stub agent path when autogen-ext is
     missing
