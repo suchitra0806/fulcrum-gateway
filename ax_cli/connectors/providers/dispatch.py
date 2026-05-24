@@ -8,10 +8,11 @@ from typing import Any
 
 from ..activity import (
     record_connector_tool_completed,
+    record_connector_tool_denied,
     record_connector_tool_failed,
     record_connector_tool_started,
 )
-from ..errors import ConnectorProviderError
+from ..errors import ConnectorPolicyError, ConnectorProviderError
 from ..filtering import assert_tool_allowed, filter_tools, from_config
 from ..types import ConnectorRow
 from . import composio_adapter, http_mcp_adapter
@@ -61,14 +62,22 @@ def execute_tool(
     auth_env: dict[str, str],
 ) -> dict[str, Any]:
     policy = from_config(connector.config)
-    assert_tool_allowed(tool_slug, policy)
+    try:
+        assert_tool_allowed(tool_slug, policy)
+    except ConnectorPolicyError as exc:
+        record_connector_tool_denied(connector, tool_slug, policy_detail=exc.policy_detail)
+        raise
 
     record_connector_tool_started(connector, tool_slug)
     t0 = time.monotonic()
     try:
         adapter = _get_adapter(connector.provider)
         result = adapter.execute_tool(
-            tool_slug, args, auth_env, connector.config, connector.name,
+            tool_slug,
+            args,
+            auth_env,
+            connector.config,
+            connector.name,
         )
     except Exception as exc:
         duration_ms = int((time.monotonic() - t0) * 1000)
@@ -89,7 +98,11 @@ def list_tools(
         items = result.get("tools", [])
     else:
         result = adapter.search_tools(
-            "", auth_env, connector.config, connector.name, limit=200,
+            "",
+            auth_env,
+            connector.config,
+            connector.name,
+            limit=200,
         )
         items = result.get("items", [])
     policy = from_config(connector.config)
@@ -114,14 +127,19 @@ def search_tools(
             )
         adapter = _get_adapter(connector.provider)
         result = adapter.search_tools(
-            query, auth_env, connector.config, connector.name, limit=limit,
+            query,
+            auth_env,
+            connector.config,
+            connector.name,
+            limit=limit,
         )
         items = result.get("items", [])
     else:
         list_result = list_tools(connector, auth_env)
         query_lower = query.lower()
         items = [
-            item for item in list_result["items"]
+            item
+            for item in list_result["items"]
             if query_lower in str(item.get("name", "")).lower()
             or query_lower in str(item.get("displayName", "")).lower()
             or query_lower in str(item.get("description", "")).lower()

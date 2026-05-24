@@ -33,13 +33,18 @@ def tmp_gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture()
 def seeded_connector(tmp_gateway: Path) -> ConnectorRow:
-    row = ConnectorRow.create("test-conn", "composio", managed_auth=True, config={
-        "composio_base_url": "https://backend.composio.dev/api/v2",
-        "entity_id": "default",
-        "connected_account_id": None,
-        "app_name": None,
-        "classification": None,
-    })
+    row = ConnectorRow.create(
+        "test-conn",
+        "composio",
+        managed_auth=True,
+        config={
+            "composio_base_url": "https://backend.composio.dev/api/v2",
+            "entity_id": "default",
+            "connected_account_id": None,
+            "app_name": None,
+            "classification": None,
+        },
+    )
     add_connector(row)
     return row
 

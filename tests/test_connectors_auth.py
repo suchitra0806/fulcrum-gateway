@@ -61,7 +61,7 @@ class TestEnvSerialization:
         assert result == {"KEY": "val"}
 
     def test_parse_quoted_values(self):
-        text = 'KEY="hello world"\nSINGLE=\'quoted\'\n'
+        text = "KEY=\"hello world\"\nSINGLE='quoted'\n"
         result = _parse_env(text)
         assert result["KEY"] == "hello world"
         assert result["SINGLE"] == "quoted"

@@ -9661,9 +9661,9 @@ def connectors_tools_list(
     if toolkit:
         toolkit_lower = toolkit.lower()
         items = [
-            i for i in items
-            if toolkit_lower in str(i.get("appName", "")).lower()
-            or toolkit_lower in str(i.get("toolkit", "")).lower()
+            i
+            for i in items
+            if toolkit_lower in str(i.get("appName", "")).lower() or toolkit_lower in str(i.get("toolkit", "")).lower()
         ]
     if limit and limit > 0:
         items = items[:limit]

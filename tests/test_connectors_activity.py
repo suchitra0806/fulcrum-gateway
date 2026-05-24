@@ -9,6 +9,7 @@ import pytest
 
 from ax_cli.connectors.activity import (
     record_connector_tool_completed,
+    record_connector_tool_denied,
     record_connector_tool_failed,
     record_connector_tool_started,
 )
@@ -44,7 +45,9 @@ class TestEventShape:
 
     def test_completed_event(self, connector: ConnectorRow, tmp_activity: Path):
         record = record_connector_tool_completed(
-            connector, "GITHUB_LIST_PRS", duration_ms=150,
+            connector,
+            "GITHUB_LIST_PRS",
+            duration_ms=150,
         )
         assert record["event"] == "connector_tool_completed"
         assert record["duration_ms"] == 150
@@ -52,15 +55,31 @@ class TestEventShape:
 
     def test_failed_event(self, connector: ConnectorRow, tmp_activity: Path):
         record = record_connector_tool_failed(
-            connector, "GITHUB_LIST_PRS", error="Timeout", duration_ms=30000,
+            connector,
+            "GITHUB_LIST_PRS",
+            error="Timeout",
+            duration_ms=30000,
         )
         assert record["event"] == "connector_tool_failed"
         assert record["error"] == "Timeout"
         assert record["duration_ms"] == 30000
 
+    def test_denied_event(self, connector: ConnectorRow, tmp_activity: Path):
+        record = record_connector_tool_denied(
+            connector,
+            "GITHUB_DELETE_REPO",
+            policy_detail="matched denied pattern in ['GITHUB_DELETE_*']",
+        )
+        assert record["event"] == "connector_tool_denied"
+        assert record["tool_name"] == "composio/GITHUB_DELETE_REPO"
+        assert record["connector_name"] == "test-conn"
+        assert record["policy_detail"] == "matched denied pattern in ['GITHUB_DELETE_*']"
+
     def test_extra_fields(self, connector: ConnectorRow, tmp_activity: Path):
         record = record_connector_tool_started(
-            connector, "SLACK_SEND_MSG", agent_name="my-agent",
+            connector,
+            "SLACK_SEND_MSG",
+            agent_name="my-agent",
         )
         assert record["agent_name"] == "my-agent"
 
@@ -78,7 +97,9 @@ class TestRedaction:
 
     def test_no_config_in_events(self, connector: ConnectorRow, tmp_activity: Path):
         record = record_connector_tool_completed(
-            connector, "GITHUB_LIST_PRS", duration_ms=100,
+            connector,
+            "GITHUB_LIST_PRS",
+            duration_ms=100,
         )
         serialized = json.dumps(record)
         assert "entity_id" not in serialized

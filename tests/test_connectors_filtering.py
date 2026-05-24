@@ -25,13 +25,15 @@ class TestFromConfig:
         assert policy.tools_limit == 50
 
     def test_all_fields(self):
-        policy = from_config({
-            "allowed_tools": ["GITHUB_*"],
-            "denied_tools": ["*_DELETE_*"],
-            "allowed_toolkits": ["github"],
-            "denied_toolkits": ["slack"],
-            "tools_limit": 100,
-        })
+        policy = from_config(
+            {
+                "allowed_tools": ["GITHUB_*"],
+                "denied_tools": ["*_DELETE_*"],
+                "allowed_toolkits": ["github"],
+                "denied_toolkits": ["slack"],
+                "tools_limit": 100,
+            }
+        )
         assert policy.allowed_tools == ["GITHUB_*"]
         assert policy.denied_tools == ["*_DELETE_*"]
         assert policy.allowed_toolkits == ["github"]

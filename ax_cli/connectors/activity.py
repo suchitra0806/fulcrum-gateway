@@ -64,3 +64,23 @@ def record_connector_tool_failed(
         duration_ms=duration_ms,
         **extra,
     )
+
+
+def record_connector_tool_denied(
+    connector: ConnectorRow,
+    tool_slug: str,
+    *,
+    policy_detail: str,
+    **extra: Any,
+) -> dict[str, Any]:
+    from ax_cli.gateway import record_gateway_activity
+
+    return record_gateway_activity(
+        "connector_tool_denied",
+        tool_name=f"{connector.provider}/{tool_slug}",
+        connector_name=connector.name,
+        connector_id=connector.id,
+        provider=connector.provider,
+        policy_detail=policy_detail,
+        **extra,
+    )

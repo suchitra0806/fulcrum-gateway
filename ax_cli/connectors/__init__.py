@@ -5,6 +5,7 @@ Public API re-exports for convenience.
 
 from .activity import (
     record_connector_tool_completed,
+    record_connector_tool_denied,
     record_connector_tool_failed,
     record_connector_tool_started,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "load_connectors_registry",
     "read_auth",
     "record_connector_tool_completed",
+    "record_connector_tool_denied",
     "record_connector_tool_failed",
     "record_connector_tool_started",
     "remove_connector",
