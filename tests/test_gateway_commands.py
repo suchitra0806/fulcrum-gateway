@@ -634,10 +634,37 @@ def test_gateway_login_saves_gateway_session(monkeypatch, tmp_path):
     session = gateway_core.load_gateway_session()
     assert session["token"] == "axp_u_test.token"
     assert session["base_url"] == "https://paxai.app"
+    assert "ephemeral" not in session
     assert not (config_dir / "user.toml").exists()
     recent = gateway_core.load_recent_gateway_activity()
     assert recent[-1]["event"] == "gateway_login"
     assert recent[-1]["username"] == "madtank"
+
+
+def test_gateway_login_no_persist_marks_session_ephemeral(monkeypatch, tmp_path):
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr("ax_cli.token_cache.TokenExchanger", _FakeTokenExchanger)
+    monkeypatch.setattr(gateway_cmd, "AxClient", _FakeLoginClient)
+
+    result = runner.invoke(
+        app,
+        [
+            "gateway",
+            "login",
+            "--token",
+            "axp_u_test.token",
+            "--url",
+            "https://paxai.app",
+            "--no-persist",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    session = gateway_core.load_gateway_session()
+    assert session["ephemeral"] is True
+    assert session["token"] == "axp_u_test.token"
 
 
 def test_gateway_state_dir_isolated_by_environment(monkeypatch, tmp_path):

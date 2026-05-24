@@ -232,6 +232,29 @@ def _load_gateway_session_or_exit() -> dict:
     return session
 
 
+def _wipe_ephemeral_session_if_marked() -> Path | None:
+    # Called after a successful agent mint. If the operator ran
+    # `ax gateway login --no-persist`, the user PAT was meant to live on disk
+    # only long enough to mint one agent — delete session.json now so the raw
+    # axp_u_* token doesn't linger in the (often bind-mounted) state dir.
+    # Best-effort: a failure here must not mask the successful mint.
+    try:
+        session = load_gateway_session()
+    except Exception:
+        return None
+    if not session or not bool(session.get("ephemeral")):
+        return None
+    path = gateway_core.session_path()
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+    record_gateway_activity("gateway_session_wiped_ephemeral", session_path=str(path))
+    return path
+
+
 # ---------------------------------------------------------------------------
 # Upstream rate-limit handling: retry with exponential backoff + structured
 # error so operator-visible flows (Connect agent modal, CLI commands) degrade
@@ -6566,6 +6589,16 @@ def login(
         None, "--url", "-u", help="API base URL (defaults to existing axctl login or paxai.app)"
     ),
     space_id: str = typer.Option(None, "--space-id", "-s", help="Optional default space for managed agents"),
+    no_persist: bool = typer.Option(
+        False,
+        "--no-persist",
+        help=(
+            "Mark the session ephemeral: session.json is deleted automatically after "
+            "the first successful `agents add`. Use this for containerized setups "
+            "where the user PAT should not linger on disk beyond the one mint it's "
+            "needed for. See issue #87."
+        ),
+    ),
     as_json: bool = JSON_OPTION,
 ):
     """Store the Gateway bootstrap session.
@@ -6633,6 +6666,8 @@ def login(
         "email": me.get("email"),
         "saved_at": None,
     }
+    if no_persist:
+        payload["ephemeral"] = True
     path = save_gateway_session(payload)
     registry = load_gateway_registry()
     registry.setdefault("gateway", {})
@@ -8382,7 +8417,11 @@ def add_agent(
         err_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
+    wiped_path = _wipe_ephemeral_session_if_marked()
+
     if as_json:
+        if wiped_path is not None:
+            entry = {**entry, "ephemeral_session_wiped": str(wiped_path)}
         print_json(entry)
     else:
         err_console.print(f"[green]Managed agent ready:[/green] @{name}")
@@ -8394,6 +8433,8 @@ def add_agent(
         if entry.get("timeout_seconds"):
             err_console.print(f"  timeout = {entry.get('timeout_seconds')}s")
         err_console.print(f"  token_file = {entry['token_file']}")
+        if wiped_path is not None:
+            err_console.print(f"[cyan]Ephemeral session wiped:[/cyan] {wiped_path}")
 
 
 @agents_app.command("update")
