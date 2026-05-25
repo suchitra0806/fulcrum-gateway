@@ -310,11 +310,66 @@ def _resolve_workdir() -> str:
 # ToolNode and inherits the same security wrapper transparently.
 
 
+# ── MCP-server discovery (Sprint 05) ──────────────────────────────────────
+# When AX_BRIDGE_MCP_SERVERS is set (JSON object, optionally @file), spawn
+# the listed MCP stdio servers at bridge startup and register their tools
+# into the same ToolNode as the built-ins. Subprocesses live for the whole
+# bridge run; atexit closes them on shutdown. MCP tools go through the
+# same wrap_tool_call security middleware as the built-ins — unknown tool
+# names default-allow unless AX_BRIDGE_STRICT_SECURITY=1.
+
+_MCP_CLIENTS: list = []
+
+
+def _load_mcp_tools() -> list:
+    """Return MCP-backed LangChain tools, or [] if none configured / available.
+
+    Failures are non-fatal: bridge degrades to built-in tools when MCP setup
+    breaks rather than killing the whole agent loop. Surfaces an activity
+    event so the operator sees the loss.
+    """
+    try:
+        from ax_cli.runtimes.mcp_servers.langchain_adapter import load_mcps_from_env
+    except Exception as exc:  # noqa: BLE001
+        emit_event({"status": "activity", "activity": f"MCP adapter import failed; skipping MCP tools ({exc})"})
+        return []
+    try:
+        debug = os.environ.get("AX_MCP_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+        tools, clients = load_mcps_from_env(debug=debug)
+    except Exception as exc:  # noqa: BLE001
+        emit_event({"status": "activity", "activity": f"MCP load failed; skipping MCP tools ({exc})"})
+        return []
+    if not tools:
+        return []
+    _MCP_CLIENTS.extend(clients)
+    if not getattr(_load_mcp_tools, "_atexit_registered", False):
+        import atexit
+        atexit.register(_close_mcp_clients)
+        _load_mcp_tools._atexit_registered = True  # type: ignore[attr-defined]
+    emit_event({
+        "status": "activity",
+        "activity": (
+            f"registered {len(tools)} MCP tool(s) from {len(clients)} server(s): "
+            + ", ".join(getattr(t, "name", "?") for t in tools)
+        ),
+    })
+    return tools
+
+
+def _close_mcp_clients() -> None:
+    for client in _MCP_CLIENTS:
+        try:
+            client.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _default_tools() -> list:
     """Build the default LangChain tool set for the bridge.
 
     Imported lazily so the bridge still loads when langchain_core is missing
-    (degrades to single-node path).
+    (degrades to single-node path). MCP-backed tools (Sprint 05) are appended
+    when AX_BRIDGE_MCP_SERVERS is set.
     """
     from langchain_core.tools import tool
 
@@ -351,7 +406,7 @@ def _default_tools() -> list:
         except OSError as exc:
             return f"error: {exc}"
 
-    return [echo, read_file, list_dir]
+    return [echo, read_file, list_dir] + _load_mcp_tools()
 
 
 # ── Security wrapper (Sub-B) ──────────────────────────────────────────────
