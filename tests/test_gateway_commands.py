@@ -8049,6 +8049,79 @@ def test_same_error_signature_increments_consecutive_count(monkeypatch, tmp_path
     assert runtime.entry["consecutive_setup_errors"] == 4
 
 
+def test_hermes_plugin_setup_error_increments_consecutive_count(monkeypatch, tmp_path):
+    """#33: the hermes_plugin runtime must go through the same
+    consecutive-error counter + auto-disable plumbing as hermes_sentinel.
+
+    Before this fix, _start_hermes_plugin_process called the old inline
+    _record_supervised_setup_error which only recorded state — no counter,
+    no auto-disable, no escalating backoff. A plugin agent with a broken
+    precondition (missing token, missing scaffold) would retry every
+    reconcile tick indefinitely.
+    """
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    # Token file path points nowhere — load_gateway_managed_agent_token raises
+    # at the first call site inside _start_hermes_plugin_process.
+    token_file = tmp_path / "token-missing"
+
+    runtime = gateway_core.ManagedAgentRuntime(
+        {
+            "name": "plugin-esc",
+            "agent_id": "agent-plugin-esc",
+            "space_id": "space-1",
+            "base_url": "https://paxai.app",
+            "runtime_type": "hermes_plugin",
+            "token_file": str(token_file),
+            "consecutive_setup_errors": 0,
+        },
+        client_factory=lambda **kwargs: object(),
+    )
+
+    runtime._start_hermes_plugin_process(runtime_instance_id="ri-test")
+
+    assert runtime.entry.get("consecutive_setup_errors") == 1, (
+        "hermes_plugin setup error did not increment counter — escalating "
+        "backoff plumbing not wired (#33 regression)"
+    )
+    assert runtime.entry.get("last_setup_error_signature"), (
+        "hermes_plugin setup error did not record signature for dedup"
+    )
+
+
+def test_hermes_plugin_setup_error_eventually_auto_disables(monkeypatch, tmp_path):
+    """#33 (auto-disable side): repeated plugin setup failures must auto-disable
+    after SETUP_ERROR_MAX_CONSECUTIVE identical errors, same as sentinel."""
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    # ``hermes_bin`` set to a string short-circuits _hermes_bin so the
+    # deterministic failure point is the token-missing ValueError — that's
+    # the error whose signature we seed below.
+    token_file = tmp_path / "token-missing"
+
+    # Seed at MAX - 1 so the next failure crosses the threshold.
+    seed_error_msg = f"Gateway-managed token file is missing: {token_file}"
+    runtime = gateway_core.ManagedAgentRuntime(
+        {
+            "name": "plugin-disable",
+            "agent_id": "agent-plugin-disable",
+            "space_id": "space-1",
+            "base_url": "https://paxai.app",
+            "runtime_type": "hermes_plugin",
+            "hermes_bin": "/skip-step-1-bin-resolution",
+            "token_file": str(token_file),
+            "consecutive_setup_errors": gateway_core.SETUP_ERROR_MAX_CONSECUTIVE - 1,
+            "last_setup_error_signature": seed_error_msg[:120],
+        },
+        client_factory=lambda **kwargs: object(),
+    )
+
+    runtime._start_hermes_plugin_process(runtime_instance_id="ri-test")
+
+    assert runtime.entry.get("setup_disabled") is True, (
+        "hermes_plugin did not auto-disable after MAX consecutive setup errors"
+    )
+    assert "Auto-disabled" in str(runtime.entry.get("setup_disabled_reason") or "")
+
+
 # -- Active-space simplification (single source of truth) ---------------------
 
 
