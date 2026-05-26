@@ -104,7 +104,9 @@ from ..gateway_runtime_types import (
     agent_template_definition,
     agent_template_list,
     runtime_type_definition,
+    runtime_type_deprecated,
     runtime_type_list,
+    runtime_type_successor,
 )
 from ..mentions import merge_explicit_mentions_metadata
 from ..output import JSON_OPTION, console, err_console, print_json, print_table
@@ -3891,6 +3893,29 @@ def _agent_output_label(agent: dict) -> str:
     return str(agent.get("output_label") or agent.get("reply") or "Reply")
 
 
+def _adapter_label(agent: dict) -> str:
+    """Adapter cell for ``agents show`` — annotates deprecated runtimes.
+
+    Surfaces the silent-drift bug in #90: a registry minted by an older
+    axctl may carry a runtime_type that is now deprecated. The user
+    runs the modern axctl but the entry pins the legacy code path. We
+    print the deprecation and a copy-pasteable migration command so the
+    drift stops being invisible.
+    """
+    runtime_type = str(agent.get("runtime_type") or "").strip()
+    if not runtime_type:
+        return "-"
+    if not runtime_type_deprecated(runtime_type):
+        return runtime_type
+    successor = runtime_type_successor(runtime_type)
+    name = str(agent.get("name") or "").strip()
+    if successor and name:
+        return f"{runtime_type} (deprecated — migrate with `ax gateway agents update {name} --type {successor}`)"
+    if successor:
+        return f"{runtime_type} (deprecated — migrate with `--type {successor}`)"
+    return f"{runtime_type} (deprecated)"
+
+
 def _metric_panel(label: str, value: object, *, tone: str = "cyan", subtitle: str | None = None) -> Panel:
     body = Text()
     body.append(str(value), style=f"bold {tone}")
@@ -6506,7 +6531,7 @@ def _render_agent_detail(entry: dict, *, activity: list[dict]) -> Group:
         "Timeout",
         f"{entry.get('timeout_seconds')}s" if entry.get("timeout_seconds") else "-",
     )
-    overview.add_row("Adapter", str(entry.get("runtime_type") or "-"), "Space", str(entry.get("space_id") or "-"))
+    overview.add_row("Adapter", _adapter_label(entry), "Space", str(entry.get("space_id") or "-"))
     overview.add_row(
         "Cred Source", str(entry.get("credential_source") or "-"), "Token", str(entry.get("token_file") or "-")
     )

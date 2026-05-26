@@ -2816,6 +2816,50 @@ class TestIsHermesPluginRuntime:
         assert _is_hermes_plugin_runtime("hermes_sentinel") is False
 
 
+class TestRuntimeTypeDeprecation:
+    """Catalog helpers that surface deprecated runtime types in display
+    paths so a registry minted by an older axctl doesn't silently pin a
+    legacy code path after upgrade (#90)."""
+
+    def test_deprecated_true_for_marked_runtime(self):
+        from ax_cli.gateway_runtime_types import runtime_type_deprecated
+
+        assert runtime_type_deprecated("hermes_sentinel") is True
+
+    def test_deprecated_false_for_current_runtime(self):
+        from ax_cli.gateway_runtime_types import runtime_type_deprecated
+
+        assert runtime_type_deprecated("hermes_plugin") is False
+        assert runtime_type_deprecated("echo") is False
+
+    def test_deprecated_tolerates_unknown(self):
+        from ax_cli.gateway_runtime_types import runtime_type_deprecated
+
+        # Corrupt or future-unknown values must not raise — display paths
+        # call this unconditionally on whatever the registry stored.
+        assert runtime_type_deprecated("not-a-real-runtime") is False
+        assert runtime_type_deprecated("") is False
+        assert runtime_type_deprecated(None) is False
+
+    def test_successor_for_deprecated_runtime(self):
+        from ax_cli.gateway_runtime_types import runtime_type_successor
+
+        assert runtime_type_successor("hermes_sentinel") == "hermes_plugin"
+
+    def test_successor_none_for_current_runtime(self):
+        from ax_cli.gateway_runtime_types import runtime_type_successor
+
+        assert runtime_type_successor("hermes_plugin") is None
+        assert runtime_type_successor("echo") is None
+
+    def test_successor_tolerates_unknown(self):
+        from ax_cli.gateway_runtime_types import runtime_type_successor
+
+        assert runtime_type_successor("not-a-real-runtime") is None
+        assert runtime_type_successor("") is None
+        assert runtime_type_successor(None) is None
+
+
 # ---------------------------------------------------------------------------
 # Unique classes migrated from test_gateway_coverage.py
 # ---------------------------------------------------------------------------

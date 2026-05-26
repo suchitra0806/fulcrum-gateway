@@ -111,6 +111,11 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
             "kind": "supervised_process",
             "passive": False,
             "deprecated": True,
+            # Successor runtime an `ax gateway agents update --type <id>`
+            # migration should land on. Surfaced in `agents show` so
+            # operators discover the drift instead of running deprecated
+            # code paths silently after upgrading axctl (#90).
+            "successor_runtime_type": "hermes_plugin",
             "requires": [],
             "form_fields": [
                 {
@@ -282,6 +287,41 @@ def runtime_type_definition(runtime_type: str) -> dict[str, Any]:
     if normalized not in catalog:
         raise KeyError(runtime_type)
     return catalog[normalized]
+
+
+def runtime_type_deprecated(runtime_type: str | None) -> bool:
+    """Return True when ``runtime_type`` is marked deprecated in the catalog.
+
+    Tolerates unknown / corrupt values: a missing or unrecognized
+    ``runtime_type`` is treated as not deprecated rather than raising,
+    so callers in display paths can call this unconditionally.
+    """
+    if not runtime_type:
+        return False
+    try:
+        return bool(runtime_type_definition(runtime_type).get("deprecated"))
+    except KeyError:
+        return False
+
+
+def runtime_type_successor(runtime_type: str | None) -> str | None:
+    """Return the recommended successor runtime id for a deprecated runtime.
+
+    Returns ``None`` when the runtime is not deprecated, has no recorded
+    successor, or is unknown.
+    """
+    if not runtime_type:
+        return None
+    try:
+        definition = runtime_type_definition(runtime_type)
+    except KeyError:
+        return None
+    if not definition.get("deprecated"):
+        return None
+    successor = definition.get("successor_runtime_type")
+    if isinstance(successor, str) and successor.strip():
+        return successor.strip()
+    return None
 
 
 def runtime_type_list() -> list[dict[str, Any]]:
