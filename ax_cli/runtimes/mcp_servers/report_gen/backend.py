@@ -42,10 +42,10 @@ def select_backend() -> Backend:
     kind = (os.environ.get("AX_REPORT_GEN_DB_KIND") or "sqlite").strip().lower()
     if kind == "sqlite":
         from .sqlite_backend import SqliteBackend
+
         return SqliteBackend()
     if kind == "postgres":
         from .postgres_backend import PostgresBackend
+
         return PostgresBackend()
-    raise ValueError(
-        f"AX_REPORT_GEN_DB_KIND must be 'sqlite' or 'postgres'; got {kind!r}"
-    )
+    raise ValueError(f"AX_REPORT_GEN_DB_KIND must be 'sqlite' or 'postgres'; got {kind!r}")

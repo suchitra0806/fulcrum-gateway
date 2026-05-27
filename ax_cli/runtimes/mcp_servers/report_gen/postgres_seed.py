@@ -88,20 +88,14 @@ def seed_postgres(dsn: str | None = None) -> dict[str, int]:
 
     dsn = dsn or os.environ.get("AX_REPORT_GEN_PG_DSN_OWNER")
     if not dsn:
-        raise RuntimeError(
-            "AX_REPORT_GEN_PG_DSN_OWNER is required (or pass dsn=...)"
-        )
+        raise RuntimeError("AX_REPORT_GEN_PG_DSN_OWNER is required (or pass dsn=...)")
 
     counts: dict[str, int] = {}
     with psycopg.connect(dsn, autocommit=False) as conn:
         with conn.cursor() as cur:
             cur.execute(POSTGRES_SCHEMA_SQL)
-            cur.executemany(
-                "INSERT INTO theater VALUES (%s, %s, %s, %s, %s)", THEATERS
-            )
-            cur.executemany(
-                "INSERT INTO unit VALUES (%s, %s, %s, %s, %s)", UNITS
-            )
+            cur.executemany("INSERT INTO theater VALUES (%s, %s, %s, %s, %s)", THEATERS)
+            cur.executemany("INSERT INTO unit VALUES (%s, %s, %s, %s, %s)", UNITS)
             cur.executemany(
                 "INSERT INTO ammo_stockpile VALUES (%s, %s, %s, %s, %s, %s)",
                 AMMO_STOCKPILE,

@@ -195,9 +195,7 @@ def _render_donut(data: list[dict[str, Any]], width: int, height: int, scheme: s
     return "".join(parts)
 
 
-def _donut_slice(
-    cx: int, cy: int, r_outer: int, r_inner: int, start: float, end: float, color: str
-) -> str:
+def _donut_slice(cx: int, cy: int, r_outer: int, r_inner: int, start: float, end: float, color: str) -> str:
     x1 = cx + r_outer * math.cos(start)
     y1 = cy + r_outer * math.sin(start)
     x2 = cx + r_outer * math.cos(end)
@@ -247,9 +245,7 @@ def _empty_chart_text(width: int, height: int) -> str:
     )
 
 
-def render_status_card(
-    title: str, sections: list[dict[str, Any]], options: dict[str, Any] | None = None
-) -> str:
+def render_status_card(title: str, sections: list[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
     """Render a status briefing card as SVG.
 
     Layout: title bar at top, optional subtitle, then one box per section with
@@ -266,17 +262,13 @@ def render_status_card(
     section_header_h = 30
     section_gap = 12
 
-    section_heights = [
-        section_header_h + section_padding * 2 + row_h * len(s.get("rows") or [])
-        for s in sections
-    ]
+    section_heights = [section_header_h + section_padding * 2 + row_h * len(s.get("rows") or []) for s in sections]
     body_h = sum(section_heights) + section_gap * max(len(sections) - 1, 0)
     footer_h = 28 if footer else 0
     height = header_h + 16 + body_h + footer_h + 16
 
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
-        f'width="{width}" height="{height}">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">',
         f'<rect width="{width}" height="{height}" fill="{BG}"/>',
         f'<rect x="0" y="0" width="{width}" height="{header_h}" fill="#1e293b"/>',
         f'<text x="24" y="38" fill="{FG}" font-family="sans-serif" '
@@ -284,8 +276,7 @@ def render_status_card(
     ]
     if subtitle:
         parts.append(
-            f'<text x="24" y="62" fill="{MUTED}" font-family="sans-serif" '
-            f'font-size="12">{_esc(subtitle)}</text>'
+            f'<text x="24" y="62" fill="{MUTED}" font-family="sans-serif" font-size="12">{_esc(subtitle)}</text>'
         )
 
     y = header_h + 16
@@ -293,10 +284,7 @@ def render_status_card(
         heading = section.get("heading", "")
         rows = section.get("rows") or []
         section_h = section_header_h + section_padding * 2 + row_h * len(rows)
-        parts.append(
-            f'<rect x="16" y="{y}" width="{width - 32}" height="{section_h}" '
-            f'fill="#1e293b" rx="6"/>'
-        )
+        parts.append(f'<rect x="16" y="{y}" width="{width - 32}" height="{section_h}" fill="#1e293b" rx="6"/>')
         parts.append(
             f'<text x="28" y="{y + 22}" fill="{FG}" font-family="sans-serif" '
             f'font-size="13" font-weight="600">{_esc(heading)}</text>'
@@ -307,12 +295,9 @@ def render_status_card(
             value = _esc(row.get("value", ""))
             status = str(row.get("status", "")).lower()
             pill_color = STATUS_PILL.get(status, PILL_FALLBACK)
+            parts.append(f'<circle cx="32" cy="{row_y + 8}" r="5" fill="{pill_color}"/>')
             parts.append(
-                f'<circle cx="32" cy="{row_y + 8}" r="5" fill="{pill_color}"/>'
-            )
-            parts.append(
-                f'<text x="46" y="{row_y + 12}" fill="{FG}" font-family="sans-serif" '
-                f'font-size="12">{label}</text>'
+                f'<text x="46" y="{row_y + 12}" fill="{FG}" font-family="sans-serif" font-size="12">{label}</text>'
             )
             parts.append(
                 f'<text x="{width - 28}" y="{row_y + 12}" fill="{FG}" font-family="sans-serif" '

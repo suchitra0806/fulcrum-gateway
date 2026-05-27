@@ -108,8 +108,7 @@ def _handle_request(config: ServerConfig, request: dict[str, Any]) -> None:
             request_id,
             {
                 "tools": [
-                    {"name": t.name, "description": t.description, "inputSchema": t.input_schema}
-                    for t in config.tools
+                    {"name": t.name, "description": t.description, "inputSchema": t.input_schema} for t in config.tools
                 ]
             },
         )

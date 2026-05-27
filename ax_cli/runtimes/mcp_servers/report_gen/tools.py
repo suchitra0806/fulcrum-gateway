@@ -45,9 +45,7 @@ def _check_sql_readonly(sql: str, dialect: str = "sqlite") -> None:
         import sqlglot
         from sqlglot import exp
     except ImportError as e:
-        raise SqlGlotMissing(
-            "sqlglot is required for SQL safety; install via `pip install ax-cli[mcp]`"
-        ) from e
+        raise SqlGlotMissing("sqlglot is required for SQL safety; install via `pip install ax-cli[mcp]`") from e
 
     try:
         parsed = sqlglot.parse(sql, dialect=dialect)
@@ -58,8 +56,12 @@ def _check_sql_readonly(sql: str, dialect: str = "sqlite") -> None:
         raise ReadOnlyViolation("empty SQL")
 
     write_node_types = (
-        exp.Delete, exp.Update, exp.Insert,
-        exp.Drop, exp.Create, exp.Alter,
+        exp.Delete,
+        exp.Update,
+        exp.Insert,
+        exp.Drop,
+        exp.Create,
+        exp.Alter,
         exp.TruncateTable,
     )
     suspicious_functions = {"load_extension", "attach", "detach", "pragma"}
@@ -68,14 +70,10 @@ def _check_sql_readonly(sql: str, dialect: str = "sqlite") -> None:
         if stmt is None:
             continue
         if not isinstance(stmt, exp.Select):
-            raise ReadOnlyViolation(
-                f"Only SELECT statements allowed; got {type(stmt).__name__}"
-            )
+            raise ReadOnlyViolation(f"Only SELECT statements allowed; got {type(stmt).__name__}")
         for node in stmt.walk():
             if isinstance(node, write_node_types):
-                raise ReadOnlyViolation(
-                    f"Write operation rejected: {type(node).__name__}"
-                )
+                raise ReadOnlyViolation(f"Write operation rejected: {type(node).__name__}")
             if isinstance(node, exp.Anonymous):
                 name = (node.name or "").lower()
                 if name in suspicious_functions:
@@ -138,13 +136,13 @@ DB_QUERY_INPUT_SCHEMA: dict[str, Any] = {
         "sql": {
             "type": "string",
             "description": "A SELECT statement (SQLite or Postgres dialect depending on "
-                          "backend). Write operations, DDL, and extension-loading function "
-                          "calls are rejected by the AST safety check before execution.",
+            "backend). Write operations, DDL, and extension-loading function "
+            "calls are rejected by the AST safety check before execution.",
         },
         "row_limit": {
             "type": "number",
             "description": f"Maximum rows returned (default {ROW_LIMIT_DEFAULT}, max 10000). "
-                          "If the query produces more rows, the response sets truncated=true.",
+            "If the query produces more rows, the response sets truncated=true.",
         },
     },
     "required": ["sql"],

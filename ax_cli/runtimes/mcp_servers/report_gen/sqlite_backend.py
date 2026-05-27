@@ -26,8 +26,7 @@ class SqliteBackend:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
             )
             table_names = [r[0] for r in cursor.fetchall()]
             tables = []
@@ -54,12 +53,14 @@ class SqliteBackend:
                 ]
                 cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
                 row_count = cursor.fetchone()[0]
-                tables.append({
-                    "name": table_name,
-                    "columns": cols,
-                    "foreign_keys": foreign_keys,
-                    "row_count": row_count,
-                })
+                tables.append(
+                    {
+                        "name": table_name,
+                        "columns": cols,
+                        "foreign_keys": foreign_keys,
+                        "row_count": row_count,
+                    }
+                )
             return {
                 "backend": "sqlite",
                 "database": str(db_path),

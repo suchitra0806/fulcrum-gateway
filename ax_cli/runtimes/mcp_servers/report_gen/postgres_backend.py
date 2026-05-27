@@ -33,20 +33,18 @@ class PostgresMissing(Exception):
 def _require_psycopg():
     try:
         import psycopg  # noqa: F401
+
         return psycopg
     except ImportError as e:
         raise PostgresMissing(
-            "psycopg is required for the postgres backend; "
-            "install via `pip install ax-cli[mcp-postgres]`"
+            "psycopg is required for the postgres backend; install via `pip install ax-cli[mcp-postgres]`"
         ) from e
 
 
 def _reader_dsn() -> str:
     dsn = os.environ.get("AX_REPORT_GEN_PG_DSN_READER")
     if not dsn:
-        raise RuntimeError(
-            "AX_REPORT_GEN_PG_DSN_READER is required when AX_REPORT_GEN_DB_KIND=postgres"
-        )
+        raise RuntimeError("AX_REPORT_GEN_PG_DSN_READER is required when AX_REPORT_GEN_DB_KIND=postgres")
     return dsn
 
 
@@ -147,17 +145,17 @@ class PostgresBackend:
                         for col, ref_table, ref_col in cur.fetchall()
                     ]
 
-                    cur.execute(
-                        f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"'
-                    )
+                    cur.execute(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"')
                     row_count = cur.fetchone()[0]
 
-                    tables.append({
-                        "name": table_name,
-                        "columns": cols,
-                        "foreign_keys": foreign_keys,
-                        "row_count": row_count,
-                    })
+                    tables.append(
+                        {
+                            "name": table_name,
+                            "columns": cols,
+                            "foreign_keys": foreign_keys,
+                            "row_count": row_count,
+                        }
+                    )
 
                 return {
                     "backend": "postgres",

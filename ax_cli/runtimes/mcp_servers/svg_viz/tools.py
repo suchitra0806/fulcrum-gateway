@@ -94,8 +94,14 @@ STATUS_CARD_INPUT_SCHEMA: dict[str, Any] = {
             "description": "Optional rendering tweaks.",
             "properties": {
                 "subtitle": {"type": "string", "description": "Secondary heading shown below title."},
-                "footer": {"type": "string", "description": "Footer text (good place for disclaimers or generation stamps)."},
-                "width": {"type": "number", "description": "SVG width in pixels (default 800). Height auto-fits sections."},
+                "footer": {
+                    "type": "string",
+                    "description": "Footer text (good place for disclaimers or generation stamps).",
+                },
+                "width": {
+                    "type": "number",
+                    "description": "SVG width in pixels (default 800). Height auto-fits sections.",
+                },
             },
         },
     },
