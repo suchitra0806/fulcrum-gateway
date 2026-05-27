@@ -40,7 +40,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import Any, Callable
+from typing import Any
 
 from .mcp_client import McpStdioClient, McpToolError, McpToolSpec
 
