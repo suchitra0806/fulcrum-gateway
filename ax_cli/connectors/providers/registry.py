@@ -13,7 +13,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "optional_auth_keys": ["COMPOSIO_ENTITY_ID", "COMPOSIO_CONNECTED_ACCOUNT_ID"],
         "capabilities": ["execute", "list_tools", "intent_search"],
         "default_config": {
-            "composio_base_url": "https://backend.composio.dev/api/v2",
+            "composio_base_url": "https://backend.composio.dev/api/v3",
             "entity_id": "default",
             "connected_account_id": None,
             "app_name": None,

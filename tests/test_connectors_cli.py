@@ -38,7 +38,7 @@ def seeded_connector(tmp_gateway: Path) -> ConnectorRow:
         "composio",
         managed_auth=True,
         config={
-            "composio_base_url": "https://backend.composio.dev/api/v2",
+            "composio_base_url": "https://backend.composio.dev/api/v3",
             "entity_id": "default",
             "connected_account_id": None,
             "app_name": None,

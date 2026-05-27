@@ -49,7 +49,7 @@ ax gateway connectors set <ref> <key> <value>
 
 | Key | Default | Description |
 |---|---|---|
-| `composio_base_url` | `https://backend.composio.dev/api/v2` | Composio API base URL |
+| `composio_base_url` | `https://backend.composio.dev/api/v3` | Composio API base URL |
 | `entity_id` | `default` | Composio entity ID for account resolution |
 | `connected_account_id` | (none) | Direct account ID (overrides entity_id) |
 | `app_name` | (none) | Default app for execute calls |
