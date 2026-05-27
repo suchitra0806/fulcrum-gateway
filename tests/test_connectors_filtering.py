@@ -187,3 +187,26 @@ class TestAssertToolAllowed:
         with pytest.raises(ConnectorPolicyError) as exc_info:
             assert_tool_allowed("BAD_TOOL", policy)
         assert exc_info.value.tool_slug == "BAD_TOOL"
+
+    def test_toolkit_allowed_at_execution(self):
+        policy = ToolFilterPolicy(allowed_toolkits=["github"])
+        assert_tool_allowed("GITHUB_LIST_PRS", policy, toolkit="github")
+
+    def test_toolkit_denied_at_execution(self):
+        policy = ToolFilterPolicy(denied_toolkits=["slack"])
+        with pytest.raises(ConnectorPolicyError):
+            assert_tool_allowed("SLACK_SEND_MSG", policy, toolkit="slack")
+
+    def test_toolkit_not_in_allowlist_at_execution(self):
+        policy = ToolFilterPolicy(allowed_toolkits=["github"])
+        with pytest.raises(ConnectorPolicyError):
+            assert_tool_allowed("SLACK_SEND_MSG", policy, toolkit="slack")
+
+    def test_toolkit_none_with_allowlist_at_execution(self):
+        policy = ToolFilterPolicy(allowed_toolkits=["github"])
+        with pytest.raises(ConnectorPolicyError):
+            assert_tool_allowed("UNKNOWN_TOOL", policy, toolkit=None)
+
+    def test_toolkit_none_without_policy_passes(self):
+        policy = ToolFilterPolicy()
+        assert_tool_allowed("ANYTHING", policy, toolkit=None)

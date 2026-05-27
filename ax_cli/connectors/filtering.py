@@ -91,8 +91,15 @@ def filter_tools(items: list[dict[str, Any]], policy: ToolFilterPolicy) -> list[
     return result
 
 
-def assert_tool_allowed(tool_slug: str, policy: ToolFilterPolicy) -> None:
+def assert_tool_allowed(tool_slug: str, policy: ToolFilterPolicy, *, toolkit: str | None = None) -> None:
     if policy.denied_tools and _matches_any(tool_slug, policy.denied_tools):
         raise ConnectorPolicyError(tool_slug, f"matched denied pattern in {policy.denied_tools}")
     if policy.allowed_tools and not _matches_any(tool_slug, policy.allowed_tools):
         raise ConnectorPolicyError(tool_slug, f"did not match any allowed pattern in {policy.allowed_tools}")
+    if not _toolkit_allowed(toolkit, policy):
+        detail = f"toolkit {toolkit!r}" if toolkit else "no toolkit"
+        if policy.denied_toolkits and toolkit and _matches_any(toolkit, policy.denied_toolkits):
+            raise ConnectorPolicyError(
+                tool_slug, f"{detail} matched denied toolkit pattern in {policy.denied_toolkits}"
+            )
+        raise ConnectorPolicyError(tool_slug, f"{detail} not in allowed toolkits {policy.allowed_toolkits}")

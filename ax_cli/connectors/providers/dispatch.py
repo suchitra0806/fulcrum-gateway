@@ -60,15 +60,20 @@ def execute_tool(
     tool_slug: str,
     args: dict[str, Any],
     auth_env: dict[str, str],
+    *,
+    toolkit: str | None = None,
+    agent_name: str | None = None,
+    agent_id: str | None = None,
 ) -> dict[str, Any]:
     policy = from_config(connector.config)
+    identity = {k: v for k, v in [("agent_name", agent_name), ("agent_id", agent_id)] if v}
     try:
-        assert_tool_allowed(tool_slug, policy)
+        assert_tool_allowed(tool_slug, policy, toolkit=toolkit)
     except ConnectorPolicyError as exc:
-        record_connector_tool_denied(connector, tool_slug, policy_detail=exc.policy_detail)
+        record_connector_tool_denied(connector, tool_slug, policy_detail=exc.policy_detail, **identity)
         raise
 
-    record_connector_tool_started(connector, tool_slug)
+    record_connector_tool_started(connector, tool_slug, **identity)
     t0 = time.monotonic()
     try:
         adapter = _get_adapter(connector.provider)
@@ -81,10 +86,10 @@ def execute_tool(
         )
     except Exception as exc:
         duration_ms = int((time.monotonic() - t0) * 1000)
-        record_connector_tool_failed(connector, tool_slug, error=str(exc), duration_ms=duration_ms)
+        record_connector_tool_failed(connector, tool_slug, error=str(exc), duration_ms=duration_ms, **identity)
         raise
     duration_ms = int((time.monotonic() - t0) * 1000)
-    record_connector_tool_completed(connector, tool_slug, duration_ms=duration_ms)
+    record_connector_tool_completed(connector, tool_slug, duration_ms=duration_ms, **identity)
     return result
 
 
@@ -131,6 +136,7 @@ def search_tools(
             auth_env,
             connector.config,
             connector.name,
+            apps=apps,
             limit=limit,
         )
         items = result.get("items", [])

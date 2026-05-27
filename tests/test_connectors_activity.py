@@ -83,6 +83,16 @@ class TestEventShape:
         )
         assert record["agent_name"] == "my-agent"
 
+    def test_identity_fields(self, connector: ConnectorRow, tmp_activity: Path):
+        record = record_connector_tool_started(
+            connector,
+            "GITHUB_LIST_PRS",
+            agent_name="sentinel-agent",
+            agent_id="abc-123",
+        )
+        assert record["agent_name"] == "sentinel-agent"
+        assert record["agent_id"] == "abc-123"
+
 
 # ── Redaction ────────────────────────────────────────────────────────────────
 

@@ -9226,6 +9226,18 @@ def connectors_set(
         err_console.print(f"[red]Connector not found:[/red] {ref}")
         raise typer.Exit(1)
     config = dict(row.config)
+    _POLICY_LIST_KEYS = {"allowed_tools", "denied_tools", "allowed_toolkits", "denied_toolkits"}
+    if key in _POLICY_LIST_KEYS:
+        import json as _json
+
+        try:
+            parsed = _json.loads(value)
+            if isinstance(parsed, list):
+                value = parsed
+            else:
+                value = [str(parsed)]
+        except _json.JSONDecodeError:
+            value = [v.strip() for v in value.split(",") if v.strip()]
     config[key] = value
     updated = update_connector(ref, {"config": config})
     if as_json:

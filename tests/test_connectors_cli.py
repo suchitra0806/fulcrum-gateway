@@ -149,6 +149,42 @@ class TestConnectorsSet:
         result = runner.invoke(connectors_app, ["set", "nonexistent", "key", "val"])
         assert result.exit_code == 1
 
+    def test_set_policy_json_array(self, seeded_connector: ConnectorRow):
+        result = runner.invoke(
+            connectors_app,
+            ["set", "test-conn", "allowed_tools", '["GITHUB_*", "JIRA_*"]', "--json"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["config"]["allowed_tools"] == ["GITHUB_*", "JIRA_*"]
+
+    def test_set_policy_comma_separated(self, seeded_connector: ConnectorRow):
+        result = runner.invoke(
+            connectors_app,
+            ["set", "test-conn", "denied_toolkits", "slack,salesforce", "--json"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["config"]["denied_toolkits"] == ["slack", "salesforce"]
+
+    def test_set_policy_single_value(self, seeded_connector: ConnectorRow):
+        result = runner.invoke(
+            connectors_app,
+            ["set", "test-conn", "allowed_toolkits", "github", "--json"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["config"]["allowed_toolkits"] == ["github"]
+
+    def test_set_non_policy_key_stays_string(self, seeded_connector: ConnectorRow):
+        result = runner.invoke(
+            connectors_app,
+            ["set", "test-conn", "entity_id", '["not", "parsed"]', "--json"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["config"]["entity_id"] == '["not", "parsed"]'
+
 
 # ── connectors providers ─────────────────────────────────────────────────────
 
