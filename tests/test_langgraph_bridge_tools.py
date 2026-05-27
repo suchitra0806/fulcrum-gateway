@@ -282,6 +282,40 @@ def test_security_wrapper_allows_echo_tool_with_args(monkeypatch, tmp_path):
     assert result == "EXECUTED"
 
 
+def test_security_wrapper_degraded_emits_status_error_event_and_stderr(monkeypatch, tmp_path, capsys):
+    """#111: when ax_cli.runtimes.hermes.tools can't be imported, the wrapper
+    degrades to a permissive passthrough. That downgrade must be loud, not
+    quiet — both ``ax gateway status`` (via the kind:status,status:error
+    event) and an operator running the bridge directly (via stderr) need to
+    see it. Pre-fix it emitted a single kind:activity event and nothing on
+    stderr; an IL2 operator could miss the loss of tool sandboxing entirely.
+    """
+    import sys as _sys
+
+    # Force the in-function import to fail.
+    monkeypatch.setitem(_sys.modules, "ax_cli.runtimes.hermes.tools", None)
+    captured: list[dict] = []
+    monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: captured.append(payload))
+
+    wrap = langgraph_bridge._make_security_wrap(str(tmp_path))
+
+    # Status-event side: surfaces in `ax gateway status`.
+    status_errors = [
+        e for e in captured if e.get("kind") == "status" and e.get("status") == "error"
+    ]
+    assert len(status_errors) == 1, f"expected one status:error event, got {captured!r}"
+    assert "security wrapper degraded" in str(status_errors[0].get("error_message") or "")
+    # Stderr side: surfaces in the operator's terminal.
+    err = capsys.readouterr().err
+    assert "WARNING" in err and "security wrapper degraded" in err
+
+    # Wrapper still functions (permissive passthrough — the bridge stays
+    # usable for non-security demos, just unsandboxed).
+    req = _FakeToolCallRequest("bash", {"command": "rm -rf /"})
+    result = wrap(req, _execute_marker)
+    assert result == "EXECUTED"
+
+
 # ── 10. ToolNode + wrap_tool_call integration ─────────────────────────────
 
 
