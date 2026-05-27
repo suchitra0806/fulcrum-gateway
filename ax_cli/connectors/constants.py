@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DEFAULT_COMPOSIO_BASE_URL = "https://backend.composio.dev/api/v2"
+DEFAULT_COMPOSIO_BASE_URL = "https://backend.composio.dev/api/v3"
 DEFAULT_ENTITY_ID = "default"
 
 CONNECT_TIMEOUT = 10.0
