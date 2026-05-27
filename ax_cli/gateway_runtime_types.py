@@ -462,7 +462,7 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
             "setup_skill_path": str(skill_path),
             "defaults": {
                 "runtime_type": "exec",
-                "exec_command": "python3 examples/gateway_autogen/autogen_bridge.py",
+                "exec_command": f"{_bridge_python()} {repo_root / 'examples' / 'gateway_autogen' / 'autogen_bridge.py'}",
                 "workdir": str(repo_root),
             },
             "signals": runtime_signals["exec"],
