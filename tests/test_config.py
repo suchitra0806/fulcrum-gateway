@@ -1071,7 +1071,50 @@ class TestSaveConfig:
         _save_config({"timeout": 30, "debug": True}, local=True)
         content = (ax_dir / "config.toml").read_text()
         assert "timeout = 30" in content
-        assert "debug = True" in content
+        # TOML booleans are lowercase, not Python's "True" / "False".
+        assert "debug = true" in content
+
+    def test_round_trip_preserves_nested_tables(self, tmp_path, monkeypatch):
+        """Regression for #39: load → mutate → save must keep [gateway]/[agent]
+        tables parseable. Previously emitted Python ``dict.__repr__`` and
+        corrupted the file."""
+        import tomllib
+
+        monkeypatch.chdir(tmp_path)
+        ax_dir = tmp_path / ".ax"
+        ax_dir.mkdir()
+        (ax_dir / "config.toml").write_text(
+            "[gateway]\n"
+            'mode = "local"\n'
+            'url = "http://127.0.0.1:8765"\n'
+            "\n"
+            "[agent]\n"
+            'agent_name = "aalan-bot"\n'
+            'workdir = "/home/claude/repos/ax-gateway"\n'
+        )
+
+        cfg = _load_local_config()
+        cfg["space_id"] = "fdffa484-efcc-44d4-ae92-6340ad6209d9"
+        _save_config(cfg, local=True)
+
+        reloaded = tomllib.loads((ax_dir / "config.toml").read_text())
+        assert reloaded["space_id"] == "fdffa484-efcc-44d4-ae92-6340ad6209d9"
+        assert reloaded["gateway"] == {"mode": "local", "url": "http://127.0.0.1:8765"}
+        assert reloaded["agent"]["agent_name"] == "aalan-bot"
+        assert reloaded["agent"]["workdir"] == "/home/claude/repos/ax-gateway"
+
+    def test_escapes_strings_containing_quotes(self, tmp_path, monkeypatch):
+        """Defensive: the prior hand-rolled writer produced unescaped output
+        for strings with embedded quotes or backslashes, breaking the next
+        load. The TOML writer handles escaping for us."""
+        import tomllib
+
+        monkeypatch.chdir(tmp_path)
+        ax_dir = tmp_path / ".ax"
+        ax_dir.mkdir()
+        _save_config({"note": 'has "quotes" and \\ backslash'}, local=True)
+        reloaded = tomllib.loads((ax_dir / "config.toml").read_text())
+        assert reloaded["note"] == 'has "quotes" and \\ backslash'
 
     def test_creates_ax_dir_when_missing(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

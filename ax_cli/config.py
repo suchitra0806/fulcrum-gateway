@@ -11,11 +11,12 @@ the agent operates — never shared via ~/.ax/ unless explicitly requested.
 import os
 import re
 import sys
-import tomllib  # stdlib 3.11+
+import tomllib  # stdlib 3.11+ (read)
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import UUID
 
+import tomli_w  # write
 import typer
 
 from .client import AxClient
@@ -1015,7 +1016,13 @@ def _load_config() -> dict:
 
 
 def _save_config(cfg: dict, *, local: bool = True) -> None:
-    """Save config. Default: writes to CWD .ax/. Use local=False for ~/.ax/."""
+    """Save config. Default: writes to CWD .ax/. Use local=False for ~/.ax/.
+
+    Uses ``tomli_w`` so nested tables (e.g. ``[gateway]``/``[agent]`` written
+    by Gateway-managed workspaces) survive a load → mutate → save round-trip.
+    The naive ``f"{k} = {v}"`` loop this replaced emitted Python ``repr`` for
+    dict values, producing invalid TOML the next read could not parse.
+    """
     if local:
         d = _local_config_dir()
         if not d:
@@ -1025,13 +1032,7 @@ def _save_config(cfg: dict, *, local: bool = True) -> None:
         d = _global_config_dir()
     d.mkdir(parents=True, exist_ok=True)
     cf = d / "config.toml"
-    lines = []
-    for k, v in cfg.items():
-        if isinstance(v, str):
-            lines.append(f'{k} = "{v}"')
-        else:
-            lines.append(f"{k} = {v}")
-    cf.write_text("\n".join(lines) + "\n")
+    cf.write_text(tomli_w.dumps(cfg))
     cf.chmod(0o600)
 
 
