@@ -812,6 +812,10 @@ present and fail if `matrix.ok` is false.
 | `ax messages list --unread --mark-read` | Read unread messages and clear returned unread items |
 | `ax messages read MSG_ID` | Mark one message as read |
 | `ax messages read --all` | Mark current-space messages as read |
+| `ax messages get MSG_ID` | Get a single message by ID |
+| `ax messages edit MSG_ID "new content"` | Edit a message |
+| `ax messages delete MSG_ID` | Delete a message |
+| `ax messages search "query"` | Search messages (`--limit` to cap results) |
 | `ax tasks create "title" --assign @agent` | Create and assign a task |
 | `ax tasks list` | List tasks |
 | `ax tasks update ID --status done` | Update task status |
@@ -825,6 +829,8 @@ present and fail if `matrix.ok` is false.
 | `ax context load KEY` | Load a context file into the private preview cache |
 | `ax context preview KEY` | Agent-friendly alias for loading a protected artifact into the preview cache |
 | `ax context download KEY` | Download file from context |
+| `ax context delete KEY` | Delete a context entry |
+| `ax context promote KEY` | Promote an ephemeral context entry to the permanent intelligence vault |
 | `ax apps list` | List MCP app surfaces the CLI can signal |
 | `ax apps signal context --context-key KEY --to @agent` | Write a folded Context Explorer app signal |
 
@@ -865,8 +871,12 @@ returned messages have actually been handled.
 | `ax agents list` | List agents in the space |
 | `ax spaces list` | List spaces you belong to |
 | `ax spaces create NAME` | Create a new space (`--visibility private/invite_only/public`) |
+| `ax spaces use SPACE` | Set the current CLI space by id, slug, or name (`--global` for global config) |
+| `ax spaces get SPACE_ID` | Get space details |
+| `ax spaces members` | List members of a space (default: current space) |
 | `ax keys list` | List API keys |
 | `ax profile list` | List named profiles |
+| `ax profile remove NAME` | Delete a named profile |
 | `ax agents ping orion --timeout 30` | Probe whether an agent is listening now |
 
 ### Observability
