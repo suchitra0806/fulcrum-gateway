@@ -466,6 +466,7 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
             "defaults": {
                 "runtime_type": "exec",
                 "exec_command": f"{_bridge_python()} {repo_root / 'examples' / 'gateway_langgraph' / 'langgraph_bridge.py'}",
+                "bridge_source": str(repo_root / "examples" / "gateway_langgraph" / "langgraph_bridge.py"),
                 "workdir": str(repo_root),
             },
             "signals": runtime_signals["exec"],
@@ -546,6 +547,7 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
             "defaults": {
                 "runtime_type": "exec",
                 "exec_command": f"{_bridge_python()} {repo_root / 'examples' / 'gateway_autogen' / 'autogen_bridge.py'}",
+                "bridge_source": str(repo_root / "examples" / "gateway_autogen" / "autogen_bridge.py"),
                 "workdir": str(repo_root),
             },
             "signals": runtime_signals["exec"],
@@ -578,6 +580,7 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
             "defaults": {
                 "runtime_type": "exec",
                 "exec_command": f"{_bridge_python()} {repo_root / 'examples' / 'gateway_strands' / 'strands_bridge.py'}",
+                "bridge_source": str(repo_root / "examples" / "gateway_strands" / "strands_bridge.py"),
                 "workdir": str(repo_root),
             },
             "signals": runtime_signals["exec"],
