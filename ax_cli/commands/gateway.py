@@ -1264,6 +1264,25 @@ def _resolve_system_prompt_input(
     return current
 
 
+def _normalize_connector_ref(connector_ref: str) -> str:
+    """Resolve and validate a connector registry reference (name or id)."""
+    from ..connectors import ConnectorNotFoundError, find_connector
+
+    ref = str(connector_ref or "").strip()
+    if not ref:
+        raise ValueError(
+            "Template LangGraph + Composio requires --connector-ref <name>. "
+            "Register a connector first: ax gateway connectors add <name> --provider composio --managed-auth"
+        )
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError as exc:
+        raise ValueError(f"Connector not found: {ref!r}. Run: ax gateway connectors list") from exc
+    if not row.enabled:
+        raise ValueError(f"Connector {row.name!r} is disabled. Run: ax gateway connectors enable {row.name}")
+    return row.name
+
+
 def _register_managed_agent(
     *,
     name: str,
@@ -1280,6 +1299,7 @@ def _register_managed_agent(
     timeout_seconds: int | None = None,
     allow_all_users: bool = False,
     allowed_users: str | None = None,
+    connector_ref: str | None = None,
     start: bool = True,
 ) -> dict:
     name = name.strip()
@@ -1311,6 +1331,14 @@ def _register_managed_agent(
     if template_effective_id in {"hermes", "sentinel_cli", "claude_code_channel"} and not explicit_workdir:
         raise ValueError(
             f"Template {template['label']} requires --workdir so Gateway can bind the agent to its runtime folder."
+        )
+    normalized_connector_ref: str | None = None
+    if connector_ref and str(connector_ref).strip():
+        normalized_connector_ref = _normalize_connector_ref(connector_ref)
+    elif template_effective_id == "langgraph_composio":
+        raise ValueError(
+            "Template LangGraph + Composio requires --connector-ref <name>. "
+            "Register a connector first: ax gateway connectors add <name> --provider composio --managed-auth"
         )
     _validate_runtime_registration(runtime_type, exec_cmd)
     timeout_effective = _normalize_timeout_seconds(timeout_seconds)
@@ -1403,6 +1431,8 @@ def _register_managed_agent(
         entry_payload["allow_all_users"] = True
     if allowed_users and str(allowed_users).strip():
         entry_payload["allowed_users"] = str(allowed_users).strip()
+    if normalized_connector_ref:
+        entry_payload["connector_ref"] = normalized_connector_ref
     if requires_approval:
         entry_payload["install_id"] = str(uuid.uuid4())
     entry = upsert_agent_entry(registry, entry_payload)
@@ -1685,6 +1715,7 @@ def _update_managed_agent(
     timeout_seconds: int | object = _UNSET,
     allow_all_users: bool | object = _UNSET,
     allowed_users: str | object = _UNSET,
+    connector_ref: str | object = _UNSET,
     desired_state: str | None = None,
 ) -> dict:
     name = name.strip()
@@ -1742,6 +1773,19 @@ def _update_managed_agent(
         raise ValueError("--ollama-model is only supported with the Ollama template.")
     if template_effective_id == "ollama" and ollama_model is _UNSET and not ollama_model_effective:
         ollama_model_effective = str(ollama_setup_status().get("recommended_model") or "").strip() or None
+
+    if connector_ref is not _UNSET:
+        connector_clean = str(connector_ref or "").strip()
+        if connector_clean:
+            entry["connector_ref"] = _normalize_connector_ref(connector_clean)
+        else:
+            entry.pop("connector_ref", None)
+
+    if template_effective_id == "langgraph_composio" and not str(entry.get("connector_ref") or "").strip():
+        raise ValueError(
+            "Template LangGraph + Composio requires --connector-ref <name>. "
+            "Register a connector first: ax gateway connectors add <name> --provider composio --managed-auth"
+        )
 
     _validate_runtime_registration(runtime_effective, exec_effective)
 
@@ -8311,7 +8355,12 @@ def local_inbox(
 def add_agent(
     name: str = typer.Argument(..., help="Managed agent name"),
     template_id: str = typer.Option(
-        None, "--template", help="Agent template: echo_test | ollama | hermes | sentinel_cli | claude_code_channel"
+        None,
+        "--template",
+        help=(
+            "Agent template: echo_test | ollama | hermes | langgraph | langgraph_composio | "
+            "sentinel_cli | claude_code_channel | …"
+        ),
     ),
     runtime_type: str = typer.Option(
         None,
@@ -8359,6 +8408,11 @@ def add_agent(
         "--allowed-users",
         help="Hermes plugin runtime only: comma-separated agent/user names allowed to mention this agent.",
     ),
+    connector_ref: str = typer.Option(
+        None,
+        "--connector-ref",
+        help="Outbound connector name (required for langgraph_composio; sets AX_GATEWAY_CONNECTOR_REF).",
+    ),
     start: bool = typer.Option(True, "--start/--no-start", help="Desired running state after registration"),
     as_json: bool = JSON_OPTION,
 ):
@@ -8403,6 +8457,7 @@ def add_agent(
             timeout_seconds=timeout_seconds,
             allow_all_users=allow_all_users,
             allowed_users=allowed_users,
+            connector_ref=connector_ref,
             start=start,
         )
     except (ValueError, LookupError) as exc:
@@ -8415,6 +8470,8 @@ def add_agent(
         err_console.print(f"[green]Managed agent ready:[/green] @{name}")
         if entry.get("template_label"):
             err_console.print(f"  type = {entry['template_label']}")
+        if entry.get("connector_ref"):
+            err_console.print(f"  connector_ref = {entry['connector_ref']}")
         if entry.get("asset_type_label"):
             err_console.print(f"  asset = {entry['asset_type_label']}")
         err_console.print(f"  desired_state = {entry['desired_state']}")
@@ -8467,6 +8524,11 @@ def update_agent(
             "Pass an empty string to clear."
         ),
     ),
+    connector_ref: str = typer.Option(
+        None,
+        "--connector-ref",
+        help="Outbound connector name for langgraph_composio (clears when passed as empty).",
+    ),
     desired_state: str = typer.Option(None, "--desired-state", help="running | stopped"),
     as_json: bool = JSON_OPTION,
 ):
@@ -8496,6 +8558,7 @@ def update_agent(
             timeout_seconds=timeout_seconds if timeout_seconds is not None else _UNSET,
             allow_all_users=allow_all_users if allow_all_users is not None else _UNSET,
             allowed_users=allowed_users if allowed_users is not None else _UNSET,
+            connector_ref=connector_ref if connector_ref is not None else _UNSET,
             desired_state=desired_state,
         )
     except (LookupError, ValueError) as exc:
@@ -8507,6 +8570,8 @@ def update_agent(
         return
     err_console.print(f"[green]Managed agent updated:[/green] @{name}")
     err_console.print(f"  type = {entry.get('template_label') or entry.get('runtime_type')}")
+    if entry.get("connector_ref"):
+        err_console.print(f"  connector_ref = {entry['connector_ref']}")
     err_console.print(f"  desired_state = {entry.get('desired_state')}")
     if entry.get("timeout_seconds"):
         err_console.print(f"  timeout = {entry.get('timeout_seconds')}s")

@@ -9,6 +9,13 @@ from .activity import (
     record_connector_tool_failed,
     record_connector_tool_started,
 )
+from .api import (
+    ConnectorToolCallResult,
+    ConnectorToolMatch,
+    ConnectorToolSearchResult,
+    execute_connector_tool,
+    search_connector_tools,
+)
 from .auth import auth_status, cleanup_auth, read_auth, write_auth
 from .errors import (
     ConnectorAuthError,
@@ -35,6 +42,9 @@ from .types import ConnectorRow
 from .validation import validate_new_connector
 
 __all__ = [
+    "ConnectorToolCallResult",
+    "ConnectorToolMatch",
+    "ConnectorToolSearchResult",
     "ConnectorAuthError",
     "ConnectorAuthHTTPError",
     "ConnectorNotFoundError",
@@ -52,6 +62,7 @@ __all__ = [
     "cleanup_auth",
     "connectors_dir",
     "connectors_registry_path",
+    "execute_connector_tool",
     "execute_tool",
     "filter_tools",
     "find_connector",
@@ -68,6 +79,7 @@ __all__ = [
     "record_connector_tool_started",
     "remove_connector",
     "save_connectors_registry",
+    "search_connector_tools",
     "search_tools",
     "update_connector",
     "validate_new_connector",

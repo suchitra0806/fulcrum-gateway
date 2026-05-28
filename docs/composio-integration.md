@@ -8,6 +8,18 @@ Outbound connectors let managed agents invoke third-party tools (GitHub, Jira, S
 - A running Gateway (`ax gateway up`)
 - A [Composio](https://composio.dev) API key
 
+## LangGraph agent template
+
+For a Gateway-managed demo agent that searches (and optionally executes) Composio tools
+per mention:
+
+```bash
+ax gateway agents add lgc-demo --template langgraph_composio --connector-ref composio-main --no-start
+ax gateway agents start lgc-demo
+```
+
+See `examples/gateway_langgraph_composio/README.md` for `RUN:<TOOL_SLUG>` execution syntax.
+
 ## Quick start
 
 ```bash
