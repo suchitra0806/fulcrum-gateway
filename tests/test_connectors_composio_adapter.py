@@ -15,6 +15,7 @@ from ax_cli.connectors.providers.composio_adapter import (
     _base_url,
     execute_tool,
     search_tools,
+    toolkit_from_slug,
 )
 
 
@@ -45,6 +46,37 @@ def _mock_response(status_code: int = 200, json_data: dict | None = None) -> htt
         text="",
         request=httpx.Request("GET", "https://example.com"),
     )
+
+
+# ── Toolkit slug derivation ─────────────────────────────────────────────────
+
+
+class TestToolkitFromSlug:
+    """toolkit_from_slug recovers the toolkit (app namespace) from a tool
+    slug so callers that only have the slug (Hermes _connector_call, #128)
+    can still pass it through to allowed_toolkits / denied_toolkits policy
+    enforcement at execute time."""
+
+    def test_uppercase_namespace_slug(self):
+        assert toolkit_from_slug("GITHUB_LIST_PULL_REQUESTS") == "github"
+
+    def test_single_underscore(self):
+        assert toolkit_from_slug("SLACK_SEND") == "slack"
+
+    def test_already_lowercase(self):
+        assert toolkit_from_slug("github_list_prs") == "github"
+
+    def test_no_underscore_returns_none(self):
+        # Don't invent a toolkit from a single token — that would silently
+        # coerce a namespace-less tool through a whitelist that didn't
+        # name it.
+        assert toolkit_from_slug("STANDALONE") is None
+
+    def test_empty_returns_none(self):
+        assert toolkit_from_slug("") is None
+
+    def test_leading_underscore_returns_none(self):
+        assert toolkit_from_slug("_FOO_BAR") is None
 
 
 # ── Config helpers ────────────────────────────────────────────────────────────
