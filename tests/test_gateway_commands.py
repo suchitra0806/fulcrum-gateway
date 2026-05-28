@@ -7171,9 +7171,7 @@ def test_save_registry_preserves_other_writer_row_deletion(monkeypatch, tmp_path
 
     final = gateway_core.load_gateway_registry()
     names = {a["name"] for a in final["agents"]}
-    assert names == {"incumbent"}, (
-        "to-remove was resurrected by daemon save — registry remove race regressed (#42)"
-    )
+    assert names == {"incumbent"}, "to-remove was resurrected by daemon save — registry remove race regressed (#42)"
     # Daemon's effective_state update on the incumbent should still apply.
     incumbent = next(a for a in final["agents"] if a["name"] == "incumbent")
     assert incumbent["effective_state"] == "running"
@@ -9041,14 +9039,16 @@ def test_gateway_local_connect_404_uses_actionable_guidance(monkeypatch):
     assert "@wishy" in msg
     assert "Live Listener" in msg
     assert "ax gateway local connect wishy --workdir /repo" in msg
+
+
 # ── _hermes_sentinel_sdk_runtime ────────────────────────────────────────────
 #
 # The Hermes sentinel launcher historically hardcoded `--runtime hermes_sdk`,
 # which meant operators could never route a managed Hermes agent through
-# alternate SDK runtimes (openai_sdk, groq_sdk, gemini_sdk) that the
-# vendored sentinel itself supports. The helper below resolves the choice
-# from per-agent registry entry fields and falls back to the historical
-# default so existing setups are unchanged.
+# alternate SDK runtimes (openai_sdk, groq_sdk, gemini_sdk, leapfrog_sdk,
+# mistral_sdk, xai_sdk) that the vendored sentinel itself supports. The
+# helper below resolves the choice from per-agent registry entry fields and
+# falls back to the historical default so existing setups are unchanged.
 
 
 def test_hermes_sentinel_sdk_runtime_defaults_to_hermes_sdk_when_unset():
@@ -9076,6 +9076,22 @@ def test_hermes_sentinel_sdk_runtime_reads_sdk_runtime_fallback():
     """Tertiary knob — terse alias."""
     entry = {"name": "ada", "sdk_runtime": "openai_sdk"}
     assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "openai_sdk"
+
+
+def test_hermes_sentinel_sdk_runtime_accepts_mistral_sdk():
+    """mistral_sdk (PR #30) is a registered runtime and must be selectable
+    via the sentinel switch. Regression guard for the allowlist gap where
+    the runtime merged without an entry in _HERMES_SENTINEL_SDK_RUNTIMES,
+    so operators silently got hermes_sdk instead."""
+    entry = {"name": "ada", "sentinel_sdk_runtime": "mistral_sdk"}
+    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "mistral_sdk"
+
+
+def test_hermes_sentinel_sdk_runtime_accepts_xai_sdk():
+    """xai_sdk (PR #71) is a registered runtime and must be selectable via
+    the sentinel switch. Same allowlist-gap regression guard as mistral_sdk."""
+    entry = {"name": "ada", "sentinel_sdk_runtime": "xai_sdk"}
+    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "xai_sdk"
 
 
 def test_hermes_sentinel_sdk_runtime_rejects_unknown_values():

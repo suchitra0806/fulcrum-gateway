@@ -4282,6 +4282,8 @@ _HERMES_SENTINEL_SDK_RUNTIMES = {
     "groq_sdk",
     "gemini_sdk",
     "leapfrog_sdk",
+    "mistral_sdk",
+    "xai_sdk",
 }
 
 
