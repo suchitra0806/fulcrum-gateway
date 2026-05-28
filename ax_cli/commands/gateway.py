@@ -10815,13 +10815,32 @@ def connectors_tools_list(
     if limit and limit > 0:
         items = items[:limit]
 
+    matched = result.get("matched", len(items))
+    clipped = bool(result.get("clipped"))
+    policy_limit = result.get("limit")
+
     if as_json:
-        print_json({"connector": row.name, "provider": row.provider, "tools": items, "count": len(items)})
+        print_json(
+            {
+                "connector": row.name,
+                "provider": row.provider,
+                "tools": items,
+                "count": len(items),
+                "matched": matched,
+                "limit": policy_limit,
+                "clipped": clipped,
+            }
+        )
         return
     if not items:
         err_console.print(f"No tools found for connector {row.name!r}.")
         return
     err_console.print(f"[bold]{row.name}[/bold] ({row.provider}) — {len(items)} tools:")
+    if clipped:
+        err_console.print(
+            f"[yellow]Note:[/yellow] {matched} tools matched policy but only {policy_limit} are shown "
+            f"(tools_limit={policy_limit}). Narrow with allowed_tools/allowed_toolkits or raise tools_limit."
+        )
     print_table(
         ["Name", "Display Name", "Description"],
         [
