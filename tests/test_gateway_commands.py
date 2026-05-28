@@ -987,6 +987,18 @@ def test_gateway_start_rolls_back_daemon_when_ui_start_fails(monkeypatch, tmp_pa
     assert cleared == [None]
 
 
+def test_gateway_agents_add_template_help_lists_full_catalog():
+    result = runner.invoke(app, ["gateway", "agents", "add", "--help"])
+    assert result.exit_code == 0, result.output
+    text = _strip_ansi(result.output)
+    expected_ids = [t["id"] for t in gateway_runtime_types.agent_template_list()]
+    # Sanity: catalog should include templates beyond the original static five
+    # so this test actually exercises drift coverage.
+    assert {"langgraph", "autogen"}.issubset(set(expected_ids))
+    for template_id in expected_ids:
+        assert template_id in text, f"--template help missing '{template_id}': {text}"
+
+
 def test_gateway_agents_add_mints_token_and_writes_registry(monkeypatch, tmp_path):
     config_dir = tmp_path / "config"
     monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
