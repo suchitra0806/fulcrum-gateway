@@ -192,6 +192,15 @@ def _warn_if_gateway_session_stale() -> None:
     in-process reason for user.toml to be newer than session.json other
     than the user re-logging-in / rotating the user PAT.
 
+    The session and the user login resolve through *different* environment
+    scoping (see #80): `session_path()` scopes via `gateway_environment()`
+    (`AX_GATEWAY_ENV`, ignores the active-env marker), while `_user_config_path()`
+    scopes via `_resolve_user_env()` (consults `AX_USER_ENV`/`AX_ENV` and the
+    active marker). When those disagree the two paths point at *different*
+    environments' files, so an mtime comparison would pair the session against
+    an unrelated `user.toml` and false-positive. In that case we can't make a
+    trustworthy comparison, so skip silently rather than cry wolf.
+
     Fails closed silently — never raises, never blocks the command — so a
     `stat()` error, missing user.toml (different env), or an unexpected
     filesystem edge case can't break gateway commands themselves.
@@ -201,6 +210,12 @@ def _warn_if_gateway_session_stale() -> None:
 
         session_p = gateway_core.session_path()
         user_p = _user_config_path()
+        # Only compare when both stores resolve to the same environment. The
+        # user.toml the gateway env *would* use must match the one the user-env
+        # scoping picked; otherwise the two paths are unrelated (see #80).
+        gateway_user_p = _user_config_path(gateway_core.gateway_environment() or "default")
+        if gateway_user_p != user_p:
+            return
         if not session_p.exists() or not user_p.exists():
             return
         if session_p.stat().st_mtime < user_p.stat().st_mtime:

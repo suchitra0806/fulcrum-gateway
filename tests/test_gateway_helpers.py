@@ -3100,6 +3100,32 @@ class TestGatewaySessionStalenessWarning:
         stderr = capsys.readouterr().err
         assert "older than your user login" not in stderr
 
+    def test_no_warning_when_user_env_and_gateway_env_diverge(self, monkeypatch, tmp_path, capsys):
+        # Regression for #80: the gateway session resolves through
+        # gateway_environment() (AX_GATEWAY_ENV; ignores the active marker),
+        # while user.toml resolves through _resolve_user_env() (consults the
+        # active marker). When those disagree the mtime comparison would pair
+        # the default-env session against a *different* env's user.toml and
+        # false-positive. The two stores point at different environments here,
+        # so the check must skip silently rather than cry wolf.
+        from ax_cli.config import _set_active_user_env, _user_config_path
+
+        monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+        # Default-env gateway session, minted earlier from the default user.toml.
+        self._make_session(mtime=1_000_000.0)
+        # Operator later ran `axctl login --env staging`: fresh, newer staging
+        # user.toml + active marker flipped to staging. No AX_*_ENV env vars,
+        # so the gateway session stays default-scoped.
+        _set_active_user_env("staging")
+        staging_p = _user_config_path("staging")
+        staging_p.parent.mkdir(parents=True, exist_ok=True)
+        staging_p.write_text('token = "axp_u_staging.token"\nbase_url = "https://paxai.app"\n')
+        os.utime(staging_p, (2_000_000.0, 2_000_000.0))
+
+        gw_cmd._load_gateway_user_client()
+        stderr = capsys.readouterr().err
+        assert "older than your user login" not in stderr
+
 
 class TestLocalOriginSignature:
     def test_excludes_agent_name(self):
