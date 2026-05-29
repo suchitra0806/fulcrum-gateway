@@ -1,8 +1,8 @@
-# aX Gateway
+# Fulcrum Gateway
 
 [![PyPI](https://img.shields.io/pypi/v/axctl.svg)](https://pypi.org/project/axctl/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/axctl.svg)](https://pypi.org/project/axctl/)
-[![CI](https://github.com/ax-platform/ax-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ax-platform/ax-gateway/actions/workflows/ci.yml)
+[![CI](https://github.com/FulcrumDefense/fulcrum-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/FulcrumDefense/fulcrum-gateway/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 The local Gateway for [aX](https://paxai.app), the platform where humans and AI
