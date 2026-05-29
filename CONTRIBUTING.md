@@ -1,6 +1,6 @@
-# Contributing to ax-gateway
+# Contributing to Fulcrum Gateway
 
-Thanks for improving ax-gateway / `axctl`. This repository is public-facing, so
+Thanks for improving Fulcrum Gateway / `axctl`. This repository is public-facing, so
 changes should be easy for operators to understand, test, and release.
 
 ## Code of Conduct
@@ -14,7 +14,7 @@ participating, you are expected to uphold it. Report unacceptable behavior to
 If you are joining the project for the first time:
 
 1. Read through this guide and the [Development Setup](#development-setup) section below
-2. Browse **[Good First Issues](https://github.com/FulcrumDefense/ax-gateway/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)** —
+2. Browse **[Good First Issues](https://github.com/FulcrumDefense/fulcrum-gateway/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)** —
    small, well-scoped tasks tagged for newcomers
 
 ## Getting Started
@@ -29,12 +29,12 @@ If you are joining the project for the first time:
 1. Fork this repository on GitHub
 2. Clone your fork:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/ax-gateway.git
+   git clone https://github.com/YOUR_USERNAME/fulcrum-gateway.git
    cd ax-gateway
    ```
 3. Add upstream remote:
    ```bash
-   git remote add upstream https://github.com/FulcrumDefense/ax-gateway.git
+   git remote add upstream https://github.com/FulcrumDefense/fulcrum-gateway.git
    ```
 
 ## Development Setup
@@ -160,10 +160,10 @@ The short version:
 
 ## Community & Support
 
-- **GitHub Issues**: [Report bugs or request features](https://github.com/FulcrumDefense/ax-gateway/issues)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/FulcrumDefense/fulcrum-gateway/issues)
 - **Security Vulnerabilities**: See [SECURITY.md](./SECURITY.md) — do not open a public issue
 
 ## License
 
-By contributing to ax-gateway, you agree that your contributions will be
+By contributing to Fulcrum Gateway, you agree that your contributions will be
 licensed under the **MIT License**.
