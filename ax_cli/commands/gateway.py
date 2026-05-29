@@ -41,7 +41,7 @@ from ..commands.bootstrap import (
     _mint_agent_pat,
     _polish_metadata,
 )
-from ..config import resolve_space_id, resolve_user_base_url, resolve_user_token
+from ..config import resolve_space_id, resolve_user_token
 from ..gateway import (
     AX_PLUGIN_NAME,
     GatewayDaemon,
@@ -6628,6 +6628,26 @@ def _render_agent_detail(entry: dict, *, activity: list[dict]) -> Group:
     return Group(*panels)
 
 
+def _resolve_gateway_login_base_url(explicit: str | None) -> str:
+    """Resolve the base URL for `ax gateway login`.
+
+    Explicit `--url` wins. Otherwise prefer the user's existing axctl
+    session (`AX_USER_BASE_URL` env or the `base_url` field from the
+    axctl user config). Fall back to the documented default
+    `https://paxai.app` rather than the local-dev `http://localhost:8001`
+    that the broader `resolve_user_base_url()` would surface, matching
+    the `--url` help text. Closes #129.
+    """
+    if explicit:
+        return explicit
+    from ..config import _load_user_config
+
+    user_cfg = _load_user_config()
+    env_url = os.environ.get("AX_USER_BASE_URL", "").strip()
+    cfg_url = str(user_cfg.get("base_url") or "").strip()
+    return env_url or cfg_url or auth_cmd.DEFAULT_LOGIN_BASE_URL
+
+
 @app.command("login")
 def login(
     token: str = typer.Option(
@@ -6648,7 +6668,7 @@ def login(
     if not resolved_token.startswith("axp_u_"):
         err_console.print("[red]Gateway bootstrap requires a user PAT (axp_u_).[/red]")
         raise typer.Exit(1)
-    resolved_base_url = base_url or resolve_user_base_url() or auth_cmd.DEFAULT_LOGIN_BASE_URL
+    resolved_base_url = _resolve_gateway_login_base_url(base_url)
 
     err_console.print(f"[cyan]Verifying Gateway login against {resolved_base_url}...[/cyan]")
     from ..token_cache import TokenExchanger

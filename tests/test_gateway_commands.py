@@ -814,6 +814,66 @@ def test_gateway_cli_argv_prefers_current_ax_script(monkeypatch, tmp_path):
     assert argv == [str(current_ax.resolve()), "gateway", "run"]
 
 
+# ── _resolve_gateway_login_base_url (#129) ─────────────────────────────────
+#
+# `ax gateway login` was falling back to http://localhost:8001 when no
+# axctl login existed, because resolve_user_base_url() falls through to
+# resolve_base_url() (the local-dev default) which returned a truthy
+# string and shortcircuited the `or DEFAULT_LOGIN_BASE_URL` chain. The
+# --url help text promised paxai.app as the default. These tests pin the
+# resolution order so the bug stays closed and the helper does not drift
+# back into the broader resolve_user_base_url() behavior.
+
+
+def test_resolve_gateway_login_base_url_explicit_wins(monkeypatch):
+    """Explicit --url arg must win over env, user config, and the default."""
+    monkeypatch.setenv("AX_USER_BASE_URL", "https://env.example")
+    monkeypatch.setattr(gateway_cmd, "_load_user_config", lambda: {"base_url": "https://cfg.example"}, raising=False)
+    assert gateway_cmd._resolve_gateway_login_base_url("https://explicit.example") == "https://explicit.example"
+
+
+def test_resolve_gateway_login_base_url_env_wins_when_no_explicit(monkeypatch):
+    """AX_USER_BASE_URL env wins over the user config and the default."""
+    monkeypatch.setenv("AX_USER_BASE_URL", "https://env.example")
+
+    def _fake_load() -> dict:
+        return {"base_url": "https://cfg.example"}
+
+    from ax_cli import config as _config
+
+    monkeypatch.setattr(_config, "_load_user_config", _fake_load)
+    assert gateway_cmd._resolve_gateway_login_base_url(None) == "https://env.example"
+
+
+def test_resolve_gateway_login_base_url_user_cfg_wins_when_no_env(monkeypatch):
+    """User-config base_url is used when no env override is set."""
+    monkeypatch.delenv("AX_USER_BASE_URL", raising=False)
+
+    def _fake_load() -> dict:
+        return {"base_url": "https://cfg.example"}
+
+    from ax_cli import config as _config
+
+    monkeypatch.setattr(_config, "_load_user_config", _fake_load)
+    assert gateway_cmd._resolve_gateway_login_base_url(None) == "https://cfg.example"
+
+
+def test_resolve_gateway_login_base_url_falls_to_paxai_when_unconfigured(monkeypatch):
+    """The actual bug from issue #129: with no explicit arg, no env, and
+    no axctl login, the gateway login command must default to paxai.app
+    matching the --url help text, not the local-dev localhost:8001 that
+    the broader resolve_user_base_url() would surface."""
+    monkeypatch.delenv("AX_USER_BASE_URL", raising=False)
+
+    from ax_cli import config as _config
+
+    monkeypatch.setattr(_config, "_load_user_config", lambda: {})
+    resolved = gateway_cmd._resolve_gateway_login_base_url(None)
+    assert resolved == "https://paxai.app"
+    assert "localhost" not in resolved
+    assert "127.0.0.1" not in resolved
+
+
 def test_gateway_start_without_login_starts_ui_only(monkeypatch, tmp_path):
     config_dir = tmp_path / "config"
     monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
