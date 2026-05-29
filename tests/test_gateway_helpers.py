@@ -3101,6 +3101,81 @@ class TestGatewaySessionStalenessWarning:
         assert "older than your user login" not in stderr
 
 
+class TestAgentTokenFilePortability:
+    """#89: token_file is stored relative to gateway_dir() and resolved at read
+    time, so a registry minted on one host opens in another (container, machine
+    B, /Users→/home migration)."""
+
+    def test_relpath_shape(self):
+        assert gw.agent_token_relpath("nova") == "agents/nova/token"
+
+    def test_resolve_relative_against_gateway_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AX_GATEWAY_DIR", str(tmp_path / "gw"))
+        resolved = gw.resolve_agent_token_file({"name": "nova", "token_file": "agents/nova/token"})
+        assert resolved == (tmp_path / "gw" / "agents" / "nova" / "token")
+        assert resolved.is_absolute()
+
+    def test_resolve_absolute_passes_through(self, monkeypatch, tmp_path):
+        # Legacy absolute paths are honored as-is for backward compatibility.
+        monkeypatch.setenv("AX_GATEWAY_DIR", str(tmp_path / "gw"))
+        abs_path = "/Users/claude/ax-agents/nova/gateway-state/agents/nova/token"
+        resolved = gw.resolve_agent_token_file({"name": "nova", "token_file": abs_path})
+        assert str(resolved) == abs_path
+
+    def test_resolve_empty_passthrough(self):
+        # Empty value preserves the prior Path("") behaviour (callers guard).
+        assert gw.resolve_agent_token_file({"name": "nova", "token_file": ""}) == Path("")
+
+    def test_migrate_rewrites_canonical_absolute_to_relative(self):
+        registry = {
+            "agents": [
+                {"name": "nova", "token_file": "/Users/claude/gw-state/agents/nova/token"},
+            ]
+        }
+        assert gw.migrate_registry_token_files(registry) == 1
+        assert registry["agents"][0]["token_file"] == "agents/nova/token"
+
+    def test_migrate_is_idempotent(self):
+        registry = {"agents": [{"name": "nova", "token_file": "agents/nova/token"}]}
+        assert gw.migrate_registry_token_files(registry) == 0
+        assert registry["agents"][0]["token_file"] == "agents/nova/token"
+
+    def test_migrate_leaves_non_canonical_paths_alone(self):
+        # A path that isn't the agents/<name>/token shape is operator-meaningful
+        # or unrelated — don't touch it.
+        registry = {"agents": [{"name": "nova", "token_file": "/etc/custom/nova.token"}]}
+        assert gw.migrate_registry_token_files(registry) == 0
+        assert registry["agents"][0]["token_file"] == "/etc/custom/nova.token"
+
+    def test_migrate_name_must_match_parent_dir(self):
+        # Guard against rewriting a token whose parent dir doesn't match the
+        # entry name (would point the relative path at the wrong agent).
+        registry = {"agents": [{"name": "nova", "token_file": "/x/agents/other/token"}]}
+        assert gw.migrate_registry_token_files(registry) == 0
+
+    def test_load_registry_heals_frozen_absolute_path(self, monkeypatch, tmp_path):
+        # End-to-end: a registry minted on a "Mac host" opens in a "container"
+        # with a different gateway_dir, and load_gateway_registry rewrites the
+        # frozen absolute path to the portable relative form (the #89 repro).
+        monkeypatch.setenv("AX_GATEWAY_DIR", str(tmp_path / "container-gw"))
+        gw.save_gateway_registry(
+            {
+                "agents": [
+                    {
+                        "name": "nova",
+                        "agent_id": "agent-1",
+                        "token_file": "/Users/claude/ax-agents/nova/gateway-state/agents/nova/token",
+                    }
+                ]
+            }
+        )
+        registry = gw.load_gateway_registry()
+        row = next(a for a in registry["agents"] if a["name"] == "nova")
+        assert row["token_file"] == "agents/nova/token"
+        # And it now resolves under the container's gateway_dir.
+        assert gw.resolve_agent_token_file(row) == (tmp_path / "container-gw" / "agents" / "nova" / "token")
+
+
 class TestLocalOriginSignature:
     def test_excludes_agent_name(self):
         fp = {"exe_path": "/usr/bin/python3", "cwd": "/home/user", "user": "testuser"}

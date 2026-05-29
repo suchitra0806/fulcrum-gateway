@@ -57,6 +57,7 @@ from ..gateway import (
     activity_log_path,
     agent_dir,
     agent_token_path,
+    agent_token_relpath,
     annotate_runtime_health,
     apply_entry_current_space,
     approve_gateway_approval,
@@ -88,6 +89,7 @@ from ..gateway import (
     ollama_setup_status,
     record_gateway_activity,
     remove_agent_entry,
+    resolve_agent_token_file,
     save_agent_pending_messages,
     save_gateway_registry,
     save_gateway_session,
@@ -1412,7 +1414,9 @@ def _register_managed_agent(
         "workdir": workdir,
         "ollama_model": normalized_ollama_model,
         "timeout_seconds": timeout_effective,
-        "token_file": str(token_file),
+        # Stored relative to gateway_dir() so the registry stays portable across
+        # hosts/containers; resolved via resolve_agent_token_file() at read (#89).
+        "token_file": agent_token_relpath(name),
         "desired_state": "running" if start else "stopped",
         "effective_state": "stopped",
         "transport": "gateway",
@@ -2183,8 +2187,10 @@ def _read_recovery_evidence(name: str) -> dict | None:
         return None
     if not isinstance(target_event, dict):
         return None
-    token_file = str(target_event.get("token_file") or "").strip()
-    if not token_file or not Path(token_file).is_file():
+    # The token always lives at the canonical <gateway_dir>/agents/<name>/token,
+    # so verify *that* location rather than the absolute path frozen into the
+    # activity event, which may have been captured under a different host (#89).
+    if not agent_token_path(name).is_file():
         return None
     return target_event
 
@@ -2232,7 +2238,9 @@ def _recover_managed_agents_from_evidence(names: list[str]) -> dict:
             "runtime_type": str(evidence.get("runtime_type") or "").strip(),
             "transport": str(evidence.get("transport") or "gateway").strip(),
             "credential_source": str(evidence.get("credential_source") or "gateway").strip(),
-            "token_file": str(evidence.get("token_file") or "").strip(),
+            # Reconstruct the portable relative form, not the (possibly foreign)
+            # absolute path recorded in the activity event (#89).
+            "token_file": agent_token_relpath(name),
             "space_id": str(evidence.get("space_id") or "").strip(),
             "added_at": str(evidence.get("ts") or "").strip(),
             "lifecycle_phase": "active",
@@ -2381,8 +2389,7 @@ def _remove_managed_agent(name: str, *, client_factory=None) -> dict:
         raise LookupError(f"Managed agent not found: {name}")
     save_gateway_registry(registry)
     archive_stale_gateway_approvals()
-    token_file_value = str(entry.get("token_file") or "").strip()
-    token_file = Path(token_file_value) if token_file_value else None
+    token_file = resolve_agent_token_file(entry) if str(entry.get("token_file") or "").strip() else None
     if token_file and token_file.is_file():
         token_file.unlink()
     record_gateway_activity("managed_agent_removed", entry=entry)
@@ -3599,7 +3606,7 @@ def _run_gateway_doctor(name: str, *, send_test: bool = False) -> dict:
     elif attestation_state == "verified":
         add_check("binding_attestation", "passed", "Runtime matches the approved local binding.")
 
-    token_file = Path(str(entry.get("token_file") or "")).expanduser()
+    token_file = resolve_agent_token_file(entry)
     if token_file.exists() and token_file.read_text().strip():
         add_check("agent_token", "passed", "Managed agent token file is present.")
     else:

@@ -964,7 +964,11 @@ def test_gateway_agents_add_mints_token_and_writes_registry(monkeypatch, tmp_pat
     assert registry["bindings"][0]["asset_id"] == "agent-1"
     assert registry["bindings"][0]["approved_state"] == "approved"
     assert registry["agents"][0]["install_id"] == registry["bindings"][0]["install_id"]
-    token_file = Path(registry["agents"][0]["token_file"])
+    # token_file is stored relative to gateway_dir() for portability (#89);
+    # resolve it before touching the filesystem.
+    assert registry["agents"][0]["token_file"] == "agents/echo-bot/token"
+    token_file = gateway_core.resolve_agent_token_file(registry["agents"][0])
+    assert token_file.is_absolute()
     assert token_file.exists()
     assert token_file.read_text().strip() == "axp_a_agent.secret"
     recent = gateway_core.load_recent_gateway_activity()
@@ -6713,7 +6717,10 @@ def test_recover_managed_agents_from_evidence_restores_lost_row(monkeypatch, tmp
     assert row["runtime_type"] == "claude_code_channel"
     assert row["template_id"] == "claude_code_channel"
     assert row["space_id"] == "49afd277-78d2-4a32-9858-3594cda684af"
-    assert row["token_file"] == str(token_dir / "token")
+    # Recovery reconstructs the portable relative token_file, resolving to the
+    # real on-disk token under gateway_dir() (#89).
+    assert row["token_file"] == "agents/ghost-agent/token"
+    assert gateway_core.resolve_agent_token_file(row) == token_dir / "token"
     assert row["lifecycle_phase"] == "active"
     assert row["desired_state"] == "stopped"  # safe default — operator restarts deliberately
     assert row["drift_reason"] == "registry_row_recovered_from_evidence"

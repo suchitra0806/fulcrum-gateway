@@ -3054,9 +3054,72 @@ def agent_token_path(name: str) -> Path:
     return agent_dir(name) / "token"
 
 
+def agent_token_relpath(name: str) -> str:
+    """Canonical registry-stored ``token_file``: relative to ``gateway_dir()``.
+
+    The managed token always lives at ``<gateway_dir>/agents/<name>/token`` (see
+    ``_save_agent_token``), so the portable registry value is just the relative
+    tail — it resolves correctly no matter which host or container opens the
+    registry (#89).
+    """
+    return f"agents/{name}/token"
+
+
+def resolve_agent_token_file(entry: dict[str, Any]) -> Path:
+    """Resolve a registry entry's ``token_file`` to an absolute path.
+
+    ``token_file`` is stored relative to ``gateway_dir()`` so registries stay
+    portable across hosts/containers (#89). Absolute values (legacy entries
+    written before the migration, or any future out-of-tree path) are honored
+    as-is for backward compatibility. Empty values pass through unchanged so
+    callers keep their existing emptiness guards.
+    """
+    raw = str(entry.get("token_file") or "")
+    p = Path(raw).expanduser()
+    if raw and not p.is_absolute():
+        return gateway_dir() / p
+    return p
+
+
+def migrate_registry_token_files(registry: dict[str, Any]) -> int:
+    """Rewrite managed-agent ``token_file`` paths to the portable relative form.
+
+    ``ax gateway agents add`` historically froze ``token_file`` as an absolute
+    path (``<gateway_dir>/agents/<name>/token``) into ``registry.json``, so a
+    registry minted on one host couldn't open in another even when the token
+    file was reachable (#89). Detect entries whose ``token_file`` is the
+    canonical managed token — basename ``token`` directly under
+    ``agents/<name>/`` — and rewrite to ``agents/<name>/token``, resolved against
+    ``gateway_dir()`` at read time.
+
+    Matches on the path *shape* rather than "is under the current gateway_dir"
+    on purpose: the whole point is to heal a path captured under a *different*
+    host's gateway_dir (e.g. ``/Users/.../agents/nova/token`` opened inside a
+    Linux container). Idempotent. Returns the count rewritten.
+    """
+    migrated = 0
+    for entry in registry.get("agents", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        raw = str(entry.get("token_file") or "").strip()
+        if not raw:
+            continue
+        canonical = agent_token_relpath(name)
+        if raw == canonical:
+            continue  # already portable
+        p = Path(raw)
+        if p.name == "token" and p.parent.name == name and p.parent.parent.name == "agents":
+            entry["token_file"] = canonical
+            migrated += 1
+    return migrated
+
+
 def load_gateway_managed_agent_token(entry: dict[str, Any]) -> str:
     """Read a Gateway-managed runtime token and reject bootstrap credentials."""
-    token_file = Path(str(entry.get("token_file") or "")).expanduser()
+    token_file = resolve_agent_token_file(entry)
     if not token_file.exists():
         raise ValueError(f"Gateway-managed token file is missing: {token_file}")
     token = token_file.read_text().strip()
@@ -3279,6 +3342,10 @@ def load_gateway_registry() -> dict[str, Any]:
     gateway.pop("space_id", None)
     gateway.pop("space_name", None)
     reconcile_corrupt_space_ids(registry)
+    # Heal absolute token_file paths frozen in by an older `agents add` into the
+    # portable `agents/<name>/token` relative form (#89). In-memory only, like
+    # the space-id reconcile above — the next save_gateway_registry persists it.
+    migrate_registry_token_files(registry)
     # Stamp a load-time snapshot so save_gateway_registry can distinguish:
     #   - "caller removed this row" vs "another writer added this row"
     #     (row existence diff)
@@ -3939,12 +4006,13 @@ def sanitize_exec_env(prompt: str, entry: dict[str, Any]) -> dict[str, str]:
     env["AX_AGENT_NAME"] = agent_name
     env["AX_GATEWAY_RUNTIME_TYPE"] = str(entry.get("runtime_type") or "")
     env["AX_MENTION_CONTENT"] = prompt
-    token_file = str(entry.get("token_file") or "").strip()
-    if token_file:
+    if str(entry.get("token_file") or "").strip():
         # Validate the bound credential without placing the secret in the child
         # process environment. Bridges read AX_TOKEN_FILE when they need to call aX.
         load_gateway_managed_agent_token(entry)
-        env["AX_TOKEN_FILE"] = token_file
+        # Inject the resolved absolute path — the child resolves AX_TOKEN_FILE
+        # against its own cwd, so the stored relative form would break (#89).
+        env["AX_TOKEN_FILE"] = str(resolve_agent_token_file(entry))
     base_url = str(entry.get("base_url") or "").strip()
     if base_url:
         env["AX_BASE_URL"] = base_url
@@ -4896,7 +4964,7 @@ class ManagedAgentRuntime:
 
     @property
     def token_file(self) -> Path:
-        return Path(str(self.entry.get("token_file") or "")).expanduser()
+        return resolve_agent_token_file(self.entry)
 
     def _log(self, message: str) -> None:
         self.logger(f"{self.name}: {message}")

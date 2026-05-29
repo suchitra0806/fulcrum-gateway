@@ -28,6 +28,15 @@ stores a separate registry, session, PID file, UI state, queues, and agent token
 files. `AX_GATEWAY_DIR=/path/to/gateway-state` is available when a deployment
 needs an explicit state root.
 
+Managed-agent token paths are stored in `registry.json` **relative to the
+gateway state dir** (`agents/<name>/token`) and resolved against it at read
+time, so a registry stays portable across hosts and containers — bind-mount the
+state dir at a different absolute path (e.g. a macOS host's `~/ax-agents/...`
+mounted into a Linux devcontainer) and the same registry opens without
+re-minting. Registries written by older builds carried an absolute path frozen
+at mint time; those are healed automatically on load (see
+[Corruption repair](#corruption-repair)).
+
 ## Current Gateway State
 
 Gateway has enough plumbing to register agents, mint managed agent tokens, show
@@ -329,6 +338,14 @@ inconsistencies in `registry.json` (e.g., missing fields, invalid state
 values), it resets the affected entry to a safe default state and logs a
 warning. This is a best-effort recovery — if the registry file itself is
 unparseable, see the [recovery scenario](scenarios/recover-corrupted-registry.md).
+
+Registry load also runs a one-shot path migration: any managed-agent
+`token_file` frozen as an absolute `…/agents/<name>/token` path (from an older
+`agents add`) is rewritten in place to the portable relative form
+`agents/<name>/token`. The migration is idempotent and matches on the canonical
+token shape, so it heals a path captured under a *different* host's state dir
+without touching operator-supplied paths. The rewrite is applied in memory on
+load and persisted on the next registry save.
 
 ---
 
