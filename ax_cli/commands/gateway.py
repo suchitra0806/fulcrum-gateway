@@ -10839,7 +10839,8 @@ def connectors_tools_list(
     if clipped:
         err_console.print(
             f"[yellow]Note:[/yellow] {matched} tools matched policy but only {policy_limit} are shown "
-            f"(tools_limit={policy_limit}). Narrow with allowed_tools/allowed_toolkits or raise tools_limit."
+            f"(tools_limit={policy_limit}). Narrow with allowed_tools/allowed_toolkits, raise tools_limit, "
+            f"or run `tools search` with a use case to find specific tools."
         )
     print_table(
         ["Name", "Display Name", "Description"],

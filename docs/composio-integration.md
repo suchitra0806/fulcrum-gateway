@@ -101,18 +101,23 @@ ax gateway connectors set composio-main tools_limit 100
 - Deny always takes precedence over allow
 - Policy patterns use Python `fnmatch` syntax; malformed patterns (for example unbalanced `[`) are rejected at config write time
 - Policy is enforced at both discovery (`tools list`/`tools search`) and execution (`call`)
-- `tools_limit` (default 50, max 200) caps how many policy-matched tools are
-  returned by `tools list`. Tools are sorted by name before the cap, so the clip
-  is deterministic. The result reports `matched` (post-policy, pre-limit) and
-  `clipped` so you can tell when more tools matched than were shown — `tools list`
-  prints a note in that case. Raise `tools_limit` or narrow
-  `allowed_tools`/`allowed_toolkits` to surface the rest.
+- `tools_limit` (default 50, max `MAX_TOOLS_LIMIT` — defined in
+  `ax_cli/connectors/constants.py`, currently 200) caps how many policy-matched
+  tools are returned by `tools list`. Tools are sorted by name before the cap, so
+  the clip is deterministic. The result reports `matched` (post-policy, pre-limit)
+  and `clipped` so you can tell when more tools matched than were shown —
+  `tools list` prints a note in that case. To surface the rest, raise
+  `tools_limit`, narrow `allowed_tools`/`allowed_toolkits`, or run `tools search`
+  with a use case. Note the clip is *alphabetical by tool name*, not by relevance:
+  if specific high-value tools must stay in view, name them with `allowed_tools`
+  patterns rather than relying on the limit to surface them.
 
 > **Pagination gap:** catalog discovery pages a single empty search capped at
-> `MAX_TOOLS_LIMIT` (200). Providers exposing more than 200 tools (large Composio
-> catalogs) are silently truncated at the source — `total` reflects that one page,
-> not the provider's full inventory. Use `tools search` with a use case to reach
-> tools beyond the first page until cursor-based pagination lands.
+> `MAX_TOOLS_LIMIT` (see `ax_cli/connectors/constants.py`, currently 200).
+> Providers exposing more than that (large Composio catalogs) are silently
+> truncated at the source — `total` reflects that one page, not the provider's
+> full inventory. Use `tools search` with a use case to reach tools beyond the
+> first page until cursor-based pagination lands (#140).
 
 ## Auth management
 
