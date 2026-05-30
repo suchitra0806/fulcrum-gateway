@@ -578,6 +578,17 @@ def diagnose_auth_config(*, env_name: str | None = None, explicit_space_id: str 
     selected_user_env = normalized_env or _resolve_user_env()
     user_cfg = _load_user_config(selected_user_env)
     user_path = _user_config_path(selected_user_env)
+    if user_cfg.get("token") and (os.environ.get("AX_TOKEN") or "").strip():
+        warnings.append(
+            {
+                "code": "user_pat_in_file_and_env",
+                "path": str(user_path),
+                "reason": (
+                    "two sources of truth for user PAT — AX_TOKEN wins; "
+                    f"consider deleting the file copy with: rm {user_path}"
+                ),
+            }
+        )
     explicit_cfg_env = os.environ.get("AX_CONFIG_FILE")
     explicit_cfg_path = Path(explicit_cfg_env).expanduser() if explicit_cfg_env else None
     explicit_cfg = _load_runtime_config_file(explicit_cfg_env)
