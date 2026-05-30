@@ -30,6 +30,7 @@ Start here and follow in order:
 | [Investigate a 429 storm](scenarios/investigate-429-storm.md) | Rate limiting |
 | [Recover corrupted registry](scenarios/recover-corrupted-registry.md) | State files |
 | [Rotate an agent PAT](scenarios/rotate-agent-pat.md) | Credential lifecycle |
+| [Store user PAT in an encrypted secret store](scenarios/encrypted-pat-at-rest.md) | User PAT at rest with dotenvx, sops, or pass |
 
 ## Architecture Decision Records
 
