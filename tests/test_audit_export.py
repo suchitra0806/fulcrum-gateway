@@ -55,6 +55,19 @@ def test_redact_masks_exact_secret_keys():
     assert out["agent_name"] == "demo-bot"
 
 
+def test_redact_masks_token_file_locator():
+    # token_file is a credential-locator path emitted by managed_agent_added /
+    # asset_bound; leaking it forwards the on-disk bearer-token location.
+    record = {
+        "event": "managed_agent_added",
+        "agent_name": "echo-demo",
+        "token_file": "/home/dev/.ax/gateway/agents/echo-demo/token",
+    }
+    out = redact_record(record)
+    assert out["token_file"] == "<redacted>"
+    assert out["agent_name"] == "echo-demo"
+
+
 def test_redact_matches_secret_key_suffixes():
     record = {
         "managed_agent_token": "axp_a_secret",

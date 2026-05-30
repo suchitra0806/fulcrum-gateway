@@ -30,6 +30,8 @@ from typing import Any
 _REDACTED = "<redacted>"
 
 # Exact key names (case-insensitive) that always carry secret material.
+# ``token_file`` is a credential-locator path — masked so SIEM forwards
+# don't leak the on-disk bearer-token location.
 _SECRET_KEYS_EXACT: frozenset[str] = frozenset(
     {
         "token",
@@ -44,6 +46,7 @@ _SECRET_KEYS_EXACT: frozenset[str] = frozenset(
         "authorization",
         "x-api-key",
         "x-gateway-session",
+        "token_file",
     }
 )
 
