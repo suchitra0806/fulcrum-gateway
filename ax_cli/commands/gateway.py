@@ -8897,6 +8897,13 @@ def inbox_for_agent(
 @agents_app.command("start")
 def start_agent(name: str = typer.Argument(..., help="Managed agent name")):
     """Set a managed agent's desired state to running."""
+    if active_gateway_pid() is None:
+        err_console.print(
+            f"[red]Gateway daemon is stopped — `agents start {name}` would only "
+            "set desired_state, no supervisor would bring the agent up.[/red]"
+        )
+        err_console.print("[yellow]Start it with `ax gateway start`, then retry.[/yellow]")
+        raise typer.Exit(1)
     try:
         _set_managed_agent_desired_state(name, "running")
     except LookupError:

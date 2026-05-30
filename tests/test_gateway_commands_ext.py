@@ -1141,12 +1141,14 @@ class TestAgentsInboxCommand:
 
 class TestAgentsStartStopCommand:
     def test_start(self, monkeypatch):
+        monkeypatch.setattr(gw_cmd, "active_gateway_pid", lambda: 12345)
         monkeypatch.setattr(gw_cmd, "_set_managed_agent_desired_state", lambda name, state: {"ok": True})
         result = runner.invoke(app, ["gateway", "agents", "start", "bot1"])
         assert result.exit_code == 0
         assert "running" in _strip(result.output).lower()
 
     def test_start_not_found(self, monkeypatch):
+        monkeypatch.setattr(gw_cmd, "active_gateway_pid", lambda: 12345)
         monkeypatch.setattr(
             gw_cmd,
             "_set_managed_agent_desired_state",
