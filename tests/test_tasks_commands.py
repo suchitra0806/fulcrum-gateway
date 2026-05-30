@@ -669,7 +669,11 @@ def test_tasks_update_json_unwraps_task_wrapper(monkeypatch):
     result = runner.invoke(app, ["tasks", "update", "task-42", "--status", "done", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert set(payload.keys()) == {"id", "title", "status"}
+    # Assert the wrapper is gone (no "task" key) and the unwrapped fields are
+    # present, without pinning the exact keyset — the API may add fields like
+    # updated_at without breaking the unwrap behavior under test.
+    assert "task" not in payload
+    assert {"id", "title", "status"}.issubset(payload.keys())
     assert payload["id"] == "task-42"
     assert payload["status"] == "done"
 
