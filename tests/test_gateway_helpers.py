@@ -845,9 +845,7 @@ class TestDeriveConfidence:
     def test_sse_disconnected_returns_low(self):
         from ax_cli.gateway import _derive_confidence
 
-        level, reason, detail = _derive_confidence(
-            {}, mode="LIVE", liveness="stale", reachability="sse_disconnected"
-        )
+        level, reason, detail = _derive_confidence({}, mode="LIVE", liveness="stale", reachability="sse_disconnected")
         assert level == "LOW"
         assert reason == "sse_disconnected"
         assert "SSE subscription is down" in detail
@@ -855,9 +853,7 @@ class TestDeriveConfidence:
     def test_attach_required_still_returns_low(self):
         from ax_cli.gateway import _derive_confidence
 
-        level, reason, detail = _derive_confidence(
-            {}, mode="LIVE", liveness="stale", reachability="attach_required"
-        )
+        level, reason, detail = _derive_confidence({}, mode="LIVE", liveness="stale", reachability="attach_required")
         assert level == "LOW"
         assert reason == "attach_required"
 
@@ -3152,6 +3148,17 @@ class TestAgentTokenFilePortability:
         # entry name (would point the relative path at the wrong agent).
         registry = {"agents": [{"name": "nova", "token_file": "/x/agents/other/token"}]}
         assert gw.migrate_registry_token_files(registry) == 0
+
+    def test_migrate_rewrites_canonical_shape_even_outside_gateway_dir(self):
+        # Deliberate: the match is purely structural. A path whose tail is
+        # agents/<name>/token is rewritten even when the original absolute path
+        # lived outside any gateway state dir (e.g. /var/secrets/...). This is
+        # exactly what heals a foreign host's path, so it is pinned here to stop
+        # a future maintainer "tightening" the migration to a current-gateway_dir
+        # scope check — which would silently break the #89 cross-host heal.
+        registry = {"agents": [{"name": "nova", "token_file": "/var/secrets/agents/nova/token"}]}
+        assert gw.migrate_registry_token_files(registry) == 1
+        assert registry["agents"][0]["token_file"] == "agents/nova/token"
 
     def test_load_registry_heals_frozen_absolute_path(self, monkeypatch, tmp_path):
         # End-to-end: a registry minted on a "Mac host" opens in a "container"

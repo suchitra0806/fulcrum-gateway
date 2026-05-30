@@ -343,9 +343,20 @@ Registry load also runs a one-shot path migration: any managed-agent
 `token_file` frozen as an absolute `…/agents/<name>/token` path (from an older
 `agents add`) is rewritten in place to the portable relative form
 `agents/<name>/token`. The migration is idempotent and matches on the canonical
-token shape, so it heals a path captured under a *different* host's state dir
-without touching operator-supplied paths. The rewrite is applied in memory on
-load and persisted on the next registry save.
+token shape, so it heals a path captured under a *different* host's state dir.
+The rewrite is applied in memory on load and persisted on the next registry
+save.
+
+> **Custom token paths:** the match is purely structural — *any* `token_file`
+> whose tail is `agents/<name>/token` (where `<name>` is the entry's name) is
+> rewritten to the relative form and resolved under the current `gateway_dir()`,
+> even if the original absolute path pointed outside the gateway state dir. This
+> is deliberate: it is what heals a Mac-minted `/Users/.../agents/nova/token`
+> opened inside a Linux container. Gateway only ever writes managed tokens to
+> `<gateway_dir>/agents/<name>/token` (ADR-005), so the only way to hit this with
+> a path you do *not* want relocated is to hand-edit `registry.json`. If you
+> deliberately point a managed agent at a custom token location, avoid the
+> `agents/<name>/token` tail shape so the migration leaves it alone.
 
 ---
 

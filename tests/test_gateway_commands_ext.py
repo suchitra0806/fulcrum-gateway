@@ -1079,6 +1079,80 @@ class TestChannelSseDoctorCheck:
         assert check_names.get("claude_code_session", {}).get("status") == "passed"
 
 
+class TestTokenFileResolutionInRemoveAndDoctor:
+    """#89 / #147: the `agents remove` and `agents doctor` flows resolve
+    `token_file` through `resolve_agent_token_file`, so they work for both the
+    new relative form and legacy absolute paths. The relative-form doctor case
+    also pins the regression sarob flagged on PR #108 (resolving the relative
+    path against CWD instead of gateway_dir reported a false agent_token
+    failure)."""
+
+    def _entry(self, name, token_file):
+        return {
+            "name": name,
+            "agent_id": f"agent-{name}",
+            "space_id": "space-1",
+            "base_url": "https://paxai.app",
+            "runtime_type": "hermes",
+            "template_id": "hermes",
+            "desired_state": "running",
+            "effective_state": "running",
+            "last_seen_at": gateway_core._now_iso(),
+            "token_file": token_file,
+            "transport": "gateway",
+            "credential_source": "gateway",
+        }
+
+    def _save(self, entry):
+        gateway_core.save_gateway_session(
+            {"token": "axp_u_test.token", "base_url": "https://paxai.app", "space_id": "space-1", "username": "u"}
+        )
+        registry = gateway_core.load_gateway_registry()
+        registry["agents"] = [entry]
+        gateway_core.save_gateway_registry(registry)
+
+    def test_doctor_agent_token_passes_for_relative_token_file(self):
+        # The relative form resolves under gateway_dir(), not CWD (PR #108 bug).
+        token_path = gateway_core.agent_token_path("nova")
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text("axp_a_agent.secret")
+        self._save(self._entry("nova", "agents/nova/token"))
+
+        result = gw_cmd._run_gateway_doctor("nova")
+        checks = {c["name"]: c for c in result["checks"]}
+        assert checks["agent_token"]["status"] == "passed"
+
+    def test_doctor_agent_token_passes_for_legacy_absolute_token_file(self, tmp_path):
+        # A legacy absolute path (non-canonical shape, so the load-time
+        # migration leaves it) is honored as-is by the resolver.
+        legacy = tmp_path / "legacy_tokens" / "nova.token"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text("axp_a_agent.secret")
+        self._save(self._entry("nova", str(legacy)))
+
+        result = gw_cmd._run_gateway_doctor("nova")
+        checks = {c["name"]: c for c in result["checks"]}
+        assert checks["agent_token"]["status"] == "passed"
+
+    def test_remove_unlinks_relative_token_file(self):
+        token_path = gateway_core.agent_token_path("nova")
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text("axp_a_agent.secret")
+        self._save(self._entry("nova", "agents/nova/token"))
+
+        gw_cmd._remove_managed_agent("nova", client_factory=lambda: None)
+        assert not token_path.exists()
+
+    def test_remove_unlinks_legacy_absolute_token_file(self, tmp_path):
+        legacy = tmp_path / "legacy_tokens" / "nova.token"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text("axp_a_agent.secret")
+        self._save(self._entry("nova", str(legacy)))
+
+        gw_cmd._remove_managed_agent("nova", client_factory=lambda: None)
+        assert not legacy.exists()
+
+
 # ── CLI: gateway agents send ─────────────────────────────────────────
 
 
