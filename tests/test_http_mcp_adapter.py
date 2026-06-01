@@ -8,7 +8,12 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from ax_cli.connectors.errors import ConnectorProviderError
+from ax_cli.connectors.errors import (
+    ConnectorAuthHTTPError,
+    ConnectorProviderError,
+    ConnectorRateLimitError,
+    ConnectorTransientError,
+)
 from ax_cli.connectors.providers.http_mcp_adapter import execute_tool, list_tools
 
 
@@ -174,3 +179,42 @@ class TestExecuteTool:
             execute_tool("tool", {}, auth, config, "test-mcp")
             headers = mock_post.call_args.kwargs["headers"]
             assert headers["X-API-Key"] == "raw-key"
+
+
+# ── error classification ─────────────────────────────────────────────────────
+#
+# The adapter routes HTTP error responses through ``classify_provider_error``
+# so callers (retry middleware, auth refresh, etc.) can dispatch on typed
+# subclasses instead of re-parsing ``status_code``. Brings the http_mcp
+# adapter to parity with composio (#127).
+
+
+class TestErrorClassification:
+    @pytest.mark.parametrize("status", [401, 403])
+    def test_auth_status_raises_auth_subclass(self, status: int, auth_env: dict, config: dict):
+        with patch("httpx.post", return_value=_mock_response(status)):
+            with pytest.raises(ConnectorAuthHTTPError) as exc_info:
+                list_tools(auth_env, config, "test-mcp")
+            assert exc_info.value.status_code == status
+
+    def test_rate_limit_status_raises_rate_limit_subclass(self, auth_env: dict, config: dict):
+        with patch("httpx.post", return_value=_mock_response(429)):
+            with pytest.raises(ConnectorRateLimitError) as exc_info:
+                execute_tool("tool", {}, auth_env, config, "test-mcp")
+            assert exc_info.value.status_code == 429
+
+    @pytest.mark.parametrize("status", [500, 502, 503, 504])
+    def test_5xx_status_raises_transient_subclass(self, status: int, auth_env: dict, config: dict):
+        with patch("httpx.post", return_value=_mock_response(status)):
+            with pytest.raises(ConnectorTransientError) as exc_info:
+                list_tools(auth_env, config, "test-mcp")
+            assert exc_info.value.status_code == status
+
+    def test_unclassified_status_falls_back_to_base(self, auth_env: dict, config: dict):
+        # 404 isn't auth / rate-limit / transient — should land on the base
+        # class so the existing catch-all branches still trigger.
+        with patch("httpx.post", return_value=_mock_response(404)):
+            with pytest.raises(ConnectorProviderError) as exc_info:
+                execute_tool("nope", {}, auth_env, config, "test-mcp")
+            assert type(exc_info.value) is ConnectorProviderError
+            assert exc_info.value.status_code == 404

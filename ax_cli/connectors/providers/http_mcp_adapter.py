@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 
 from ..constants import CONNECT_TIMEOUT, READ_TIMEOUT
-from ..errors import ConnectorProviderError
+from ..errors import ConnectorProviderError, classify_provider_error
 
 log = logging.getLogger("connectors.http_mcp")
 
@@ -68,7 +68,7 @@ def _post(url: str, body: dict[str, Any], headers: dict[str, str], context: str)
         except Exception:
             body_data = {}
         detail = str(body_data.get("error", {}).get("message", "") or resp.text[:200])
-        raise ConnectorProviderError(
+        raise classify_provider_error(
             "http_mcp",
             f"{context}: {detail}",
             status_code=resp.status_code,
