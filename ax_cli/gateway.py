@@ -5581,19 +5581,17 @@ class ManagedAgentRuntime:
         try:
             hermes_bin_path = _hermes_bin(self.entry)
         except RuntimeError as exc:
-            self._record_supervised_setup_error(str(exc))
+            self._record_setup_error(str(exc))
             return
         try:
             load_gateway_managed_agent_token(self.entry)
         except ValueError as exc:
-            self._record_supervised_setup_error(str(exc))
+            self._record_setup_error(str(exc))
             return
         try:
             home = _scaffold_hermes_plugin_home(self.entry)
         except OSError as exc:
-            self._record_supervised_setup_error(
-                f"Failed to scaffold HERMES_HOME ({_hermes_plugin_home(self.entry)}): {exc}"
-            )
+            self._record_setup_error(f"Failed to scaffold HERMES_HOME ({_hermes_plugin_home(self.entry)}): {exc}")
             return
 
         workdir = _hermes_plugin_workdir(self.entry)
@@ -5633,10 +5631,11 @@ class ManagedAgentRuntime:
             )
             self._sentinel_stdout_thread.start()
         except Exception as exc:
-            self._record_supervised_setup_error(f"Failed to start Hermes plugin: {str(exc)[:360]}")
+            self._record_setup_error(f"Failed to start Hermes plugin: {str(exc)[:360]}")
             return
 
         self._supervised_process = process
+        self._clear_setup_error_state()
         self._update_state(
             effective_state="running",
             current_status=None,
@@ -5694,18 +5693,6 @@ class ManagedAgentRuntime:
                 error=error,
             )
             return
-
-    def _record_supervised_setup_error(self, error: str) -> None:
-        """Shared error path for supervised-subprocess runtimes."""
-        self._update_state(
-            effective_state="error",
-            current_status="error",
-            current_activity=error,
-            last_error=error,
-            last_runtime_error_at=_now_iso(),
-        )
-        self.entry["last_runtime_error_at"] = self._state.get("last_runtime_error_at")
-        record_gateway_activity("runtime_error", entry=self.entry, error=error)
 
     def _publish_processing_status(
         self,
