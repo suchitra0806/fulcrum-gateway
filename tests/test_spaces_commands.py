@@ -417,6 +417,35 @@ def test_spaces_use_text_output(monkeypatch):
     assert "my-space" in result.output
 
 
+def test_spaces_use_gateway_sync_failure_logs_debug_and_is_silent(monkeypatch, caplog):
+    # issue #160: a Gateway sync failure must stay fail-soft for operators (the
+    # CLI-config write still succeeds, gateway_session is null) but leave a
+    # debug-level trace so a swallowed programming error stays visible.
+    import logging
+
+    class FakeClient:
+        def list_spaces(self):
+            return {"spaces": [{"id": "s1", "slug": "my-space"}]}
+
+        def whoami(self):
+            return {"bound_agent": {"agent_name": "bot", "allowed_spaces": [{"space_id": "s1"}]}}
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr("ax_cli.commands.spaces.get_client", lambda: FakeClient())
+    monkeypatch.setattr("ax_cli.commands.spaces.save_space_id", lambda sid, **kw: None)
+    monkeypatch.setattr("ax_cli.commands.spaces.resolve_space_id", lambda c, explicit=None: "s1")
+    monkeypatch.setattr("ax_cli.gateway.apply_space_to_gateway_session", _boom)
+
+    with caplog.at_level(logging.DEBUG, logger="ax.spaces"):
+        result = runner.invoke(app, ["spaces", "use", "my-space", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["gateway_session"] is None
+    assert any("gateway session sync failed" in r.message for r in caplog.records)
+
+
 def test_spaces_use_text_warns_unattached(monkeypatch):
     class FakeClient:
         def list_spaces(self):
