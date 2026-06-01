@@ -207,7 +207,7 @@ def run_connector_round(
                 preview = preview[:237] + "..."
             lines.append(f"    data = {preview}")
     else:
-        lines.append("  Tip: append RUN:<TOOL_SLUG> {\"key\": \"value\"} to execute a matched tool.")
+        lines.append('  Tip: append RUN:<TOOL_SLUG> {"key": "value"} to execute a matched tool.')
 
     return "\n".join(lines)
 
@@ -247,6 +247,15 @@ def main() -> int:
 
     connector_ref = _connector_ref()
     if not connector_ref:
+        emit_event(
+            {
+                "kind": "status",
+                "status": "error",
+                "error_message": (
+                    "AX_GATEWAY_CONNECTOR_REF not set. Set via `ax gateway agents add --connector-ref <name>`."
+                ),
+            }
+        )
         print(
             "LangGraph+Composio bridge requires AX_GATEWAY_CONNECTOR_REF "
             "(set via `ax gateway agents add --connector-ref <name>`).",

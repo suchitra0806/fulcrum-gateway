@@ -182,8 +182,19 @@ def test_bridge_main_requires_connector_ref(monkeypatch, capsys) -> None:
     monkeypatch.setattr(sys, "argv", ["langgraph_composio_bridge.py", "hello"])
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     rc = bridge.main()
+    out = capsys.readouterr()
     assert rc == 1
-    assert "AX_GATEWAY_CONNECTOR_REF" in capsys.readouterr().err
+    assert "AX_GATEWAY_CONNECTOR_REF" in out.err
+    # Gateway must see a status:error event before exit, not just stderr.
+    assert "AX_GATEWAY_EVENT" in out.out
+    event_lines = [
+        line[len("AX_GATEWAY_EVENT ") :] for line in out.out.splitlines() if line.startswith("AX_GATEWAY_EVENT ")
+    ]
+    assert event_lines, "bridge exited without emitting any AX_GATEWAY_EVENT"
+    payload = json.loads(event_lines[-1])
+    assert payload["kind"] == "status"
+    assert payload["status"] == "error"
+    assert "AX_GATEWAY_CONNECTOR_REF" in payload["error_message"]
 
 
 def test_bridge_main_emits_lifecycle_with_mocked_round(monkeypatch, capsys) -> None:
