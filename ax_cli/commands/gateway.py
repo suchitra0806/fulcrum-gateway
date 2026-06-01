@@ -227,6 +227,10 @@ def _warn_if_gateway_session_stale() -> None:
         return
 
 
+def _divergence_marker_path() -> Path:
+    return gateway_dir() / "divergence_warned"
+
+
 def _warn_if_gateway_space_divergent() -> None:
     """Warn when the Gateway session's space differs from the CLI's space.
 
@@ -237,6 +241,13 @@ def _warn_if_gateway_space_divergent() -> None:
     surfacing as a cryptic 400 from /api/v1/keys ("Agent IDs not found in this
     space").
 
+    Warn once per distinct divergence state, not on every command (issue #159):
+    operators who intentionally keep a project-local CLI space differing from the
+    single global Gateway session would otherwise see this on every gateway
+    command. We record the warned `session|cli` pair in a marker file and stay
+    quiet until that pair changes; re-alignment clears the marker so a later
+    divergence warns again. The early signal is preserved; the repetition is not.
+
     Reads only local config — `_load_config()` merges TOML files with no network
     call. Best-effort and fails closed silently: never raises, never blocks.
     """
@@ -245,11 +256,30 @@ def _warn_if_gateway_space_divergent() -> None:
 
         session_space = str(load_gateway_session().get("space_id") or "").strip()
         cli_space = str(_load_config().get("space_id") or "").strip()
-        if session_space and cli_space and session_space != cli_space:
-            err_console.print(
-                f"[yellow]Warning:[/yellow] Gateway space ({session_space}) differs from your "
-                f"CLI space ({cli_space}) — run `ax spaces use <space>` to sync both."
-            )
+        marker = _divergence_marker_path()
+
+        if not (session_space and cli_space and session_space != cli_space):
+            # Aligned (or not enough info to judge): drop any prior marker so a
+            # future divergence is surfaced again.
+            marker.unlink(missing_ok=True)
+            return
+
+        state_key = f"{session_space}|{cli_space}"
+        try:
+            already_warned = marker.read_text(encoding="utf-8").strip() == state_key
+        except OSError:
+            already_warned = False
+        if already_warned:
+            return
+
+        err_console.print(
+            f"[yellow]Warning:[/yellow] Gateway space ({session_space}) differs from your "
+            f"CLI space ({cli_space}) — run `ax spaces use <space>` to sync both."
+        )
+        try:
+            marker.write_text(state_key, encoding="utf-8")
+        except OSError:
+            pass
     except Exception:
         return
 
