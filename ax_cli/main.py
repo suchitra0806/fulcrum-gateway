@@ -62,6 +62,7 @@ from .commands import (  # noqa: E402
     upload,
     watch,
 )
+from .output import handle_error  # noqa: E402  — error-path helper, deferred like the imports above
 
 
 def _version_callback(value: bool) -> None:
@@ -185,3 +186,23 @@ def main():
     except httpx.ConnectError:
         typer.echo("Error: cannot reach aX API. Is the server running?", err=True)
         sys.exit(1)
+    except gateway.GatewaySessionRejectedError:
+        typer.echo(
+            "Error 401: Gateway session token rejected by `/auth/exchange`. The token in "
+            "~/.ax/gateway/session.json is no longer valid (likely from a rotated PAT). "
+            "Run `ax gateway login` to refresh.",
+            err=True,
+        )
+        sys.exit(1)
+    except httpx.HTTPStatusError as exc:
+        # Any HTTPStatusError a command didn't catch locally lands here. Typer
+        # re-raises uncaught exceptions (see Typer.__call__), so without this
+        # the operator gets a 30+ line Rich traceback instead of an actionable
+        # message (#73). handle_error parses the body and redacts secrets.
+        try:
+            handle_error(exc)
+        except typer.Exit as exit_exc:
+            # handle_error signals exit by raising typer.Exit, which Typer only
+            # turns into a process exit inside an app() call. main() is outside
+            # that boundary, so convert it to an explicit sys.exit here.
+            sys.exit(exit_exc.exit_code)

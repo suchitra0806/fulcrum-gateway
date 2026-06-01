@@ -3049,6 +3049,95 @@ class TestLoadGatewayUserClient:
         assert client is not None
         client.close()
 
+    def test_valid_session_returns_guarded_client(self, monkeypatch, tmp_path):
+        """#73: the loader wraps the exchange boundary so a rejected session PAT
+        surfaces as a typed error instead of a raw traceback."""
+        monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+        gw.save_gateway_session({"token": "axp_u_test.token", "base_url": "https://paxai.app"})
+        client = gw_cmd._load_gateway_user_client()
+        monkeypatch.setattr(
+            client._exchanger,
+            "get_token",
+            lambda *a, **k: (_ for _ in ()).throw(TestGatewayExchangeBoundary._exchange_error(401)),
+        )
+        with pytest.raises(gw_cmd.GatewaySessionRejectedError):
+            client._get_jwt()
+        client.close()
+
+
+class TestGatewayExchangeBoundary:
+    """Regression for #73: a rejected gateway session PAT must surface as
+    GatewaySessionRejectedError at the exchange boundary, not as a raw
+    httpx.HTTPStatusError that escapes every command as a Rich traceback."""
+
+    def _client(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+        client = gw_cmd.AxClient(base_url="https://paxai.app", token="axp_u_test.token")
+        gw_cmd._guard_gateway_exchange(client)
+        return client
+
+    @staticmethod
+    def _exchange_error(status: int, url: str = "https://paxai.app/auth/exchange"):
+        import httpx
+
+        request = httpx.Request("POST", url)
+        response = httpx.Response(status, request=request)
+        return httpx.HTTPStatusError("boom", request=request, response=response)
+
+    def test_exchange_401_becomes_typed_error(self, monkeypatch, tmp_path):
+        client = self._client(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            client._exchanger, "get_token", lambda *a, **k: (_ for _ in ()).throw(self._exchange_error(401))
+        )
+        with pytest.raises(gw_cmd.GatewaySessionRejectedError):
+            client._get_jwt()
+        client.close()
+
+    def test_exchange_403_becomes_typed_error(self, monkeypatch, tmp_path):
+        client = self._client(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            client._exchanger, "get_token", lambda *a, **k: (_ for _ in ()).throw(self._exchange_error(403))
+        )
+        with pytest.raises(gw_cmd.GatewaySessionRejectedError):
+            client._get_jwt()
+        client.close()
+
+    def test_non_exchange_url_passes_through(self, monkeypatch, tmp_path):
+        import httpx
+
+        client = self._client(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            client._exchanger,
+            "get_token",
+            lambda *a, **k: (_ for _ in ()).throw(self._exchange_error(401, url="https://paxai.app/api/v1/agents")),
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            client._get_jwt()
+        client.close()
+
+    def test_non_auth_status_passes_through(self, monkeypatch, tmp_path):
+        import httpx
+
+        client = self._client(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            client._exchanger, "get_token", lambda *a, **k: (_ for _ in ()).throw(self._exchange_error(500))
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            client._get_jwt()
+        client.close()
+
+    def test_guard_no_op_on_double_without_get_jwt(self):
+        """PR body contract: wrapping a client double that has no `_get_jwt`
+        (a test stand-in for AxClient) is a silent no-op, not a crash, and
+        leaves the double untouched."""
+
+        class _Double:
+            pass
+
+        double = _Double()
+        gw_cmd._guard_gateway_exchange(double)  # must not raise
+        assert not hasattr(double, "_get_jwt")
+
 
 class TestGatewaySessionStalenessWarning:
     """Regression for #74: warn when the gateway session predates the user

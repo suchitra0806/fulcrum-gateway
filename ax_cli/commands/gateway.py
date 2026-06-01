@@ -258,6 +258,46 @@ def _warn_if_gateway_space_divergent() -> None:
         return
 
 
+class GatewaySessionRejectedError(RuntimeError):
+    """The gateway session PAT was rejected during token exchange.
+
+    The gateway session token (``~/.ax/gateway/session.json``) is exchanged
+    for a JWT lazily, on the first authenticated upstream call. When that PAT
+    has been rotated or revoked, ``/auth/exchange`` returns 401/403 from deep
+    inside httpx — past every ``_load_gateway_user_client`` caller's local
+    error handling. Surfacing a typed error instead of the raw
+    ``httpx.HTTPStatusError`` lets ``main()`` print an actionable
+    "run ``ax gateway login``" message rather than a Rich traceback (#73).
+    """
+
+
+def _guard_gateway_exchange(client: AxClient) -> None:
+    """Convert an exchange-boundary 401/403 into GatewaySessionRejectedError.
+
+    The gateway session PAT is exchanged for a JWT inside AxClient's single
+    auth boundary (``_get_jwt``). Wrapping that one method catches a rejected
+    session PAT regardless of which command triggered the exchange. Wrapping
+    the constructed instance (rather than subclassing ``AxClient``) keeps the
+    ``AxClient`` construction seam intact for callers that swap it for a
+    double; a double without ``_get_jwt`` is left untouched.
+    """
+    original = getattr(client, "_get_jwt", None)
+    if not callable(original):
+        return
+
+    def guarded(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            url = str(exc.request.url) if exc.request is not None else ""
+            if response is not None and response.status_code in (401, 403) and "/auth/exchange" in url:
+                raise GatewaySessionRejectedError() from exc
+            raise
+
+    client._get_jwt = guarded
+
+
 def _load_gateway_user_client() -> AxClient:
     session = load_gateway_session()
     if not session:
@@ -272,7 +312,9 @@ def _load_gateway_user_client() -> AxClient:
         raise typer.Exit(1)
     _warn_if_gateway_session_stale()
     _warn_if_gateway_space_divergent()
-    return AxClient(base_url=str(session.get("base_url") or auth_cmd.DEFAULT_LOGIN_BASE_URL), token=token)
+    client = AxClient(base_url=str(session.get("base_url") or auth_cmd.DEFAULT_LOGIN_BASE_URL), token=token)
+    _guard_gateway_exchange(client)
+    return client
 
 
 def _load_gateway_session_or_exit() -> dict:
