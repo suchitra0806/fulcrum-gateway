@@ -9,6 +9,7 @@ with a real ~/.ax directory.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -3243,6 +3244,20 @@ class TestGatewaySpaceDivergenceWarning:
         self._set_cli_space(monkeypatch, "space-b")
         gw_cmd._warn_if_gateway_space_divergent()
         assert "differs from your CLI space" in capsys.readouterr().err
+
+    def test_divergence_check_failure_logs_debug_and_stays_silent(self, monkeypatch, tmp_path, capsys, caplog):
+        # issue #160: the fail-soft handler must swallow errors for operators but
+        # leave a debug-level trace so a swallowed programming error is visible.
+        self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-b")
+
+        def _boom():
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("ax_cli.config._load_config", _boom)
+        with caplog.at_level(logging.DEBUG, logger="ax.gateway"):
+            gw_cmd._warn_if_gateway_space_divergent()  # must not raise
+        assert "differs from your CLI space" not in capsys.readouterr().err
+        assert any("space-divergence check failed" in r.message for r in caplog.records)
 
 
 class TestLocalOriginSignature:

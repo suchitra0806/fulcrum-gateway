@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import logging
 import os
 import secrets
 import shlex
@@ -110,6 +111,8 @@ from ..gateway_runtime_types import (
 )
 from ..mentions import merge_explicit_mentions_metadata
 from ..output import JSON_OPTION, console, err_console, print_json, print_table
+
+log = logging.getLogger("ax.gateway")
 
 app = typer.Typer(name="gateway", help="Run the local Gateway control plane", no_args_is_help=True)
 agents_app = typer.Typer(name="agents", help="Manage Gateway-controlled agents", no_args_is_help=True)
@@ -281,6 +284,10 @@ def _warn_if_gateway_space_divergent() -> None:
         except OSError:
             pass
     except Exception:
+        # Fail-soft: a divergence-check bug must never break the command. Log at
+        # debug so a swallowed programming error (NameError/AttributeError from a
+        # future refactor) is still visible to maintainers under -v (issue #160).
+        log.debug("gateway space-divergence check failed", exc_info=True)
         return
 
 
