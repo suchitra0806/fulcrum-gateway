@@ -4105,22 +4105,34 @@ def _run_exec_handler(
     def _consume_stdout() -> None:
         if process.stdout is None:
             return
-        for raw in process.stdout:
-            event = _parse_gateway_exec_event(raw)
-            if event is not None:
-                if on_event is not None:
-                    try:
-                        on_event(event)
-                    except Exception:
-                        pass
-                continue
-            stdout_lines.append(raw)
+        try:
+            for raw in process.stdout:
+                event = _parse_gateway_exec_event(raw)
+                if event is not None:
+                    if on_event is not None:
+                        try:
+                            on_event(event)
+                        except Exception:
+                            pass
+                    continue
+                stdout_lines.append(raw)
+        except ValueError:
+            # process.stdout was closed by the finally block in the main
+            # thread before this consumer drained the pipe. Bridges that
+            # exit quickly (sub-3s Groq calls) can hit this race, dropping
+            # the final reply line. Caller's join(timeout=1.0) already
+            # gave us a fair window, treat as end-of-stream and return
+            # what we have.
+            pass
 
     def _consume_stderr() -> None:
         if process.stderr is None:
             return
-        for raw in process.stderr:
-            stderr_lines.append(raw)
+        try:
+            for raw in process.stderr:
+                stderr_lines.append(raw)
+        except ValueError:
+            pass
 
     stdout_thread = threading.Thread(target=_consume_stdout, daemon=True, name=f"gw-exec-stdout-{entry.get('name')}")
     stderr_thread = threading.Thread(target=_consume_stderr, daemon=True, name=f"gw-exec-stderr-{entry.get('name')}")
@@ -4135,8 +4147,13 @@ def _run_exec_handler(
         timed_out = True
         process.kill()
     finally:
-        stdout_thread.join(timeout=1.0)
-        stderr_thread.join(timeout=1.0)
+        # Give consumer threads enough time to drain the pipe before
+        # closing. With 1.0s, fast-exiting bridges (sub-3s Groq calls
+        # via langgraph_bridge.py) can lose their final reply line if
+        # the OS hasn't propagated EOF before the close fires. 5.0s is
+        # well below any caller-side timeout we'd hit. See issue #104.
+        stdout_thread.join(timeout=5.0)
+        stderr_thread.join(timeout=5.0)
         if process.stdout is not None:
             process.stdout.close()
         if process.stderr is not None:
