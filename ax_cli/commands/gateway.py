@@ -122,6 +122,9 @@ local_app = typer.Typer(name="local", help="Connect local pass-through agents to
 connectors_app = typer.Typer(name="connectors", help="Manage outbound tool connectors", no_args_is_help=True)
 connectors_auth_app = typer.Typer(name="auth", help="Manage connector credentials", no_args_is_help=True)
 connectors_tools_app = typer.Typer(name="tools", help="Discover and search connector tools", no_args_is_help=True)
+audit_app = typer.Typer(
+    name="audit", help="Export the activity audit log in SIEM-compatible formats", no_args_is_help=True
+)
 _ATTACHED_SESSION_PROCESSES: list[subprocess.Popen[bytes]] = []
 app.add_typer(agents_app, name="agents")
 app.add_typer(spaces_app, name="spaces")
@@ -129,6 +132,7 @@ app.add_typer(approvals_app, name="approvals")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(local_app, name="local")
 app.add_typer(connectors_app, name="connectors")
+app.add_typer(audit_app, name="audit")
 connectors_app.add_typer(connectors_auth_app, name="auth")
 connectors_app.add_typer(connectors_tools_app, name="tools")
 
@@ -9932,3 +9936,167 @@ def connectors_tools_search(
         ],
         keys=["name", "displayName", "description"],
     )
+
+
+# ---------------------------------------------------------------------------
+# audit sub-app — SIEM-compatible export of the activity.jsonl log for
+# ATO / STIG compliance review (issue #62). The actual format writers,
+# redactor, and loader live in ax_cli.audit; this command is a thin CLI
+# wrapper that pipes options through.
+# ---------------------------------------------------------------------------
+
+
+@audit_app.command("export")
+def audit_export(
+    output_format: str = typer.Option(
+        "jsonl",
+        "--format",
+        "-f",
+        help="Output format: jsonl (default, JSON Lines), cef (ArcSight Common Event Format), splunk (Splunk JSON).",
+    ),
+    since: str = typer.Option(
+        None,
+        "--since",
+        help=(
+            "ISO-8601 timestamp (e.g. 2026-05-01T00:00:00+00:00). "
+            "Only export events at or after this time (inclusive boundary)."
+        ),
+    ),
+    until: str = typer.Option(
+        None,
+        "--until",
+        help=(
+            "ISO-8601 timestamp. Only export events at or before this time "
+            "(inclusive boundary — events whose `ts` equals --until are included)."
+        ),
+    ),
+    event: list[str] = typer.Option(
+        None,
+        "--event",
+        help="Filter to specific event type(s). Repeatable (e.g. --event runtime_started --event runtime_stopped).",
+    ),
+    agent: list[str] = typer.Option(
+        None,
+        "--agent",
+        help="Filter to specific agent name(s). Repeatable.",
+    ),
+    redact: bool = typer.Option(
+        True,
+        "--redact/--no-redact",
+        help=(
+            "Mask credential-shaped fields (token, *_secret, *_key, Authorization). "
+            "Default: enabled. Use --no-redact to export raw values — refused when "
+            "writing to a file unless --i-understand-credentials-in-file is also set, "
+            "since the source activity.jsonl is 0o600 but file outputs inherit umask."
+        ),
+    ),
+    redact_message_content: bool = typer.Option(
+        False,
+        "--redact-content",
+        help=(
+            "Additionally mask user-authored message body fields (content, reply_preview). "
+            "Some audits require this; others require the content intact for context."
+        ),
+    ),
+    output: str = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write to file instead of stdout. Use '-' to force stdout. File is created with 0o600 perms.",
+    ),
+    allow_unredacted_file: bool = typer.Option(
+        False,
+        "--i-understand-credentials-in-file",
+        help=(
+            "Explicit acknowledgment required to combine --no-redact with -o/--output, since the "
+            "exported file may contain raw bearer tokens from log payloads."
+        ),
+    ),
+):
+    """Export the activity audit log in a SIEM-compatible format.
+
+    Reads ~/.ax/gateway/activity.jsonl, applies filters, redacts credential-
+    shaped fields by default, and renders the result as JSONL, CEF, or Splunk
+    JSON. File outputs are created with 0o600 perms to match the source log.
+
+    Examples:
+
+      ax gateway audit export --since 2026-05-01
+      ax gateway audit export --format cef --event connector_tool_failed
+      ax gateway audit export --format splunk --agent codex-bot -o /var/log/ax-audit.json
+    """
+    import sys
+    from pathlib import Path
+
+    from ..audit import export_events, load_activity_events
+
+    log_path = activity_log_path()
+
+    # Refuse to write potentially-secret-bearing raw events to a file unless the
+    # operator explicitly acknowledges (Andrew's #62 finding #1). stdout is fine
+    # because it inherits whatever the operator's shell environment provides.
+    is_file_output = bool(output) and output != "-"
+    if is_file_output and not redact and not allow_unredacted_file:
+        err_console.print(
+            "[red]Refusing to write --no-redact output to a file.[/red] "
+            "Add --i-understand-credentials-in-file to acknowledge that the file "
+            "may contain raw bearer tokens, or drop --no-redact."
+        )
+        raise typer.Exit(1)
+
+    stats: dict[str, int] = {}
+    try:
+        records = load_activity_events(
+            log_path,
+            since=since,
+            until=until,
+            events=event,
+            agents=agent,
+            stats=stats,
+        )
+    except (ValueError, OSError) as exc:
+        err_console.print(f"[red]Audit export failed:[/red] {exc}")
+        raise typer.Exit(1)
+
+    try:
+        rendered = export_events(
+            records,
+            output_format=output_format,
+            redact=redact,
+            redact_message_content=redact_message_content,
+        )
+    except ValueError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2)
+
+    if is_file_output:
+        out_path = Path(output)
+        out_path.write_text(rendered, encoding="utf-8")
+        # Match the source activity.jsonl perms (0o600) so the export doesn't
+        # silently widen the credential boundary the source already enforces.
+        try:
+            out_path.chmod(0o600)
+        except OSError:
+            # Best-effort on filesystems that don't honor unix perms (Windows
+            # NTFS via WSL2, some network mounts). The operator will see the
+            # file path and can secure it manually.
+            err_console.print(
+                f"[yellow]Warning:[/yellow] could not chmod {output} to 0o600 — "
+                "secure the file manually if it may contain sensitive event payloads."
+            )
+        err_console.print(f"[green]Wrote {len(records)} record(s) to {output}[/green] (format={output_format.lower()})")
+    else:
+        # Write to stdout directly so pipes (`| splunk hec`, `| grep`) work
+        # without Rich-formatting interference.
+        sys.stdout.write(rendered)
+        sys.stdout.flush()
+        err_console.print(f"[dim]Exported {len(records)} record(s) (format={output_format.lower()})[/dim]")
+    # Surface the skipped-line count so silent gaps in the audit trail are
+    # visible to the operator. An audit export that quietly loses lines can
+    # mask tampering or crashes mid-write.
+    skipped = stats.get("skipped", 0)
+    if skipped:
+        err_console.print(
+            f"[yellow]Note:[/yellow] {skipped} line(s) skipped (malformed JSON, "
+            "non-dict, or missing/unparseable `ts` on time-bounded export)."
+        )
