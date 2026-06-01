@@ -1419,7 +1419,11 @@ def test_list_non_json_output(tmp_path):
                         "id": "rem-l1",
                         "enabled": True,
                         "source_task_id": "t1",
-                        "next_fire_at": "2026-06-01T00:00:00Z",
+                        # Far-future so the policy is deterministically "active"
+                        # regardless of the wall clock (a near date becomes "due"
+                        # once it passes). Matches the 2999 convention used by the
+                        # other active-state fixtures in this file.
+                        "next_fire_at": "2999-01-01T00:00:00Z",
                         "max_fires": 5,
                         "fired_count": 0,
                     },
