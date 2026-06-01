@@ -578,6 +578,23 @@ def diagnose_auth_config(*, env_name: str | None = None, explicit_space_id: str 
     selected_user_env = normalized_env or _resolve_user_env()
     user_cfg = _load_user_config(selected_user_env)
     user_path = _user_config_path(selected_user_env)
+    if user_cfg.get("token") and (
+        (os.environ.get("AX_TOKEN") or "").strip() or (os.environ.get("AX_USER_TOKEN") or "").strip()
+    ):
+        warnings.append(
+            {
+                "code": "user_pat_in_file_and_env",
+                "path": str(user_path),
+                "reason": (
+                    "two sources of truth for user PAT — precedence differs by command path: "
+                    "user-PAT commands (e.g. `ax token mint`, `bootstrap`, `ax gateway login`) "
+                    "read the file first; general runtime commands read the env var first. "
+                    f"To make the env var authoritative everywhere, clear the `token` field in {user_path} "
+                    "— the file also carries `base_url`, `space_id`, and other login defaults that "
+                    "blanket `rm` would lose."
+                ),
+            }
+        )
     explicit_cfg_env = os.environ.get("AX_CONFIG_FILE")
     explicit_cfg_path = Path(explicit_cfg_env).expanduser() if explicit_cfg_env else None
     explicit_cfg = _load_runtime_config_file(explicit_cfg_env)
