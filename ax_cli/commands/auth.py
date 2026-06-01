@@ -21,7 +21,7 @@ from ..config import (
     resolve_token,
     save_token,
 )
-from ..output import EXIT_NOT_OK, JSON_OPTION, apply_envelope, console, handle_error, print_json, print_kv
+from ..output import EXIT_NOT_OK, JSON_OPTION, apply_envelope, console, err_console, handle_error, print_json, print_kv
 
 app = typer.Typer(name="auth", help="Authentication & identity", no_args_is_help=True)
 token_app = typer.Typer(name="token", help="Token management", no_args_is_help=True)
@@ -40,19 +40,20 @@ def _mask_token_prefix(token: str) -> str:
     return f"{token[:6]}{'*' * 8}"
 
 
-def _resolve_login_token(token: str | None) -> str:
+def _resolve_login_token(token: str | None, *, print_only: bool = False) -> str:
     """Return an explicit token or prompt for one without echoing it."""
     if token and token.strip():
         return token.strip()
 
-    console.print("[cyan]Paste your aX user PAT (axp_u_). Input is hidden.[/cyan]")
+    status = err_console if print_only else console
+    status.print("[cyan]Paste your aX user PAT (axp_u_). Input is hidden.[/cyan]")
     entered = typer.prompt("Token", hide_input=True).strip()
     if not entered:
-        console.print(
+        err_console.print(
             "[red]Token required.[/red] Create a user PAT with CLI scope from Settings > Credentials in the UI."
         )
         raise typer.Exit(1)
-    console.print(f"[green]Token captured:[/green] {_mask_token_prefix(entered)}")
+    status.print(f"[green]Token captured:[/green] {_mask_token_prefix(entered)}")
     return entered
 
 
@@ -89,22 +90,32 @@ def login_user(
     space_id: str | None = None,
     agent: str | None = None,
     env_name: str | None = None,
+    print_only: bool = False,
 ) -> None:
-    """Log in a human user without touching agent runtime config."""
-    token = _resolve_login_token(token)
+    """Log in a human user without touching agent runtime config.
+
+    When ``print_only`` is True, verify the token and emit it on stdout
+    instead of writing ``~/.ax/user.toml``. Status messages route to stderr
+    so stdout is a clean pipe target for encrypted secret stores (dotenvx,
+    sops, pass).
+    """
+    token = _resolve_login_token(token, print_only=print_only)
+    status = err_console if print_only else console
+
     if agent:
-        console.print("[yellow]Ignoring --agent for user login. Use an agent PAT/profile for agent runtime.[/yellow]")
+        status.print("[yellow]Ignoring --agent for user login. Use an agent PAT/profile for agent runtime.[/yellow]")
 
-    cfg = _load_user_config(env_name)
-    cfg["token"] = token
-    cfg["base_url"] = base_url
-    cfg["principal_type"] = "user"
-    if env_name:
-        cfg["environment"] = env_name
-    cfg.pop("agent_id", None)
-    cfg.pop("agent_name", None)
+    if not print_only:
+        cfg = _load_user_config(env_name)
+        cfg["token"] = token
+        cfg["base_url"] = base_url
+        cfg["principal_type"] = "user"
+        if env_name:
+            cfg["environment"] = env_name
+        cfg.pop("agent_id", None)
+        cfg.pop("agent_name", None)
 
-    console.print(f"\n[cyan]Connecting to {base_url}...[/cyan]")
+    status.print(f"\n[cyan]Connecting to {base_url}...[/cyan]")
     try:
         from ..token_cache import TokenExchanger
 
@@ -114,10 +125,10 @@ def login_user(
             scope="messages tasks context agents spaces search",
             force_refresh=True,
         )
-        console.print("[green]Token verified.[/green] Exchange successful.")
+        status.print("[green]Token verified.[/green] Exchange successful.")
     except Exception as e:
-        console.print(f"[red]Token verification failed:[/red] {e}")
-        console.print("Check that the token is valid and the URL is correct.")
+        err_console.print(f"[red]Token verification failed:[/red] {e}")
+        err_console.print("Check that the token is valid and the URL is correct.")
         raise typer.Exit(1)
 
     try:
@@ -126,7 +137,13 @@ def login_user(
         client = AxClient(base_url=base_url, token=token)
         me = client.whoami()
         username = me.get("username", "unknown")
-        console.print(f"[green]Identity:[/green] {username} ({me.get('email', '')})")
+        status.print(f"[green]Identity:[/green] {username} ({me.get('email', '')})")
+
+        if print_only:
+            # stdout is reserved for the raw PAT so the caller can pipe it
+            # straight into an encrypted secret store.
+            print(token)
+            return
 
         if space_id:
             cfg["space_id"] = space_id
@@ -145,6 +162,11 @@ def login_user(
                         f"\n[yellow]{len(space_list)} spaces found.[/yellow] No default space selected during login."
                     )
     except Exception:
+        if print_only:
+            # whoami failed but the token already verified above; emit it so
+            # the caller can still capture it into a secret store.
+            print(token)
+            return
         if space_id:
             cfg["space_id"] = space_id
 

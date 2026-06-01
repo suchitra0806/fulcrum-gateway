@@ -15,7 +15,7 @@ def test_login_calls_user_login(monkeypatch):
     """`ax login` is the human login path, separate from local agent init."""
     called = {}
 
-    def fake_login_user(token, *, base_url, agent, space_id, env_name):
+    def fake_login_user(token, *, base_url, agent, space_id, env_name, print_only=False):
         called.update(
             {
                 "token": token,
@@ -23,6 +23,7 @@ def test_login_calls_user_login(monkeypatch):
                 "agent": agent,
                 "space_id": space_id,
                 "env_name": env_name,
+                "print_only": print_only,
             }
         )
 
@@ -52,6 +53,7 @@ def test_login_calls_user_login(monkeypatch):
         "agent": "anvil",
         "space_id": "space-123",
         "env_name": "next",
+        "print_only": False,
     }
 
 
@@ -59,7 +61,7 @@ def test_login_defaults_to_next_without_space_requirement(monkeypatch):
     """`ax login` is the user path: next URL by default, no space required."""
     called = {}
 
-    def fake_login_user(token, *, base_url, agent, space_id, env_name):
+    def fake_login_user(token, *, base_url, agent, space_id, env_name, print_only=False):
         called.update(
             {
                 "token": token,
@@ -67,6 +69,7 @@ def test_login_defaults_to_next_without_space_requirement(monkeypatch):
                 "agent": agent,
                 "space_id": space_id,
                 "env_name": env_name,
+                "print_only": print_only,
             }
         )
 
@@ -81,7 +84,23 @@ def test_login_defaults_to_next_without_space_requirement(monkeypatch):
         "agent": None,
         "space_id": None,
         "env_name": None,
+        "print_only": False,
     }
+
+
+def test_login_print_flag_threads_through_to_login_user(monkeypatch):
+    """`--print` toggles print_only on the underlying login_user call."""
+    called = {}
+
+    def fake_login_user(token, *, base_url, agent, space_id, env_name, print_only=False):
+        called["print_only"] = print_only
+
+    monkeypatch.setattr(auth, "login_user", fake_login_user)
+
+    result = runner.invoke(app, ["login", "--token", "axp_u_test.token", "--print"])
+
+    assert result.exit_code == 0
+    assert called == {"print_only": True}
 
 
 def test_login_token_prompt_is_masked(monkeypatch):
@@ -226,6 +245,98 @@ def test_user_login_env_stores_named_login_and_marks_active(monkeypatch, write_c
         "environment": "dev",
     }
     assert (global_dir / "users" / ".active").read_text().strip() == "dev"
+
+
+def test_user_login_print_only_emits_token_and_skips_save(monkeypatch, write_config, config_dir):
+    """--print verifies the token, emits it on stdout, and never writes user.toml."""
+    write_config(token="axp_a_old.secret", base_url="https://old.example.com", agent_name="orion")
+
+    class FakeTokenExchanger:
+        def __init__(self, base_url, token):
+            self.base_url = base_url
+            self.token = token
+
+        def get_token(self, token_class, *, scope, force_refresh):
+            assert self.token == "axp_u_print.secret"
+            return "fake.jwt"
+
+    class FakeAxClient:
+        def __init__(self, *, base_url, token):
+            self.base_url = base_url
+            self.token = token
+
+        def whoami(self):
+            return {"username": "madtank", "email": "madtank@example.com"}
+
+        def list_spaces(self):
+            raise AssertionError("--print must not list spaces")
+
+    def _no_save(*_a, **_k):
+        raise AssertionError("--print must not write user.toml")
+
+    monkeypatch.setattr("ax_cli.token_cache.TokenExchanger", FakeTokenExchanger)
+    monkeypatch.setattr("ax_cli.client.AxClient", FakeAxClient)
+    monkeypatch.setattr(auth, "_save_user_config", _no_save)
+
+    result = runner.invoke(app, ["login", "--token", "axp_u_print.secret", "--print"])
+
+    assert result.exit_code == 0, result.output
+    assert "axp_u_print.secret" in result.stdout
+    assert "Saved user login" not in result.output
+    global_dir = config_dir.parent / "_global_config"
+    assert not (global_dir / "user.toml").exists()
+
+
+def test_user_login_print_only_exits_on_verification_failure(monkeypatch, config_dir):
+    """A bad PAT in --print mode must fail closed without leaking the token to stdout."""
+
+    class FailingExchanger:
+        def __init__(self, base_url, token):
+            pass
+
+        def get_token(self, *_a, **_k):
+            raise RuntimeError("403 Forbidden")
+
+    def _no_save(*_a, **_k):
+        raise AssertionError("--print must not write user.toml")
+
+    monkeypatch.setattr("ax_cli.token_cache.TokenExchanger", FailingExchanger)
+    monkeypatch.setattr(auth, "_save_user_config", _no_save)
+
+    result = runner.invoke(app, ["login", "--token", "axp_u_bad.secret", "--print"])
+
+    assert result.exit_code == 1
+    assert "axp_u_bad.secret" not in result.stdout
+
+
+def test_user_login_print_only_emits_token_when_whoami_fails(monkeypatch, config_dir):
+    """A verified token still lands on stdout even when whoami transiently fails."""
+
+    class FakeTokenExchanger:
+        def __init__(self, base_url, token):
+            pass
+
+        def get_token(self, *_a, **_k):
+            return "fake.jwt"
+
+    class FailingAxClient:
+        def __init__(self, *, base_url, token):
+            pass
+
+        def whoami(self):
+            raise RuntimeError("temporary backend hiccup")
+
+    def _no_save(*_a, **_k):
+        raise AssertionError("--print must not write user.toml")
+
+    monkeypatch.setattr("ax_cli.token_cache.TokenExchanger", FakeTokenExchanger)
+    monkeypatch.setattr("ax_cli.client.AxClient", FailingAxClient)
+    monkeypatch.setattr(auth, "_save_user_config", _no_save)
+
+    result = runner.invoke(app, ["login", "--token", "axp_u_resilient.secret", "--print"])
+
+    assert result.exit_code == 0, result.output
+    assert "axp_u_resilient.secret" in result.stdout
 
 
 def test_auth_doctor_json_outputs_diagnostics(monkeypatch):
@@ -562,6 +673,7 @@ def test_resolve_login_token_empty_prompt_exits(monkeypatch):
     printed = []
     monkeypatch.setattr(auth.typer, "prompt", lambda *a, **kw: "   ")
     monkeypatch.setattr(auth.console, "print", lambda *a, **kw: printed.append(str(a[0]) if a else ""))
+    monkeypatch.setattr(auth.err_console, "print", lambda *a, **kw: printed.append(str(a[0]) if a else ""))
     with pytest.raises((SystemExit, click.exceptions.Exit)):
         auth._resolve_login_token(None)
     assert any("Token required" in p for p in printed)

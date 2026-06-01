@@ -122,9 +122,21 @@ def login(
     ),
     agent: str = typer.Option(None, "--agent", "-a", help="Agent name or ID (auto-detected if not set)"),
     space_id: str = typer.Option(None, "--space-id", "-s", help="Optional default space ID"),
+    print_only: bool = typer.Option(
+        False,
+        "--print",
+        help="Print the verified PAT to stdout instead of writing to ~/.ax/user.toml. Status messages go to stderr — pipe stdout into your encrypted secret store (dotenvx, sops, pass).",
+    ),
 ):
     """Log in to aX. Prompts for a token securely when --token is omitted."""
-    auth.login_user(token=token, base_url=base_url, agent=agent, space_id=space_id, env_name=env_name)
+    auth.login_user(
+        token=token,
+        base_url=base_url,
+        agent=agent,
+        space_id=space_id,
+        env_name=env_name,
+        print_only=print_only,
+    )
 
 
 @app.command("send")
