@@ -194,6 +194,32 @@ class TestConnectorsSet:
         assert "Invalid policy pattern" in result.output
         assert "unbalanced" in result.output
 
+    def test_set_tools_limit_above_max_warns_and_clamps(self, seeded_connector: ConnectorRow):
+        from ax_cli.connectors import find_connector
+        from ax_cli.connectors.constants import MAX_TOOLS_LIMIT
+
+        result = runner.invoke(
+            connectors_app,
+            ["set", "test-conn", "tools_limit", str(MAX_TOOLS_LIMIT + 300)],
+        )
+        assert result.exit_code == 0
+        # Warning names the real ceiling (the constant value), not a silent clamp.
+        assert str(MAX_TOOLS_LIMIT) in result.output
+        # Persisted value is clamped so stored config matches what is enforced.
+        assert find_connector("test-conn").config["tools_limit"] == MAX_TOOLS_LIMIT
+
+    def test_set_tools_limit_within_max_is_untouched(self, seeded_connector: ConnectorRow):
+        from ax_cli.connectors.constants import MAX_TOOLS_LIMIT
+
+        within = MAX_TOOLS_LIMIT - 1
+        result = runner.invoke(
+            connectors_app,
+            ["set", "test-conn", "tools_limit", str(within), "--json"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert int(data["config"]["tools_limit"]) == within
+
 
 # ── connectors providers ─────────────────────────────────────────────────────
 

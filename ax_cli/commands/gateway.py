@@ -9442,6 +9442,7 @@ def connectors_set(
 ):
     """Set a connector configuration value."""
     from ..connectors import ConnectorNotFoundError, find_connector, update_connector
+    from ..connectors.constants import KEY_TOOLS_LIMIT, MAX_TOOLS_LIMIT
 
     try:
         row = find_connector(ref)
@@ -9468,6 +9469,22 @@ def connectors_set(
         except ValueError as exc:
             err_console.print(f"[red]Invalid policy pattern:[/red] {exc}")
             raise typer.Exit(1)
+    elif key == KEY_TOOLS_LIMIT:
+        # from_config clamps a too-high limit to MAX_TOOLS_LIMIT at evaluation
+        # time, but silently — so `set tools_limit 500` would look accepted yet
+        # enforce 200. Surface the cap here (closest to the action) and persist
+        # the clamped value so stored config matches what's actually enforced.
+        # The ceiling is read from the constant so the message can't drift.
+        try:
+            requested = int(value)
+        except (TypeError, ValueError):
+            requested = None
+        if requested is not None and requested > MAX_TOOLS_LIMIT:
+            err_console.print(
+                f"[yellow]tools_limit {requested} exceeds the maximum of "
+                f"{MAX_TOOLS_LIMIT}; capping to {MAX_TOOLS_LIMIT}.[/yellow]"
+            )
+            value = MAX_TOOLS_LIMIT
     config[key] = value
     updated = update_connector(ref, {"config": config})
     if as_json:
