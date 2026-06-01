@@ -8164,6 +8164,70 @@ def test_operator_start_clears_error_state(monkeypatch, tmp_path):
     assert entry.get("setup_disabled_at") is None
 
 
+def test_agents_start_refuses_when_daemon_stopped(monkeypatch, tmp_path):
+    # #158 — without the Gateway daemon there is no supervisor to bring the
+    # agent up; the previous behaviour returned exit 0 with a success message,
+    # leaving the operator to discover effective_state=stopped via `show`.
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+
+    gateway_core.save_gateway_session(
+        {"token": "axp_u_test", "base_url": "https://paxai.app", "space_id": "space-1"}
+    )
+    registry = {
+        "agents": [
+            {
+                "name": "echo-demo",
+                "agent_id": "agent-echo",
+                "template_id": "echo_test",
+                "runtime_type": "echo",
+                "desired_state": "stopped",
+            }
+        ],
+    }
+    gateway_core.save_gateway_registry(registry)
+    monkeypatch.setattr(gateway_cmd, "active_gateway_pid", lambda: None)
+
+    result = runner.invoke(app, ["gateway", "agents", "start", "echo-demo"])
+
+    assert result.exit_code == 1, result.output
+    assert "Gateway daemon is stopped" in result.output
+    assert "ax gateway start" in result.output
+    reloaded = gateway_core.load_gateway_registry()
+    entry = next(a for a in reloaded["agents"] if a["name"] == "echo-demo")
+    assert entry["desired_state"] == "stopped"
+
+
+def test_agents_start_proceeds_when_daemon_running(monkeypatch, tmp_path):
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+
+    gateway_core.save_gateway_session(
+        {"token": "axp_u_test", "base_url": "https://paxai.app", "space_id": "space-1"}
+    )
+    registry = {
+        "agents": [
+            {
+                "name": "echo-demo",
+                "agent_id": "agent-echo",
+                "template_id": "echo_test",
+                "runtime_type": "echo",
+                "desired_state": "stopped",
+            }
+        ],
+    }
+    gateway_core.save_gateway_registry(registry)
+    monkeypatch.setattr(gateway_cmd, "active_gateway_pid", lambda: 12345)
+
+    result = runner.invoke(app, ["gateway", "agents", "start", "echo-demo"])
+
+    assert result.exit_code == 0, result.output
+    assert "Desired state set to running" in result.output
+    reloaded = gateway_core.load_gateway_registry()
+    entry = next(a for a in reloaded["agents"] if a["name"] == "echo-demo")
+    assert entry["desired_state"] == "running"
+
+
 def test_different_error_signature_resets_consecutive_count(monkeypatch, tmp_path):
     """When the error message changes, consecutive count resets to 1."""
     _isolate_gateway_paths(monkeypatch, tmp_path)
