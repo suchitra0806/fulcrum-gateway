@@ -1064,6 +1064,10 @@ def _check_config_permissions() -> None:
 
 
 def resolve_token() -> str | None:
+    # Canonical PAT precedence: environment override beats the on-disk file.
+    # ``resolve_user_token`` follows the same rule for the user-login path so
+    # ``get_client`` and ``get_user_client`` never disagree on which PAT wins
+    # when both ``AX_TOKEN`` and a stored file token are present. See #175.
     _check_config_permissions()
     cfg = _load_config()
     return (
@@ -1075,15 +1079,33 @@ def resolve_token() -> str | None:
 
 
 def resolve_user_token() -> str | None:
-    """Resolve the user login token, ignoring agent-local runtime config."""
+    """Resolve the user login token, ignoring agent-local runtime config.
+
+    Canonical user-PAT precedence (env override beats the on-disk file, matching
+    ``resolve_token`` so the runtime and user-login clients never disagree — #175):
+
+    1. ``AX_USER_TOKEN`` — the user-login-specific override, always wins.
+    2. ``AX_TOKEN`` — the general operator override, honored *above* the stored
+       file but only when it is a user PAT (``axp_u_``). An agent PAT in
+       ``AX_TOKEN`` (the common runtime case) is ignored here, so an operator
+       running agents with ``AX_TOKEN`` set does not lose their stored login.
+    3. ``~/.ax/user.toml`` token — the on-disk user login.
+    4. ``cfg.token`` from runtime config — last-resort fallback, user PATs only.
+
+    The ``axp_u_`` guard on the env/runtime fallbacks keeps an agent credential
+    from being mistaken for a user login; ``get_user_client`` rejects non-user
+    PATs regardless, but failing here gives a clearer resolution story.
+    """
     token = os.environ.get("AX_USER_TOKEN")
     if token:
         return token
-    cfg = _load_user_config()
-    token = cfg.get("token")
+    ax_token = os.environ.get("AX_TOKEN")
+    if ax_token and str(ax_token).startswith("axp_u_"):
+        return ax_token
+    token = _load_user_config().get("token")
     if token:
         return token
-    fallback = os.environ.get("AX_TOKEN") or _load_config().get("token")
+    fallback = _load_config().get("token")
     if fallback and str(fallback).startswith("axp_u_"):
         return fallback
     return None
