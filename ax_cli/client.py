@@ -432,6 +432,26 @@ class AxClient:
         r.raise_for_status()
         return self._parse_json(r)
 
+    def archive_space(self, space_id: str) -> dict:
+        """PATCH /api/v1/spaces/{id} — soft-delete (archive) a space.
+
+        Spaces have no hard-delete route (DELETE returns 405); archive is the
+        reversible soft-delete the platform exposes.
+        """
+        r = self._http.patch(f"/api/v1/spaces/{space_id}", json={"is_archived": True})
+        r.raise_for_status()
+        if not r.content:
+            return {"space_id": space_id, "is_archived": True}
+        return self._parse_json(r)
+
+    def leave_space(self, space_id: str) -> dict:
+        """DELETE /api/v1/spaces/{id}/members/me — remove the caller from the space."""
+        r = self._http.delete(f"/api/v1/spaces/{space_id}/members/me")
+        r.raise_for_status()
+        if not r.content:
+            return {"space_id": space_id, "left": True}
+        return self._parse_json(r)
+
     # --- Messages ---
 
     def send_heartbeat(
