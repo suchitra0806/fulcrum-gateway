@@ -5254,6 +5254,60 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
     <section class="dashboard">
       <section class="panel">
         <div class="panel-header">
+          <span>Outbound Connectors</span>
+          <span id="connectors-summary" class="caption">loading…</span>
+        </div>
+        <div class="panel-body">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Provider</th>
+                <th>Enabled</th>
+                <th>Auth</th>
+              </tr>
+            </thead>
+            <tbody id="connector-rows">
+              <tr><td colspan="4"><div class="empty">No connectors registered.</div></td></tr>
+            </tbody>
+          </table>
+          <form id="add-connector-form" class="detail-card" style="margin-top:16px;">
+            <p class="caption">
+              Register a connector with managed auth. Credentials stay in local auth files (0600)
+              and are never returned by this API.
+            </p>
+            <div class="form-grid">
+              <div class="control-group">
+                <label for="connector-name">Name</label>
+                <input id="connector-name" name="name" placeholder="composio-main" required />
+              </div>
+              <div class="control-group">
+                <label for="connector-provider">Provider</label>
+                <select id="connector-provider" name="provider"></select>
+              </div>
+            </div>
+            <div class="action-row">
+              <button type="submit">Add Connector</button>
+            </div>
+            <div id="add-connector-flash" class="flash"></div>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <span>Connector Detail</span>
+          <span id="selected-connector-chip" class="caption">select a connector</span>
+        </div>
+        <div id="connector-detail" class="panel-body">
+          <div class="empty">Choose a connector to manage auth, apps, and enablement.</div>
+        </div>
+      </section>
+    </section>
+
+    <section class="dashboard">
+      <section class="panel">
+        <div class="panel-header">
           <span>Managed Agents</span>
           <span id="managed-summary" class="caption">loading…</span>
         </div>
@@ -5305,7 +5359,7 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
 
     <section class="panel">
       <div class="panel-body footer-note">
-        <span>Local status API: <code>/api/status</code> and <code>/api/agents/&lt;name&gt;</code></span>
+        <span>Local status API: <code>/api/status</code>, <code>/api/agents/&lt;name&gt;</code>, <code>/api/connectors</code></span>
         <span>Setup skill: <code>skills/gateway-agent-setup/SKILL.md</code> · Terminal parity: <code>uv run ax gateway watch</code> · axctl <code>__VERSION__</code></span>
       </div>
     </section>
@@ -5314,7 +5368,9 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
   <script>
     const refreshMs = __REFRESH_MS__;
     let selectedAgent = null;
+    let selectedConnector = null;
     let agentTemplates = [];
+    let connectorProviders = [];
     let autoRefreshPaused = false;
     let setupMode = "create";
     let setupTarget = null;
@@ -5540,6 +5596,130 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
       `;
     }
 
+    async function loadConnectorProviders() {
+      const payload = await apiRequest("/api/connectors/providers");
+      connectorProviders = payload.providers || [];
+      const select = document.getElementById("connector-provider");
+      if (!connectorProviders.length) {
+        select.innerHTML = `<option value="composio">Composio</option>`;
+        return;
+      }
+      select.innerHTML = connectorProviders.map((item) => (
+        `<option value="${escapeHtml(item.name)}">${escapeHtml(item.display_name || item.name)}</option>`
+      )).join("");
+    }
+
+    function renderConnectors(payload) {
+      const connectors = payload.connectors || [];
+      const tbody = document.getElementById("connector-rows");
+      document.getElementById("connectors-summary").textContent = `${payload.enabled_count ?? 0} enabled / ${payload.count ?? 0} total`;
+      if (!connectors.length) {
+        tbody.innerHTML = `<tr><td colspan="4"><div class="empty">No connectors registered.</div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = connectors.map((connector) => {
+        const active = selectedConnector && selectedConnector.toLowerCase() === String(connector.name || "").toLowerCase();
+        const auth = connector.auth_status || {};
+        const authLabel = auth.exists ? (auth.keys?.length ? auth.keys.join(", ") : "empty") : "not configured";
+        return `
+          <tr>
+            <td colspan="4">
+              <button class="agent-button ${active ? "is-active" : ""}" data-connector-name="${escapeHtml(connector.name || "")}">
+                <table><tbody><tr>
+                  <td style="width:28%"><div class="agent-name">${escapeHtml(connector.name || "-")}</div></td>
+                  <td style="width:22%">${escapeHtml(connector.provider || "-")}</td>
+                  <td style="width:18%"><span class="status-pill ${connector.enabled ? "status-live" : "status-offline"}">${connector.enabled ? "enabled" : "disabled"}</span></td>
+                  <td style="width:32%" class="agent-meta">${escapeHtml(authLabel)}</td>
+                </tr></tbody></table>
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderConnectorDetail(detail) {
+      const panel = document.getElementById("connector-detail");
+      const chip = document.getElementById("selected-connector-chip");
+      if (!detail || !detail.connector) {
+        chip.textContent = "select a connector";
+        panel.innerHTML = `<div class="empty">Choose a connector to manage auth, apps, and enablement.</div>`;
+        return;
+      }
+      const connector = detail.connector;
+      chip.textContent = connector.name;
+      const auth = connector.auth_status || {};
+      const configEntries = Object.entries(connector.config || {});
+      const configHtml = configEntries.length
+        ? configEntries.map(([key, value]) => `<div><strong>${escapeHtml(key)}</strong> ${escapeHtml(String(value ?? "-"))}</div>`).join("")
+        : `<div class="caption">No config overrides.</div>`;
+      panel.innerHTML = `
+        <div class="detail-card">
+          <div>
+            <div class="agent-name">${escapeHtml(connector.name)}</div>
+            <div class="agent-meta">${escapeHtml(connector.provider)} · id ${escapeHtml(connector.id || "-")}</div>
+          </div>
+          <div class="runtime-info">
+            <h3>Auth status</h3>
+            <div>${auth.exists ? `Keys: ${escapeHtml((auth.keys || []).join(", ") || "(empty)")}` : "Not configured"}</div>
+            <div>Permissions: ${escapeHtml(auth.permissions || "-")}</div>
+          </div>
+          <div class="runtime-info">
+            <h3>Config</h3>
+            ${configHtml}
+          </div>
+          <form id="connector-auth-form" class="detail-card">
+            <div class="control-group">
+              <label for="connector-api-key">COMPOSIO_API_KEY</label>
+              <input id="connector-api-key" name="COMPOSIO_API_KEY" type="password" autocomplete="off" placeholder="ak_..." />
+            </div>
+            <div class="action-row">
+              <button type="submit">Save Auth</button>
+              <button type="button" class="ghost" data-connector-action="clear-auth" data-connector-name="${escapeHtml(connector.name)}">Clear Auth</button>
+            </div>
+          </form>
+          <form id="connector-connect-form" class="detail-card">
+            <div class="control-group">
+              <label for="connector-app">Connect app (OAuth)</label>
+              <input id="connector-app" name="app" placeholder="gmail, slack, github" />
+            </div>
+            <div class="action-row">
+              <button type="submit">Start Connect</button>
+              <button type="button" class="ghost" data-connector-action="list-apps" data-connector-name="${escapeHtml(connector.name)}">List Apps</button>
+            </div>
+          </form>
+          <div id="connector-action-flash" class="flash"></div>
+          <div id="connector-apps-panel" class="runtime-info" style="display:none;"></div>
+          <div class="action-row">
+            <button type="button" data-connector-action="${connector.enabled ? "disable" : "enable"}" data-connector-name="${escapeHtml(connector.name)}">${connector.enabled ? "Disable" : "Enable"}</button>
+            <button type="button" class="danger" data-connector-action="remove" data-connector-name="${escapeHtml(connector.name)}">Remove</button>
+          </div>
+        </div>
+      `;
+    }
+
+    async function loadConnectorDetail(name) {
+      try {
+        const payload = await apiRequest(`/api/connectors/${encodeURIComponent(name)}`);
+        renderConnectorDetail(payload);
+      } catch {
+        renderConnectorDetail(null);
+      }
+    }
+
+    async function loadConnectors() {
+      const payload = await apiRequest("/api/connectors");
+      renderConnectors(payload);
+      if (!selectedConnector && payload.connectors?.length) {
+        selectedConnector = payload.connectors[0].name;
+      }
+      if (selectedConnector) {
+        await loadConnectorDetail(selectedConnector);
+      } else {
+        renderConnectorDetail(null);
+      }
+    }
+
     async function loadTemplates() {
       const payload = await apiRequest("/api/templates");
       agentTemplates = payload.templates || [];
@@ -5565,6 +5745,7 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
       const queueDepth = agents.reduce((sum, agent) => sum + Number(agent.backlog_depth || 0), 0);
       const metrics = [
         ["managed agents", summary.managed_agents ?? 0, "cyan"],
+        ["connectors", `${payload.enabled_connectors ?? 0}/${payload.connectors_count ?? 0}`, "green"],
         ["live", summary.live_agents ?? 0, "green"],
         ["on-demand", summary.on_demand_agents ?? 0, "blue"],
         ["inbox", summary.inbox_agents ?? 0, "cyan"],
@@ -5805,10 +5986,131 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
       }
       try {
         await loadStatus();
+        await loadConnectors();
       } catch (error) {
         document.getElementById("activity-feed").innerHTML = `<div class="empty">Gateway UI lost contact with the local status API: ${escapeHtml(error.message || error)}</div>`;
       }
     }
+
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-connector-name]");
+      if (!button) return;
+      if (button.hasAttribute("data-connector-action")) return;
+      selectedConnector = button.getAttribute("data-connector-name");
+      tick();
+    });
+
+    document.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-connector-action]");
+      if (!button) return;
+      const action = button.getAttribute("data-connector-action");
+      const connectorName = button.getAttribute("data-connector-name");
+      try {
+        if (action === "remove") {
+          await apiRequest(`/api/connectors/${encodeURIComponent(connectorName)}`, { method: "DELETE" });
+          selectedConnector = null;
+        } else if (action === "clear-auth") {
+          await apiRequest(`/api/connectors/${encodeURIComponent(connectorName)}/auth`, { method: "DELETE" });
+        } else if (action === "enable" || action === "disable") {
+          await apiRequest(`/api/connectors/${encodeURIComponent(connectorName)}`, {
+            method: "PUT",
+            body: JSON.stringify({ enabled: action === "enable" }),
+          });
+        } else if (action === "list-apps") {
+          const result = await apiRequest(`/api/connectors/${encodeURIComponent(connectorName)}/apps`);
+          const panel = document.getElementById("connector-apps-panel");
+          if (!result.apps?.length) {
+            panel.style.display = "block";
+            panel.innerHTML = `<h3>Connected apps</h3><div class="caption">No connected apps yet.</div>`;
+          } else {
+            panel.style.display = "block";
+            panel.innerHTML = `<h3>Connected apps</h3>${result.apps.map((item) => (
+              `<div><strong>${escapeHtml(item.app || "?")}</strong> · ${escapeHtml(item.status || "?")}</div>`
+            )).join("")}`;
+          }
+          setFlash("connector-action-flash", `Loaded ${result.count || 0} app(s).`, "success");
+          return;
+        }
+        selectedConnector = connectorName;
+        setFlash("connector-action-flash", `${action} completed for ${connectorName}`, "success");
+        await tick(true);
+      } catch (error) {
+        setFlash("connector-action-flash", error.message || String(error), "error");
+      }
+    });
+
+    document.getElementById("add-connector-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = new FormData(form);
+      const payload = {
+        name: String(data.get("name") || "").trim(),
+        provider: String(data.get("provider") || "composio").trim(),
+        managed_auth: true,
+      };
+      try {
+        const result = await apiRequest("/api/connectors", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        selectedConnector = result.connector?.name || payload.name;
+        form.reset();
+        if (connectorProviders.length) {
+          document.getElementById("connector-provider").value = connectorProviders[0].name;
+        }
+        setFlash("add-connector-flash", `Added connector ${selectedConnector}`, "success");
+        await tick(true);
+      } catch (error) {
+        setFlash("add-connector-flash", error.message || String(error), "error");
+      }
+    });
+
+    document.addEventListener("submit", async (event) => {
+      if (event.target.id !== "connector-auth-form" && event.target.id !== "connector-connect-form") {
+        return;
+      }
+      event.preventDefault();
+      const form = event.target;
+      const connectorName = selectedConnector;
+      if (!connectorName) {
+        setFlash("connector-action-flash", "Select a connector first.", "error");
+        return;
+      }
+      try {
+        if (form.id === "connector-auth-form") {
+          const apiKey = String(form.COMPOSIO_API_KEY.value || "").trim();
+          if (!apiKey) {
+            setFlash("connector-action-flash", "COMPOSIO_API_KEY is required.", "error");
+            return;
+          }
+          await apiRequest(`/api/connectors/${encodeURIComponent(connectorName)}/auth`, {
+            method: "POST",
+            body: JSON.stringify({ COMPOSIO_API_KEY: apiKey }),
+          });
+          form.COMPOSIO_API_KEY.value = "";
+          setFlash("connector-action-flash", "Auth saved (key names only shown in UI).", "success");
+        } else {
+          const app = String(form.app.value || "").trim();
+          if (!app) {
+            setFlash("connector-action-flash", "App name is required.", "error");
+            return;
+          }
+          const result = await apiRequest(`/api/connectors/${encodeURIComponent(connectorName)}/connect`, {
+            method: "POST",
+            body: JSON.stringify({ app }),
+          });
+          if (result.redirect_url) {
+            setFlash("connector-action-flash", `Open OAuth URL: ${result.redirect_url}`, "success");
+            window.open(result.redirect_url, "_blank", "noopener,noreferrer");
+          } else {
+            setFlash("connector-action-flash", `Connection status: ${result.connection_status || "unknown"}`, "success");
+          }
+        }
+        await tick(true);
+      } catch (error) {
+        setFlash("connector-action-flash", error.message || String(error), "error");
+      }
+    });
 
     document.addEventListener("click", (event) => {
       const button = event.target.closest("[data-agent-name]");
@@ -5934,7 +6236,7 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
 
     async function boot() {
       try {
-        await loadTemplates();
+        await Promise.all([loadTemplates(), loadConnectorProviders()]);
       } catch (error) {
         setFlash("add-agent-flash", error.message || String(error), "error");
       }
@@ -6035,6 +6337,95 @@ def _read_json_request(handler: BaseHTTPRequestHandler) -> dict:
 _LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1"})
 
 
+def _connector_api_error_status(exc: BaseException) -> HTTPStatus:
+    from ..connectors.errors import (
+        ConnectorAuthError,
+        ConnectorNotFoundError,
+        ConnectorPolicyError,
+        ConnectorProviderError,
+    )
+
+    if isinstance(exc, ConnectorNotFoundError):
+        return HTTPStatus.NOT_FOUND
+    if isinstance(exc, ConnectorAuthError):
+        return HTTPStatus.UNAUTHORIZED
+    if isinstance(exc, ConnectorPolicyError):
+        return HTTPStatus.FORBIDDEN
+    if isinstance(exc, ConnectorProviderError):
+        return HTTPStatus.BAD_GATEWAY
+    return HTTPStatus.BAD_REQUEST
+
+
+def _dispatch_connector_api_get(path: str) -> dict:
+    from ..connectors.gateway_api import (
+        connector_apps_payload,
+        connector_auth_status_payload,
+        connector_detail_payload,
+        connectors_list_payload,
+        connectors_providers_payload,
+        parse_connector_api_path,
+    )
+
+    kind, ref, _ = parse_connector_api_path(path)
+    if kind == "list":
+        return connectors_list_payload()
+    if kind == "providers":
+        return connectors_providers_payload()
+    if kind == "detail":
+        return connector_detail_payload(ref)
+    if kind == "auth":
+        return connector_auth_status_payload(ref)
+    if kind == "apps":
+        return connector_apps_payload(ref)
+    if not kind:
+        raise LookupError("not found")
+    raise LookupError(f"Unsupported connector GET route: {path}")
+
+
+def _dispatch_connector_api_post(path: str, body: dict) -> tuple[dict, HTTPStatus]:
+    from ..connectors.gateway_api import (
+        connector_auth_write,
+        connector_call,
+        connector_connect,
+        connector_create,
+        connector_search,
+        parse_connector_api_path,
+    )
+
+    kind, ref, _ = parse_connector_api_path(path)
+    if kind == "list":
+        return connector_create(body), HTTPStatus.CREATED
+    if kind == "auth":
+        return connector_auth_write(ref, body), HTTPStatus.OK
+    if kind == "connect":
+        return connector_connect(ref, body), HTTPStatus.OK
+    if kind == "tools_search":
+        return connector_search(ref, body), HTTPStatus.OK
+    if kind == "tools_call":
+        return connector_call(ref, body), HTTPStatus.OK
+    raise LookupError("not found")
+
+
+def _dispatch_connector_api_put(path: str, body: dict) -> dict:
+    from ..connectors.gateway_api import connector_update, parse_connector_api_path
+
+    kind, ref, _ = parse_connector_api_path(path)
+    if kind == "detail":
+        return connector_update(ref, body)
+    raise LookupError("not found")
+
+
+def _dispatch_connector_api_delete(path: str) -> dict:
+    from ..connectors.gateway_api import connector_auth_clear, connector_remove, parse_connector_api_path
+
+    kind, ref, _ = parse_connector_api_path(path)
+    if kind == "detail":
+        return connector_remove(ref)
+    if kind == "auth":
+        return connector_auth_clear(ref)
+    raise LookupError("not found")
+
+
 def _is_request_host_allowed(host_header: str | None) -> bool:
     # Block DNS-rebinding: only accept Host headers that resolve to loopback.
     # Port is left open so `ax gateway start --port` keeps working.
@@ -6123,6 +6514,18 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
                 return
             if parsed.path == "/api/templates":
                 _write_json_response(self, _agent_templates_payload())
+                return
+            if parsed.path.startswith("/api/connectors"):
+                try:
+                    _write_json_response(self, _dispatch_connector_api_get(parsed.path))
+                except LookupError as exc:
+                    _write_json_response(self, {"error": str(exc)}, status=HTTPStatus.NOT_FOUND)
+                except Exception as exc:
+                    _write_json_response(
+                        self,
+                        {"error": str(exc)},
+                        status=_connector_api_error_status(exc),
+                    )
                 return
             if parsed.path == "/api/approvals":
                 query = parse_qs(parsed.query)
@@ -6228,6 +6631,19 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
                         return
                     status_code = HTTPStatus.OK if payload.get("ready") else HTTPStatus.UNPROCESSABLE_ENTITY
                     _write_json_response(self, payload, status=status_code)
+                    return
+                if parsed.path.startswith("/api/connectors"):
+                    try:
+                        payload, status = _dispatch_connector_api_post(parsed.path, body)
+                        _write_json_response(self, payload, status=status)
+                    except LookupError as exc:
+                        _write_json_response(self, {"error": str(exc)}, status=HTTPStatus.NOT_FOUND)
+                    except Exception as exc:
+                        _write_json_response(
+                            self,
+                            {"error": str(exc)},
+                            status=_connector_api_error_status(exc),
+                        )
                     return
                 if parsed.path == "/api/agents":
                     try:
@@ -6539,9 +6955,24 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
                 _write_json_response(self, {"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
         def do_PUT(self) -> None:  # noqa: N802
+            if self._reject_unauthorized_host():
+                return
             parsed = urlparse(self.path)
             try:
                 body = _read_json_request(self)
+                if parsed.path.startswith("/api/connectors/"):
+                    try:
+                        payload = _dispatch_connector_api_put(parsed.path, body)
+                        _write_json_response(self, payload)
+                    except LookupError as exc:
+                        _write_json_response(self, {"error": str(exc)}, status=HTTPStatus.NOT_FOUND)
+                    except Exception as exc:
+                        _write_json_response(
+                            self,
+                            {"error": str(exc)},
+                            status=_connector_api_error_status(exc),
+                        )
+                    return
                 if parsed.path.startswith("/api/agents/"):
                     name = unquote(parsed.path.removeprefix("/api/agents/")).strip()
                     payload = _update_managed_agent(
@@ -6572,7 +7003,22 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
                 _write_json_response(self, {"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
         def do_DELETE(self) -> None:  # noqa: N802
+            if self._reject_unauthorized_host():
+                return
             parsed = urlparse(self.path)
+            if parsed.path.startswith("/api/connectors/"):
+                try:
+                    payload = _dispatch_connector_api_delete(parsed.path)
+                    _write_json_response(self, payload)
+                except LookupError as exc:
+                    _write_json_response(self, {"error": str(exc)}, status=HTTPStatus.NOT_FOUND)
+                except Exception as exc:
+                    _write_json_response(
+                        self,
+                        {"error": str(exc)},
+                        status=_connector_api_error_status(exc),
+                    )
+                return
             if parsed.path.startswith("/api/agents/"):
                 name = unquote(parsed.path.removeprefix("/api/agents/")).strip()
                 try:
