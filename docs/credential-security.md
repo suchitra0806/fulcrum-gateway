@@ -105,6 +105,15 @@ use it with ax-cli, the platform knows immediately.
   users with real `axp_u_` tokens are never flagged by the honeypot system
 - The server IP address is available from the request itself (standard HTTP)
 
+## Storing the User PAT at Rest
+
+The user bootstrap PAT (`axp_u_…`) lands at `~/.ax/user.toml` in plaintext by
+default. To keep it off the filesystem in plaintext — useful for sync
+directories, container layer copies, and multi-assistant workspaces — see
+[Store user PAT in an encrypted secret store](scenarios/encrypted-pat-at-rest.md).
+The recipes cover dotenvx, sops, and pass; they integrate through the
+`AX_TOKEN` environment variable and the `ax login --print` flag.
+
 ## Trusted Setup Agents
 
 Trusted local agents can help configure an agent team after the user completes

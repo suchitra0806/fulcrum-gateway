@@ -24,9 +24,15 @@ class ToolResult:
 # their own worktrees/workspace and /tmp.  Secrets are always blocked.
 
 BLOCKED_READ_PATTERNS = [
-    "/.ax/",  "/.codex/",  "/.aws/",  "/.ssh/",
-    "/.env", "/secrets", "/credentials",
+    "/.ax/",
+    "/.codex/",
+    "/.aws/",
+    "/.ssh/",
+    "/.env",
+    "/secrets",
+    "/credentials",
 ]
+
 
 def _check_read_path(path: str) -> str | None:
     """Return error message if path is blocked for reading, else None."""
@@ -48,14 +54,14 @@ def _check_write_path(path: str, workdir: str) -> str | None:
     # - agent's own worktrees/workspace dirs
     # - /tmp
     allowed_prefixes = [
-        os.path.realpath(workdir),             # agent home dir
+        os.path.realpath(workdir),  # agent home dir
         "/tmp",
     ]
     # Also allow writing in any worktree under agents/
     agents_dir = os.path.realpath("/home/ax-agent/agents")
     if resolved.startswith(agents_dir):
         # Must be under a worktrees/ or workspace/ subdir
-        rel = resolved[len(agents_dir):]
+        rel = resolved[len(agents_dir) :]
         if "/worktrees/" in rel or "/workspace/" in rel or "/notes/" in rel:
             return None
     if not any(resolved.startswith(p) for p in allowed_prefixes):
@@ -66,8 +72,12 @@ def _check_write_path(path: str, workdir: str) -> str | None:
 def _check_bash_command(command: str) -> str | None:
     """Return error message if command is blocked, else None."""
     blocked = [
-        "cat ~/.ax/", "cat ~/.codex/", "cat ~/.aws/", "cat ~/.ssh/",
-        "cat /home/ax-agent/.ax/", "cat /home/ax-agent/.codex/",
+        "cat ~/.ax/",
+        "cat ~/.codex/",
+        "cat ~/.aws/",
+        "cat ~/.ssh/",
+        "cat /home/ax-agent/.ax/",
+        "cat /home/ax-agent/.codex/",
         "rm -rf /",
     ]
     for pattern in blocked:
@@ -168,7 +178,10 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "connector": {"type": "string", "description": "Connector reference name"},
-                "query": {"type": "string", "description": "Natural-language description of the tool you need (e.g. 'send email')"},
+                "query": {
+                    "type": "string",
+                    "description": "Natural-language description of the tool you need (e.g. 'send email')",
+                },
                 "app": {"type": "string", "description": "Filter results to a specific app (e.g. 'gmail', 'slack')"},
                 "limit": {"type": "integer", "description": "Max results to return", "default": 5},
             },
@@ -206,6 +219,7 @@ TOOL_DEFINITIONS = [
 
 # ── Tool execution ──────────────────────────────────────────────────────────
 
+
 def execute_tool(name: str, args: dict, workdir: str) -> ToolResult:
     """Execute a tool by name. Returns ToolResult."""
     fn = _TOOL_FNS.get(name)
@@ -227,10 +241,8 @@ def _read_file(args: dict, workdir: str) -> ToolResult:
     try:
         with open(path, "r") as f:
             lines = f.readlines()
-        selected = lines[offset - 1:offset - 1 + limit]
-        numbered = "".join(
-            f"{offset + i:>6}\t{line}" for i, line in enumerate(selected)
-        )
+        selected = lines[offset - 1 : offset - 1 + limit]
+        numbered = "".join(f"{offset + i:>6}\t{line}" for i, line in enumerate(selected))
         return ToolResult(output=numbered or "(empty file)")
     except FileNotFoundError:
         return ToolResult(output=f"File not found: {path}", is_error=True)
@@ -261,9 +273,7 @@ def _edit_file(args: dict, workdir: str) -> ToolResult:
     if count == 0:
         return ToolResult(output="old_text not found in file", is_error=True)
     if count > 1:
-        return ToolResult(
-            output=f"old_text matches {count} times — must be unique", is_error=True
-        )
+        return ToolResult(output=f"old_text matches {count} times — must be unique", is_error=True)
     content = content.replace(old_text, new_text, 1)
     with open(path, "w") as f:
         f.write(content)
@@ -305,9 +315,7 @@ def _grep(args: dict, workdir: str) -> ToolResult:
     if args.get("glob"):
         cmd.extend(["--glob", args["glob"]])
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30, cwd=workdir
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=workdir)
         output = result.stdout
         if len(output) > 20000:
             output = output[:20000] + "\n...(truncated)..."
@@ -377,6 +385,7 @@ def _connector_call(args: dict, workdir: str) -> ToolResult:
     except ImportError:
         return ToolResult(output="Connector module not available", is_error=True)
     import json as _json
+
     ref = args["connector"]
     tool = args["tool"]
     tool_args = args.get("args", {})
@@ -395,8 +404,17 @@ def _connector_call(args: dict, workdir: str) -> ToolResult:
         auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
     except Exception as e:
         return ToolResult(output=f"Auth error: {e}", is_error=True)
+    import os as _os
+
     try:
-        result = connector_execute(row, tool, tool_args, auth_env)
+        result = connector_execute(
+            row,
+            tool,
+            tool_args,
+            auth_env,
+            agent_name=_os.environ.get("AX_AGENT_NAME"),
+            agent_id=_os.environ.get("AX_AGENT_ID"),
+        )
     except Exception as e:
         return ToolResult(output=f"Connector error: {e}", is_error=True)
     output = _json.dumps(result, indent=2, default=str)
@@ -460,7 +478,10 @@ _CONNECTOR_TOOL_SCHEMAS = {
             "type": "object",
             "properties": {
                 "connector": {"type": "string", "description": "Connector reference name"},
-                "query": {"type": "string", "description": "Natural-language description of the tool you need (e.g. 'send email')"},
+                "query": {
+                    "type": "string",
+                    "description": "Natural-language description of the tool you need (e.g. 'send email')",
+                },
                 "app": {"type": "string", "description": "Filter results to a specific app (e.g. 'gmail', 'slack')"},
                 "limit": {"type": "integer", "description": "Max results to return", "default": 5},
             },
@@ -519,6 +540,7 @@ def register_connector_tools_in_hermes(workdir: str) -> int:
                 if result.is_error:
                     return _json.dumps({"error": result.output})
                 return result.output
+
             return handler
 
         registry.register(

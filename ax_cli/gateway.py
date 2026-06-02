@@ -281,6 +281,11 @@ GATEWAY_ACTIVITY_EVENTS: dict[str, str] = {
     "channel_message_received": "received",
     "channel_message_delivered": "delivered",
     "channel_reply_sent": "reply",
+    # connector: outbound tool invocations via connector providers
+    "connector_tool_started": "tool",
+    "connector_tool_completed": "tool",
+    "connector_tool_failed": "result",
+    "connector_tool_denied": "result",
     # result: terminal outcome that is not a reply
     "runtime_error": "result",
     "agent_skipped": "result",
@@ -3200,6 +3205,72 @@ def save_gateway_session(data: dict[str, Any]) -> Path:
     return session_path()
 
 
+def apply_space_to_gateway_session(
+    space_id: str,
+    *,
+    space_name: str | None = None,
+) -> dict[str, Any] | None:
+    """Point the Gateway bootstrap session at ``space_id`` so it can't diverge
+    from the CLI's current space.
+
+    Returns ``None`` when no Gateway session exists (Gateway was never logged
+    in) — the caller has nothing to sync and should stay silent. A session is
+    never fabricated here: if one is created later by ``ax gateway login`` the
+    operator picks the space then.
+
+    The write is atomic and daemon-independent (see :func:`_write_json` /
+    :func:`save_gateway_session`), so it is safe while the daemon is stopped.
+    The daemon reads ``session.json`` only at startup, so when a daemon is
+    already running the change applies on the next ``ax gateway start`` — the
+    returned ``daemon_running`` flag lets the caller warn about that.
+
+    Returns a status dict::
+
+        {
+          "updated": bool,            # False when the session already matched
+          "session_path": str,
+          "previous_space_id": str | None,
+          "space_id": str,
+          "space_name": str | None,
+          "daemon_running": bool,
+        }
+    """
+    session = load_gateway_session()
+    if not session:
+        return None
+
+    previous_space_id = str(session.get("space_id") or "").strip() or None
+    daemon_running = active_gateway_pid() is not None
+
+    if previous_space_id == space_id:
+        # Already aligned — don't rewrite the file or emit a redundant audit
+        # event. Still report daemon state in case the caller wants to message.
+        return {
+            "updated": False,
+            "session_path": str(session_path()),
+            "previous_space_id": previous_space_id,
+            "space_id": space_id,
+            "space_name": space_name or session.get("space_name"),
+            "daemon_running": daemon_running,
+        }
+
+    session["space_id"] = space_id
+    if space_name:
+        session["space_name"] = space_name
+    path = save_gateway_session(session)
+    # Keep the spaces cache warm so subsequent slug switches stay cache-served.
+    upsert_space_cache_entry(space_id, name=space_name, slug=None)
+    record_gateway_activity("gateway_space_use", space_id=space_id, space_name=space_name)
+    return {
+        "updated": True,
+        "session_path": str(path),
+        "previous_space_id": previous_space_id,
+        "space_id": space_id,
+        "space_name": space_name,
+        "daemon_running": daemon_running,
+    }
+
+
 _LOAD_SNAPSHOT_KEY = "_load_snapshot"
 
 # Fields the operator (CLI / UI server) writes authoritatively. The daemon's
@@ -4049,22 +4120,34 @@ def _run_exec_handler(
     def _consume_stdout() -> None:
         if process.stdout is None:
             return
-        for raw in process.stdout:
-            event = _parse_gateway_exec_event(raw)
-            if event is not None:
-                if on_event is not None:
-                    try:
-                        on_event(event)
-                    except Exception:
-                        pass
-                continue
-            stdout_lines.append(raw)
+        try:
+            for raw in process.stdout:
+                event = _parse_gateway_exec_event(raw)
+                if event is not None:
+                    if on_event is not None:
+                        try:
+                            on_event(event)
+                        except Exception:
+                            pass
+                    continue
+                stdout_lines.append(raw)
+        except ValueError:
+            # process.stdout was closed by the finally block in the main
+            # thread before this consumer drained the pipe. Bridges that
+            # exit quickly (sub-3s Groq calls) can hit this race, dropping
+            # the final reply line. Caller's join(timeout=1.0) already
+            # gave us a fair window, treat as end-of-stream and return
+            # what we have.
+            pass
 
     def _consume_stderr() -> None:
         if process.stderr is None:
             return
-        for raw in process.stderr:
-            stderr_lines.append(raw)
+        try:
+            for raw in process.stderr:
+                stderr_lines.append(raw)
+        except ValueError:
+            pass
 
     stdout_thread = threading.Thread(target=_consume_stdout, daemon=True, name=f"gw-exec-stdout-{entry.get('name')}")
     stderr_thread = threading.Thread(target=_consume_stderr, daemon=True, name=f"gw-exec-stderr-{entry.get('name')}")
@@ -4079,8 +4162,13 @@ def _run_exec_handler(
         timed_out = True
         process.kill()
     finally:
-        stdout_thread.join(timeout=1.0)
-        stderr_thread.join(timeout=1.0)
+        # Give consumer threads enough time to drain the pipe before
+        # closing. With 1.0s, fast-exiting bridges (sub-3s Groq calls
+        # via langgraph_bridge.py) can lose their final reply line if
+        # the OS hasn't propagated EOF before the close fires. 5.0s is
+        # well below any caller-side timeout we'd hit. See issue #104.
+        stdout_thread.join(timeout=5.0)
+        stderr_thread.join(timeout=5.0)
         if process.stdout is not None:
             process.stdout.close()
         if process.stderr is not None:
@@ -4292,6 +4380,8 @@ _HERMES_SENTINEL_SDK_RUNTIMES = {
     "groq_sdk",
     "gemini_sdk",
     "leapfrog_sdk",
+    "mistral_sdk",
+    "xai_sdk",
 }
 
 
@@ -5514,19 +5604,17 @@ class ManagedAgentRuntime:
         try:
             hermes_bin_path = _hermes_bin(self.entry)
         except RuntimeError as exc:
-            self._record_supervised_setup_error(str(exc))
+            self._record_setup_error(str(exc))
             return
         try:
             load_gateway_managed_agent_token(self.entry)
         except ValueError as exc:
-            self._record_supervised_setup_error(str(exc))
+            self._record_setup_error(str(exc))
             return
         try:
             home = _scaffold_hermes_plugin_home(self.entry)
         except OSError as exc:
-            self._record_supervised_setup_error(
-                f"Failed to scaffold HERMES_HOME ({_hermes_plugin_home(self.entry)}): {exc}"
-            )
+            self._record_setup_error(f"Failed to scaffold HERMES_HOME ({_hermes_plugin_home(self.entry)}): {exc}")
             return
 
         workdir = _hermes_plugin_workdir(self.entry)
@@ -5566,10 +5654,11 @@ class ManagedAgentRuntime:
             )
             self._sentinel_stdout_thread.start()
         except Exception as exc:
-            self._record_supervised_setup_error(f"Failed to start Hermes plugin: {str(exc)[:360]}")
+            self._record_setup_error(f"Failed to start Hermes plugin: {str(exc)[:360]}")
             return
 
         self._supervised_process = process
+        self._clear_setup_error_state()
         self._update_state(
             effective_state="running",
             current_status=None,
@@ -5627,18 +5716,6 @@ class ManagedAgentRuntime:
                 error=error,
             )
             return
-
-    def _record_supervised_setup_error(self, error: str) -> None:
-        """Shared error path for supervised-subprocess runtimes."""
-        self._update_state(
-            effective_state="error",
-            current_status="error",
-            current_activity=error,
-            last_error=error,
-            last_runtime_error_at=_now_iso(),
-        )
-        self.entry["last_runtime_error_at"] = self._state.get("last_runtime_error_at")
-        record_gateway_activity("runtime_error", entry=self.entry, error=error)
 
     def _publish_processing_status(
         self,

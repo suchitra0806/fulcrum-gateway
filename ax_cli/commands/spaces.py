@@ -127,6 +127,17 @@ def use_space(
     space_row = _find_space(client, sid) or {}
     label = _space_label(space_row, sid)
     save_space_id(sid, local=not global_config)
+    # Keep the Gateway bootstrap session pointed at the same space so the two
+    # stores can't silently diverge (issue #82). Best-effort: a Gateway problem
+    # must never break the primary CLI-config write above. The session is a
+    # single global file, so we sync it regardless of --global.
+    gw_sync = None
+    try:
+        from ..gateway import apply_space_to_gateway_session
+
+        gw_sync = apply_space_to_gateway_session(sid, space_name=space_row.get("name"))
+    except Exception:
+        gw_sync = None
     allowed, agent_name = _bound_agent_allows_space(client, sid)
     result = {
         "space_id": sid,
@@ -134,12 +145,20 @@ def use_space(
         "scope": "global" if global_config else "local",
         "bound_agent": agent_name,
         "bound_agent_allowed": allowed,
+        "gateway_session": gw_sync,
     }
     if as_json:
         print_json(result)
         return
     console.print(f"[green]Current space:[/green] {label}")
     console.print(f"[dim]Saved to {'global config' if global_config else 'local .ax/config.toml'}.[/dim]")
+    if gw_sync and gw_sync.get("updated"):
+        console.print(f"[dim]Gateway session also set to {gw_sync.get('space_name') or label}.[/dim]")
+        if gw_sync.get("daemon_running"):
+            console.print(
+                "[yellow]Warning:[/yellow] Gateway daemon is running — restart it "
+                "(`ax gateway stop && ax gateway start`) to apply the new space."
+            )
     if allowed is False and agent_name:
         console.print(
             f"[yellow]Warning:[/yellow] @{agent_name} is not attached to this space; agent-authored writes may be rejected."

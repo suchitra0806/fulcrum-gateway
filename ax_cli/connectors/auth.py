@@ -13,25 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import paths as _paths
 from .errors import ConnectorAuthError
 
 log = logging.getLogger("connectors.auth")
-
-
-def _auth_dir() -> Path:
-    from ax_cli.gateway import gateway_dir
-
-    d = gateway_dir() / "connectors" / "auth"
-    d.mkdir(parents=True, exist_ok=True)
-    try:
-        d.chmod(0o700)
-    except OSError:
-        pass
-    return d
-
-
-def _auth_path(connector_id: str) -> Path:
-    return _auth_dir() / f"{connector_id}.env"
 
 
 def _serialize_env(kvs: dict[str, str]) -> str:
@@ -73,7 +58,7 @@ def write_auth(connector_id: str, connector_name: str, kvs: dict[str, str]) -> P
         raise ConnectorAuthError(connector_name, "No key-value pairs provided")
 
     # Merge with existing keys so we don't wipe previously stored credentials
-    path = _auth_path(connector_id)
+    path = _paths.auth_path(connector_id)
     existing: dict[str, str] = {}
     if path.exists():
         try:
@@ -111,7 +96,7 @@ def write_auth(connector_id: str, connector_name: str, kvs: dict[str, str]) -> P
 
 
 def read_auth(connector_id: str, connector_name: str) -> dict[str, str]:
-    path = _auth_path(connector_id)
+    path = _paths.auth_path(connector_id)
     if not path.exists():
         raise ConnectorAuthError(connector_name, "No auth file found. Run: ax gateway connectors auth write")
     try:
@@ -122,7 +107,7 @@ def read_auth(connector_id: str, connector_name: str) -> dict[str, str]:
 
 
 def auth_status(connector_id: str, connector_name: str) -> dict[str, Any]:
-    path = _auth_path(connector_id)
+    path = _paths.auth_path(connector_id)
     if not path.exists():
         return {
             "connector": connector_name,
@@ -154,7 +139,7 @@ def auth_status(connector_id: str, connector_name: str) -> dict[str, Any]:
 
 
 def cleanup_auth(connector_id: str) -> bool:
-    path = _auth_path(connector_id)
+    path = _paths.auth_path(connector_id)
     if path.exists():
         path.unlink()
         return True

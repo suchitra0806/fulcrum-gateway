@@ -814,6 +814,66 @@ def test_gateway_cli_argv_prefers_current_ax_script(monkeypatch, tmp_path):
     assert argv == [str(current_ax.resolve()), "gateway", "run"]
 
 
+# ── _resolve_gateway_login_base_url (#129) ─────────────────────────────────
+#
+# `ax gateway login` was falling back to http://localhost:8001 when no
+# axctl login existed, because resolve_user_base_url() falls through to
+# resolve_base_url() (the local-dev default) which returned a truthy
+# string and shortcircuited the `or DEFAULT_LOGIN_BASE_URL` chain. The
+# --url help text promised paxai.app as the default. These tests pin the
+# resolution order so the bug stays closed and the helper does not drift
+# back into the broader resolve_user_base_url() behavior.
+
+
+def test_resolve_gateway_login_base_url_explicit_wins(monkeypatch):
+    """Explicit --url arg must win over env, user config, and the default."""
+    monkeypatch.setenv("AX_USER_BASE_URL", "https://env.example")
+    monkeypatch.setattr(gateway_cmd, "_load_user_config", lambda: {"base_url": "https://cfg.example"}, raising=False)
+    assert gateway_cmd._resolve_gateway_login_base_url("https://explicit.example") == "https://explicit.example"
+
+
+def test_resolve_gateway_login_base_url_env_wins_when_no_explicit(monkeypatch):
+    """AX_USER_BASE_URL env wins over the user config and the default."""
+    monkeypatch.setenv("AX_USER_BASE_URL", "https://env.example")
+
+    def _fake_load() -> dict:
+        return {"base_url": "https://cfg.example"}
+
+    from ax_cli import config as _config
+
+    monkeypatch.setattr(_config, "_load_user_config", _fake_load)
+    assert gateway_cmd._resolve_gateway_login_base_url(None) == "https://env.example"
+
+
+def test_resolve_gateway_login_base_url_user_cfg_wins_when_no_env(monkeypatch):
+    """User-config base_url is used when no env override is set."""
+    monkeypatch.delenv("AX_USER_BASE_URL", raising=False)
+
+    def _fake_load() -> dict:
+        return {"base_url": "https://cfg.example"}
+
+    from ax_cli import config as _config
+
+    monkeypatch.setattr(_config, "_load_user_config", _fake_load)
+    assert gateway_cmd._resolve_gateway_login_base_url(None) == "https://cfg.example"
+
+
+def test_resolve_gateway_login_base_url_falls_to_paxai_when_unconfigured(monkeypatch):
+    """The actual bug from issue #129: with no explicit arg, no env, and
+    no axctl login, the gateway login command must default to paxai.app
+    matching the --url help text, not the local-dev localhost:8001 that
+    the broader resolve_user_base_url() would surface."""
+    monkeypatch.delenv("AX_USER_BASE_URL", raising=False)
+
+    from ax_cli import config as _config
+
+    monkeypatch.setattr(_config, "_load_user_config", lambda: {})
+    resolved = gateway_cmd._resolve_gateway_login_base_url(None)
+    assert resolved == "https://paxai.app"
+    assert "localhost" not in resolved
+    assert "127.0.0.1" not in resolved
+
+
 def test_gateway_start_without_login_starts_ui_only(monkeypatch, tmp_path):
     config_dir = tmp_path / "config"
     monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
@@ -3568,16 +3628,17 @@ def test_gateway_templates_command_json():
         "hermes",
         "ollama",
         "langgraph",
+        "langgraph_composio",
         "autogen",
         "strands",
         "echo_test",
         "service_account",
         "pass_through",
         "sentinel_cli",
-        "claude_code_channel",
     ]
+    assert ids[10] == "claude_code_channel"
     assert "inbox" not in ids
-    assert payload["count"] == 10
+    assert payload["count"] == 11
     ollama = next(item for item in payload["templates"] if item["id"] == "ollama")
     assert ollama["runtime_type"] == "exec"
     assert ollama["launchable"] is True
@@ -3720,14 +3781,15 @@ def test_gateway_ui_handler_serves_status_and_agent_detail(monkeypatch, tmp_path
             template_payload = templates.json()
             assert template_payload["templates"][0]["id"] == "hermes"
             assert template_payload["templates"][2]["id"] == "langgraph"
-            assert template_payload["templates"][3]["id"] == "autogen"
-            assert template_payload["templates"][4]["id"] == "strands"
-            assert template_payload["templates"][6]["id"] == "service_account"
+            assert template_payload["templates"][3]["id"] == "langgraph_composio"
+            assert template_payload["templates"][4]["id"] == "autogen"
+            assert template_payload["templates"][5]["id"] == "strands"
+            assert template_payload["templates"][7]["id"] == "service_account"
             channel_template = next(
                 item for item in template_payload["templates"] if item["id"] == "claude_code_channel"
             )
             assert channel_template["runtime_type"] == "claude_code_channel"
-            assert template_payload["count"] == 10
+            assert template_payload["count"] == 11
 
             detail = client.get("/api/agents/echo-bot")
             assert detail.status_code == 200
@@ -7171,9 +7233,7 @@ def test_save_registry_preserves_other_writer_row_deletion(monkeypatch, tmp_path
 
     final = gateway_core.load_gateway_registry()
     names = {a["name"] for a in final["agents"]}
-    assert names == {"incumbent"}, (
-        "to-remove was resurrected by daemon save — registry remove race regressed (#42)"
-    )
+    assert names == {"incumbent"}, "to-remove was resurrected by daemon save — registry remove race regressed (#42)"
     # Daemon's effective_state update on the incumbent should still apply.
     incumbent = next(a for a in final["agents"] if a["name"] == "incumbent")
     assert incumbent["effective_state"] == "running"
@@ -8106,6 +8166,70 @@ def test_operator_start_clears_error_state(monkeypatch, tmp_path):
     assert entry.get("setup_disabled_at") is None
 
 
+def test_agents_start_refuses_when_daemon_stopped(monkeypatch, tmp_path):
+    # #158 — without the Gateway daemon there is no supervisor to bring the
+    # agent up; the previous behaviour returned exit 0 with a success message,
+    # leaving the operator to discover effective_state=stopped via `show`.
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+
+    gateway_core.save_gateway_session(
+        {"token": "axp_u_test", "base_url": "https://paxai.app", "space_id": "space-1"}
+    )
+    registry = {
+        "agents": [
+            {
+                "name": "echo-demo",
+                "agent_id": "agent-echo",
+                "template_id": "echo_test",
+                "runtime_type": "echo",
+                "desired_state": "stopped",
+            }
+        ],
+    }
+    gateway_core.save_gateway_registry(registry)
+    monkeypatch.setattr(gateway_cmd, "active_gateway_pid", lambda: None)
+
+    result = runner.invoke(app, ["gateway", "agents", "start", "echo-demo"])
+
+    assert result.exit_code == 1, result.output
+    assert "Gateway daemon is stopped" in result.output
+    assert "ax gateway start" in result.output
+    reloaded = gateway_core.load_gateway_registry()
+    entry = next(a for a in reloaded["agents"] if a["name"] == "echo-demo")
+    assert entry["desired_state"] == "stopped"
+
+
+def test_agents_start_proceeds_when_daemon_running(monkeypatch, tmp_path):
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+
+    gateway_core.save_gateway_session(
+        {"token": "axp_u_test", "base_url": "https://paxai.app", "space_id": "space-1"}
+    )
+    registry = {
+        "agents": [
+            {
+                "name": "echo-demo",
+                "agent_id": "agent-echo",
+                "template_id": "echo_test",
+                "runtime_type": "echo",
+                "desired_state": "stopped",
+            }
+        ],
+    }
+    gateway_core.save_gateway_registry(registry)
+    monkeypatch.setattr(gateway_cmd, "active_gateway_pid", lambda: 12345)
+
+    result = runner.invoke(app, ["gateway", "agents", "start", "echo-demo"])
+
+    assert result.exit_code == 0, result.output
+    assert "Desired state set to running" in result.output
+    reloaded = gateway_core.load_gateway_registry()
+    entry = next(a for a in reloaded["agents"] if a["name"] == "echo-demo")
+    assert entry["desired_state"] == "running"
+
+
 def test_different_error_signature_resets_consecutive_count(monkeypatch, tmp_path):
     """When the error message changes, consecutive count resets to 1."""
     _isolate_gateway_paths(monkeypatch, tmp_path)
@@ -8187,6 +8311,80 @@ def test_distinct_errors_sharing_long_prefix_do_not_falsely_dedup(monkeypatch, t
     assert runtime.entry["consecutive_setup_errors"] == 1, (
         "distinct errors sharing a 120-char prefix were falsely deduped (#34 regression)"
     )
+
+
+def test_hermes_plugin_setup_error_increments_consecutive_count(monkeypatch, tmp_path):
+    """#33: the hermes_plugin runtime must go through the same
+    consecutive-error counter + auto-disable plumbing as hermes_sentinel.
+
+    Before this fix, _start_hermes_plugin_process called the old inline
+    _record_supervised_setup_error which only recorded state — no counter,
+    no auto-disable, no escalating backoff. A plugin agent with a broken
+    precondition (missing token, missing scaffold) would retry every
+    reconcile tick indefinitely.
+    """
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    # Token file path points nowhere — load_gateway_managed_agent_token raises
+    # at the first call site inside _start_hermes_plugin_process.
+    token_file = tmp_path / "token-missing"
+
+    runtime = gateway_core.ManagedAgentRuntime(
+        {
+            "name": "plugin-esc",
+            "agent_id": "agent-plugin-esc",
+            "space_id": "space-1",
+            "base_url": "https://paxai.app",
+            "runtime_type": "hermes_plugin",
+            "token_file": str(token_file),
+            "consecutive_setup_errors": 0,
+        },
+        client_factory=lambda **kwargs: object(),
+    )
+
+    runtime._start_hermes_plugin_process(runtime_instance_id="ri-test")
+
+    assert runtime.entry.get("consecutive_setup_errors") == 1, (
+        "hermes_plugin setup error did not increment counter — escalating "
+        "backoff plumbing not wired (#33 regression)"
+    )
+    assert runtime.entry.get("last_setup_error_signature"), (
+        "hermes_plugin setup error did not record signature for dedup"
+    )
+
+
+def test_hermes_plugin_setup_error_eventually_auto_disables(monkeypatch, tmp_path):
+    """#33 (auto-disable side): repeated plugin setup failures must auto-disable
+    after SETUP_ERROR_MAX_CONSECUTIVE identical errors, same as sentinel."""
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    # ``hermes_bin`` set to a string short-circuits _hermes_bin so the
+    # deterministic failure point is the token-missing ValueError — that's
+    # the error whose signature we seed below.
+    token_file = tmp_path / "token-missing"
+
+    # Seed at MAX - 1 so the next failure crosses the threshold.
+    seed_error_msg = f"Gateway-managed token file is missing: {token_file}"
+    runtime = gateway_core.ManagedAgentRuntime(
+        {
+            "name": "plugin-disable",
+            "agent_id": "agent-plugin-disable",
+            "space_id": "space-1",
+            "base_url": "https://paxai.app",
+            "runtime_type": "hermes_plugin",
+            "hermes_bin": "/skip-step-1-bin-resolution",
+            "token_file": str(token_file),
+            "consecutive_setup_errors": gateway_core.SETUP_ERROR_MAX_CONSECUTIVE - 1,
+            "last_setup_error_signature": gateway_core._setup_error_signature(seed_error_msg),
+        },
+        client_factory=lambda **kwargs: object(),
+    )
+
+    runtime._start_hermes_plugin_process(runtime_instance_id="ri-test")
+
+    assert runtime.entry.get("setup_disabled") is True, (
+        "hermes_plugin did not auto-disable after MAX consecutive setup errors"
+    )
+    assert "Auto-disabled" in str(runtime.entry.get("setup_disabled_reason") or "")
+
 
 
 # -- Active-space simplification (single source of truth) ---------------------
@@ -9082,14 +9280,16 @@ def test_gateway_local_connect_404_uses_actionable_guidance(monkeypatch):
     assert "@wishy" in msg
     assert "Live Listener" in msg
     assert "ax gateway local connect wishy --workdir /repo" in msg
+
+
 # ── _hermes_sentinel_sdk_runtime ────────────────────────────────────────────
 #
 # The Hermes sentinel launcher historically hardcoded `--runtime hermes_sdk`,
 # which meant operators could never route a managed Hermes agent through
-# alternate SDK runtimes (openai_sdk, groq_sdk, gemini_sdk) that the
-# vendored sentinel itself supports. The helper below resolves the choice
-# from per-agent registry entry fields and falls back to the historical
-# default so existing setups are unchanged.
+# alternate SDK runtimes (openai_sdk, groq_sdk, gemini_sdk, leapfrog_sdk,
+# mistral_sdk, xai_sdk) that the vendored sentinel itself supports. The
+# helper below resolves the choice from per-agent registry entry fields and
+# falls back to the historical default so existing setups are unchanged.
 
 
 def test_hermes_sentinel_sdk_runtime_defaults_to_hermes_sdk_when_unset():
@@ -9117,6 +9317,22 @@ def test_hermes_sentinel_sdk_runtime_reads_sdk_runtime_fallback():
     """Tertiary knob — terse alias."""
     entry = {"name": "ada", "sdk_runtime": "openai_sdk"}
     assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "openai_sdk"
+
+
+def test_hermes_sentinel_sdk_runtime_accepts_mistral_sdk():
+    """mistral_sdk (PR #30) is a registered runtime and must be selectable
+    via the sentinel switch. Regression guard for the allowlist gap where
+    the runtime merged without an entry in _HERMES_SENTINEL_SDK_RUNTIMES,
+    so operators silently got hermes_sdk instead."""
+    entry = {"name": "ada", "sentinel_sdk_runtime": "mistral_sdk"}
+    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "mistral_sdk"
+
+
+def test_hermes_sentinel_sdk_runtime_accepts_xai_sdk():
+    """xai_sdk (PR #71) is a registered runtime and must be selectable via
+    the sentinel switch. Same allowlist-gap regression guard as mistral_sdk."""
+    entry = {"name": "ada", "sentinel_sdk_runtime": "xai_sdk"}
+    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "xai_sdk"
 
 
 def test_hermes_sentinel_sdk_runtime_rejects_unknown_values():
@@ -9170,3 +9386,52 @@ def test_build_hermes_sentinel_cmd_default_runtime_unchanged_for_existing_entrie
     assert "--runtime" in cmd
     runtime_idx = cmd.index("--runtime") + 1
     assert cmd[runtime_idx] == "hermes_sdk"
+
+
+# ---------- gateway spaces use as full alias of `ax spaces use` (issue #82) ----------
+
+
+def _wire_gateway_spaces_use(monkeypatch, tmp_path):
+    """Stand up a gateway session + stub resolution so `gateway spaces use`
+    runs offline. Returns the captured save_space_id call dict."""
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+    gateway_core.save_gateway_session(
+        {"token": "axp_u_test.token", "base_url": "https://paxai.app", "space_id": "space-old"}
+    )
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(gateway_cmd, "_load_gateway_user_client", lambda: MagicMock())
+    monkeypatch.setattr(gateway_cmd, "resolve_space_id", lambda c, explicit=None: "space-new")
+    monkeypatch.setattr(gateway_cmd, "_space_name_for_id", lambda c, sid: "New Space")
+    monkeypatch.setattr(gateway_core, "active_gateway_pid", lambda: None)
+    captured = {}
+    # save_space_id is lazily imported from ..config inside the command.
+    monkeypatch.setattr("ax_cli.config.save_space_id", lambda sid, **kw: captured.update(sid=sid, **kw))
+    return captured
+
+
+def test_gateway_spaces_use_syncs_both_stores(monkeypatch, tmp_path):
+    captured = _wire_gateway_spaces_use(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["gateway", "spaces", "use", "space-new", "--json"])
+
+    assert result.exit_code == 0, result.output
+    # Gateway session updated...
+    assert gateway_core.load_gateway_session()["space_id"] == "space-new"
+    # ...and the CLI config store synced too (default local).
+    assert captured == {"sid": "space-new", "local": True}
+    payload = json.loads(result.stdout)
+    assert payload["space_id"] == "space-new"
+    assert payload["cli_scope"] == "local"
+    assert payload["gateway_session"]["updated"] is True
+
+
+def test_gateway_spaces_use_global_writes_global_cli_config(monkeypatch, tmp_path):
+    captured = _wire_gateway_spaces_use(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["gateway", "spaces", "use", "space-new", "--global", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert captured == {"sid": "space-new", "local": False}
+    assert json.loads(result.stdout)["cli_scope"] == "global"

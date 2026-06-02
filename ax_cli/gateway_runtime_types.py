@@ -18,6 +18,10 @@ def _gateway_setup_skill_path() -> Path:
     return _repo_root() / "skills" / "gateway-agent-setup" / "SKILL.md"
 
 
+def _gateway_composio_connectors_skill_path() -> Path:
+    return _repo_root() / "skills" / "gateway-composio-connectors" / "SKILL.md"
+
+
 def _bridge_python() -> str:
     """Return the Python interpreter path Gateway should use for exec-bridge agents.
 
@@ -373,6 +377,7 @@ def runtime_type_list() -> list[dict[str, Any]]:
 def agent_template_catalog() -> dict[str, dict[str, Any]]:
     repo_root = _repo_root()
     skill_path = _gateway_setup_skill_path()
+    composio_skill_path = _gateway_composio_connectors_skill_path()
     runtime_signals = {
         key: runtime_type_definition(key)["signals"]
         for key in ("echo", "exec", "hermes_plugin", "hermes_sentinel", "sentinel_cli", "claude_code_channel", "inbox")
@@ -469,6 +474,44 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
                 "supports_command_override": True,
             },
         },
+        "langgraph_composio": {
+            "id": "langgraph_composio",
+            "label": "LangGraph + Composio",
+            "description": "LangGraph bridge that searches and runs tools via Gateway connectors (Composio).",
+            "availability": "ready",
+            "launchable": True,
+            "runtime_type": "exec",
+            "asset_class": "interactive_agent",
+            "intake_model": "launch_on_send",
+            "trigger_sources": ["direct_message"],
+            "return_paths": ["inline_reply"],
+            "telemetry_shape": "basic",
+            "suggested_name": "langgraph-composio-bot",
+            "operator_summary": (
+                "LangGraph round-trip with Composio intent search and optional RUN: tool execution "
+                "through the Gateway connector registry (no secrets in agent config)."
+            ),
+            "recommended_test_message": "List GitHub tools for listing repository stargazers.",
+            "what_you_need": [
+                "Python 3.11+ and a registered Composio connector (`ax gateway connectors add` + auth write).",
+                "Pass `--connector-ref <name>` when adding this agent.",
+                "Optional: `pip install langgraph` for a one-node StateGraph wrapper (same logic without it).",
+            ],
+            "setup_skill": "gateway-composio-connectors",
+            "setup_skill_path": str(composio_skill_path),
+            "defaults": {
+                "runtime_type": "exec",
+                "exec_command": (
+                    f"{_bridge_python()} {repo_root / 'examples' / 'gateway_langgraph_composio' / 'langgraph_composio_bridge.py'}"
+                ),
+                "workdir": str(repo_root),
+            },
+            "signals": runtime_signals["exec"],
+            "advanced": {
+                "adapter_label": "Gateway-managed LangGraph + Composio bridge",
+                "supports_command_override": True,
+            },
+        },
         "autogen": {
             "id": "autogen",
             "label": "AutoGen",
@@ -502,7 +545,7 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
             "setup_skill_path": str(skill_path),
             "defaults": {
                 "runtime_type": "exec",
-                "exec_command": "python3 examples/gateway_autogen/autogen_bridge.py",
+                "exec_command": f"{_bridge_python()} {repo_root / 'examples' / 'gateway_autogen' / 'autogen_bridge.py'}",
                 "workdir": str(repo_root),
             },
             "signals": runtime_signals["exec"],
@@ -760,6 +803,7 @@ def agent_template_list(*, include_advanced: bool = False) -> list[dict[str, Any
         "hermes",
         "ollama",
         "langgraph",
+        "langgraph_composio",
         "autogen",
         "strands",
         "echo_test",

@@ -1093,7 +1093,7 @@ class TestLoginCommand:
 
     def test_login_exchanger_fails(self, monkeypatch):
         monkeypatch.setattr(gw_cmd, "_resolve_gateway_login_token", lambda t: "axp_u_test123")
-        monkeypatch.setattr(gw_cmd, "resolve_user_base_url", lambda: "https://paxai.app")
+        monkeypatch.setattr(gw_cmd, "_resolve_gateway_login_base_url", lambda explicit=None: "https://paxai.app")
 
         # Mock the TokenExchanger import
         fake_exchanger = MagicMock()
@@ -1111,7 +1111,7 @@ class TestLoginCommand:
 
     def test_login_json_success(self, monkeypatch):
         monkeypatch.setattr(gw_cmd, "_resolve_gateway_login_token", lambda t: "axp_u_test123")
-        monkeypatch.setattr(gw_cmd, "resolve_user_base_url", lambda: "https://paxai.app")
+        monkeypatch.setattr(gw_cmd, "_resolve_gateway_login_base_url", lambda explicit=None: "https://paxai.app")
 
         # Mock TokenExchanger
         fake_exchanger = MagicMock()
@@ -1146,7 +1146,7 @@ class TestLoginCommand:
 
     def test_login_with_space_id(self, monkeypatch):
         monkeypatch.setattr(gw_cmd, "_resolve_gateway_login_token", lambda t: "axp_u_test123")
-        monkeypatch.setattr(gw_cmd, "resolve_user_base_url", lambda: "https://paxai.app")
+        monkeypatch.setattr(gw_cmd, "_resolve_gateway_login_base_url", lambda explicit=None: "https://paxai.app")
 
         import ax_cli.token_cache as tc_mod
 

@@ -41,7 +41,7 @@ from ..commands.bootstrap import (
     _mint_agent_pat,
     _polish_metadata,
 )
-from ..config import resolve_space_id, resolve_user_base_url, resolve_user_token
+from ..config import resolve_space_id, resolve_user_token
 from ..gateway import (
     AX_PLUGIN_NAME,
     GatewayDaemon,
@@ -59,6 +59,7 @@ from ..gateway import (
     agent_token_path,
     annotate_runtime_health,
     apply_entry_current_space,
+    apply_space_to_gateway_session,
     approve_gateway_approval,
     archive_stale_gateway_approvals,
     clear_gateway_ui_state,
@@ -96,7 +97,6 @@ from ..gateway import (
     ui_log_path,
     ui_status,
     upsert_agent_entry,
-    upsert_space_cache_entry,
     verify_local_session_token,
     write_gateway_ui_state,
 )
@@ -121,6 +121,10 @@ runtime_app = typer.Typer(
 local_app = typer.Typer(name="local", help="Connect local pass-through agents to Gateway", no_args_is_help=True)
 connectors_app = typer.Typer(name="connectors", help="Manage outbound tool connectors", no_args_is_help=True)
 connectors_auth_app = typer.Typer(name="auth", help="Manage connector credentials", no_args_is_help=True)
+connectors_tools_app = typer.Typer(name="tools", help="Discover and search connector tools", no_args_is_help=True)
+audit_app = typer.Typer(
+    name="audit", help="Export the activity audit log in SIEM-compatible formats", no_args_is_help=True
+)
 _ATTACHED_SESSION_PROCESSES: list[subprocess.Popen[bytes]] = []
 app.add_typer(agents_app, name="agents")
 app.add_typer(spaces_app, name="spaces")
@@ -128,7 +132,9 @@ app.add_typer(approvals_app, name="approvals")
 app.add_typer(runtime_app, name="runtime")
 app.add_typer(local_app, name="local")
 app.add_typer(connectors_app, name="connectors")
+app.add_typer(audit_app, name="audit")
 connectors_app.add_typer(connectors_auth_app, name="auth")
+connectors_app.add_typer(connectors_tools_app, name="tools")
 
 _STATE_STYLES = {
     "running": "green",
@@ -190,6 +196,15 @@ def _warn_if_gateway_session_stale() -> None:
     in-process reason for user.toml to be newer than session.json other
     than the user re-logging-in / rotating the user PAT.
 
+    The session and the user login resolve through *different* environment
+    scoping (see #80): `session_path()` scopes via `gateway_environment()`
+    (`AX_GATEWAY_ENV`, ignores the active-env marker), while `_user_config_path()`
+    scopes via `_resolve_user_env()` (consults `AX_USER_ENV`/`AX_ENV` and the
+    active marker). When those disagree the two paths point at *different*
+    environments' files, so an mtime comparison would pair the session against
+    an unrelated `user.toml` and false-positive. In that case we can't make a
+    trustworthy comparison, so skip silently rather than cry wolf.
+
     Fails closed silently — never raises, never blocks the command — so a
     `stat()` error, missing user.toml (different env), or an unexpected
     filesystem edge case can't break gateway commands themselves.
@@ -199,6 +214,12 @@ def _warn_if_gateway_session_stale() -> None:
 
         session_p = gateway_core.session_path()
         user_p = _user_config_path()
+        # Only compare when both stores resolve to the same environment. The
+        # user.toml the gateway env *would* use must match the one the user-env
+        # scoping picked; otherwise the two paths are unrelated (see #80).
+        gateway_user_p = _user_config_path(gateway_core.gateway_environment() or "default")
+        if gateway_user_p != user_p:
+            return
         if not session_p.exists() or not user_p.exists():
             return
         if session_p.stat().st_mtime < user_p.stat().st_mtime:
@@ -208,6 +229,73 @@ def _warn_if_gateway_session_stale() -> None:
             )
     except Exception:
         return
+
+
+def _warn_if_gateway_space_divergent() -> None:
+    """Warn when the Gateway session's space differs from the CLI's space.
+
+    `ax spaces use` now syncs both stores (issue #82), but divergence can still
+    exist from a CLI that predates that fix, a hand-edited config, or a session
+    written from a different working directory. A mismatch makes
+    `ax gateway agents add` target a different space than the operator set,
+    surfacing as a cryptic 400 from /api/v1/keys ("Agent IDs not found in this
+    space").
+
+    Reads only local config — `_load_config()` merges TOML files with no network
+    call. Best-effort and fails closed silently: never raises, never blocks.
+    """
+    try:
+        from ..config import _load_config
+
+        session_space = str(load_gateway_session().get("space_id") or "").strip()
+        cli_space = str(_load_config().get("space_id") or "").strip()
+        if session_space and cli_space and session_space != cli_space:
+            err_console.print(
+                f"[yellow]Warning:[/yellow] Gateway space ({session_space}) differs from your "
+                f"CLI space ({cli_space}) — run `ax spaces use <space>` to sync both."
+            )
+    except Exception:
+        return
+
+
+class GatewaySessionRejectedError(RuntimeError):
+    """The gateway session PAT was rejected during token exchange.
+
+    The gateway session token (``~/.ax/gateway/session.json``) is exchanged
+    for a JWT lazily, on the first authenticated upstream call. When that PAT
+    has been rotated or revoked, ``/auth/exchange`` returns 401/403 from deep
+    inside httpx — past every ``_load_gateway_user_client`` caller's local
+    error handling. Surfacing a typed error instead of the raw
+    ``httpx.HTTPStatusError`` lets ``main()`` print an actionable
+    "run ``ax gateway login``" message rather than a Rich traceback (#73).
+    """
+
+
+def _guard_gateway_exchange(client: AxClient) -> None:
+    """Convert an exchange-boundary 401/403 into GatewaySessionRejectedError.
+
+    The gateway session PAT is exchanged for a JWT inside AxClient's single
+    auth boundary (``_get_jwt``). Wrapping that one method catches a rejected
+    session PAT regardless of which command triggered the exchange. Wrapping
+    the constructed instance (rather than subclassing ``AxClient``) keeps the
+    ``AxClient`` construction seam intact for callers that swap it for a
+    double; a double without ``_get_jwt`` is left untouched.
+    """
+    original = getattr(client, "_get_jwt", None)
+    if not callable(original):
+        return
+
+    def guarded(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            url = str(exc.request.url) if exc.request is not None else ""
+            if response is not None and response.status_code in (401, 403) and "/auth/exchange" in url:
+                raise GatewaySessionRejectedError() from exc
+            raise
+
+    client._get_jwt = guarded
 
 
 def _load_gateway_user_client() -> AxClient:
@@ -223,7 +311,10 @@ def _load_gateway_user_client() -> AxClient:
         err_console.print("[red]Gateway bootstrap currently requires a user PAT (axp_u_).[/red]")
         raise typer.Exit(1)
     _warn_if_gateway_session_stale()
-    return AxClient(base_url=str(session.get("base_url") or auth_cmd.DEFAULT_LOGIN_BASE_URL), token=token)
+    _warn_if_gateway_space_divergent()
+    client = AxClient(base_url=str(session.get("base_url") or auth_cmd.DEFAULT_LOGIN_BASE_URL), token=token)
+    _guard_gateway_exchange(client)
+    return client
 
 
 def _load_gateway_session_or_exit() -> dict:
@@ -1262,6 +1353,25 @@ def _resolve_system_prompt_input(
     return current
 
 
+def _normalize_connector_ref(connector_ref: str) -> str:
+    """Resolve and validate a connector registry reference (name or id)."""
+    from ..connectors import ConnectorNotFoundError, find_connector
+
+    ref = str(connector_ref or "").strip()
+    if not ref:
+        raise ValueError(
+            "Template LangGraph + Composio requires --connector-ref <name>. "
+            "Register a connector first: ax gateway connectors add <name> --provider composio --managed-auth"
+        )
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError as exc:
+        raise ValueError(f"Connector not found: {ref!r}. Run: ax gateway connectors list") from exc
+    if not row.enabled:
+        raise ValueError(f"Connector {row.name!r} is disabled. Run: ax gateway connectors enable {row.name}")
+    return row.name
+
+
 def _register_managed_agent(
     *,
     name: str,
@@ -1278,6 +1388,7 @@ def _register_managed_agent(
     timeout_seconds: int | None = None,
     allow_all_users: bool = False,
     allowed_users: str | None = None,
+    connector_ref: str | None = None,
     start: bool = True,
 ) -> dict:
     name = name.strip()
@@ -1309,6 +1420,14 @@ def _register_managed_agent(
     if template_effective_id in {"hermes", "sentinel_cli", "claude_code_channel"} and not explicit_workdir:
         raise ValueError(
             f"Template {template['label']} requires --workdir so Gateway can bind the agent to its runtime folder."
+        )
+    normalized_connector_ref: str | None = None
+    if connector_ref and str(connector_ref).strip():
+        normalized_connector_ref = _normalize_connector_ref(connector_ref)
+    elif template_effective_id == "langgraph_composio":
+        raise ValueError(
+            "Template LangGraph + Composio requires --connector-ref <name>. "
+            "Register a connector first: ax gateway connectors add <name> --provider composio --managed-auth"
         )
     _validate_runtime_registration(runtime_type, exec_cmd)
     timeout_effective = _normalize_timeout_seconds(timeout_seconds)
@@ -1401,6 +1520,8 @@ def _register_managed_agent(
         entry_payload["allow_all_users"] = True
     if allowed_users and str(allowed_users).strip():
         entry_payload["allowed_users"] = str(allowed_users).strip()
+    if normalized_connector_ref:
+        entry_payload["connector_ref"] = normalized_connector_ref
     if requires_approval:
         entry_payload["install_id"] = str(uuid.uuid4())
     entry = upsert_agent_entry(registry, entry_payload)
@@ -1683,6 +1804,7 @@ def _update_managed_agent(
     timeout_seconds: int | object = _UNSET,
     allow_all_users: bool | object = _UNSET,
     allowed_users: str | object = _UNSET,
+    connector_ref: str | object = _UNSET,
     desired_state: str | None = None,
 ) -> dict:
     name = name.strip()
@@ -1740,6 +1862,19 @@ def _update_managed_agent(
         raise ValueError("--ollama-model is only supported with the Ollama template.")
     if template_effective_id == "ollama" and ollama_model is _UNSET and not ollama_model_effective:
         ollama_model_effective = str(ollama_setup_status().get("recommended_model") or "").strip() or None
+
+    if connector_ref is not _UNSET:
+        connector_clean = str(connector_ref or "").strip()
+        if connector_clean:
+            entry["connector_ref"] = _normalize_connector_ref(connector_clean)
+        else:
+            entry.pop("connector_ref", None)
+
+    if template_effective_id == "langgraph_composio" and not str(entry.get("connector_ref") or "").strip():
+        raise ValueError(
+            "Template LangGraph + Composio requires --connector-ref <name>. "
+            "Register a connector first: ax gateway connectors add <name> --provider composio --managed-auth"
+        )
 
     _validate_runtime_registration(runtime_effective, exec_effective)
 
@@ -2791,7 +2926,7 @@ def _status_payload(*, activity_limit: int = 10, include_hidden: bool = False) -
         if space_counts:
             fallback_space_id = max(space_counts.items(), key=lambda item: item[1])[0]
 
-    from ..connectors.storage import connectors_registry_path
+    from ..connectors.paths import connectors_registry_path
     from ..connectors.storage import list_connectors as _list_connectors
 
     _connectors_count = 0
@@ -6582,6 +6717,26 @@ def _render_agent_detail(entry: dict, *, activity: list[dict]) -> Group:
     return Group(*panels)
 
 
+def _resolve_gateway_login_base_url(explicit: str | None) -> str:
+    """Resolve the base URL for `ax gateway login`.
+
+    Explicit `--url` wins. Otherwise prefer the user's existing axctl
+    session (`AX_USER_BASE_URL` env or the `base_url` field from the
+    axctl user config). Fall back to the documented default
+    `https://paxai.app` rather than the local-dev `http://localhost:8001`
+    that the broader `resolve_user_base_url()` would surface, matching
+    the `--url` help text. Closes #129.
+    """
+    if explicit:
+        return explicit
+    from ..config import _load_user_config
+
+    user_cfg = _load_user_config()
+    env_url = os.environ.get("AX_USER_BASE_URL", "").strip()
+    cfg_url = str(user_cfg.get("base_url") or "").strip()
+    return env_url or cfg_url or auth_cmd.DEFAULT_LOGIN_BASE_URL
+
+
 @app.command("login")
 def login(
     token: str = typer.Option(
@@ -6602,7 +6757,7 @@ def login(
     if not resolved_token.startswith("axp_u_"):
         err_console.print("[red]Gateway bootstrap requires a user PAT (axp_u_).[/red]")
         raise typer.Exit(1)
-    resolved_base_url = base_url or resolve_user_base_url() or auth_cmd.DEFAULT_LOGIN_BASE_URL
+    resolved_base_url = _resolve_gateway_login_base_url(base_url)
 
     err_console.print(f"[cyan]Verifying Gateway login against {resolved_base_url}...[/cyan]")
     from ..token_cache import TokenExchanger
@@ -6685,31 +6840,48 @@ def login(
 
 @spaces_app.command("use")
 def use_gateway_space(
-    space: str = typer.Argument(..., help="Space id, slug, or name to make current for Gateway"),
+    space: str = typer.Argument(..., help="Space id, slug, or name to make current"),
+    global_config: bool = typer.Option(
+        False, "--global", help="Save the CLI space to global config instead of local .ax/config.toml"
+    ),
     as_json: bool = JSON_OPTION,
 ):
-    """Set the Gateway bootstrap session's current space by id, slug, or name."""
-    session = _load_gateway_session_or_exit()
+    """Set the current space for both the Gateway session and the CLI.
+
+    Alias of `ax spaces use` — both commands now write both stores so the
+    Gateway session and CLI config can't silently diverge (issue #82).
+    """
+    from ..config import save_space_id
+
+    _load_gateway_session_or_exit()
     client = _load_gateway_user_client()
     sid = resolve_space_id(client, explicit=space)
     space_name = _space_name_for_id(client, sid)
-    session["space_id"] = sid
-    session["space_name"] = space_name
-    path = save_gateway_session(session)
-    # Persist the resolved id/name into the spaces cache so subsequent slug
-    # switches stay cache-served and stop hammering list_spaces.
-    upsert_space_cache_entry(sid, name=space_name, slug=None)
-    record_gateway_activity("gateway_space_use", space_id=sid, space_name=space_name)
+    gw_sync = apply_space_to_gateway_session(sid, space_name=space_name)
+    # Sync the CLI config store too, so `ax send` / runtime resolution agree
+    # with the Gateway session.
+    save_space_id(sid, local=not global_config)
+    session_path_str = gw_sync.get("session_path") if gw_sync else None
     result = {
-        "session_path": str(path),
+        "session_path": session_path_str,
         "space_id": sid,
         "space_name": space_name,
+        "cli_scope": "global" if global_config else "local",
+        "gateway_session": gw_sync,
     }
     if as_json:
         print_json(result)
         return
-    err_console.print(f"[green]Gateway current space:[/green] {space_name or sid} ({sid})")
-    err_console.print(f"  session = {path}")
+    err_console.print(f"[green]Current space:[/green] {space_name or sid} ({sid})")
+    if session_path_str:
+        err_console.print(f"  session = {session_path_str}")
+    err_console.print(f"  cli config = {'global' if global_config else 'local .ax/config.toml'}")
+    if gw_sync and gw_sync.get("updated") and gw_sync.get("daemon_running"):
+        err_console.print(
+            "[yellow]Warning:[/yellow] Gateway daemon is running — restart it "
+            "(`ax gateway stop && ax gateway start`) to apply the new space."
+        )
+    err_console.print("[dim]Tip: `ax spaces use` now sets both CLI and Gateway space.[/dim]")
 
 
 @spaces_app.command("current")
@@ -8309,7 +8481,12 @@ def local_inbox(
 def add_agent(
     name: str = typer.Argument(..., help="Managed agent name"),
     template_id: str = typer.Option(
-        None, "--template", help="Agent template: echo_test | ollama | hermes | sentinel_cli | claude_code_channel"
+        None,
+        "--template",
+        help=(
+            "Agent template: echo_test | ollama | hermes | langgraph | langgraph_composio | "
+            "sentinel_cli | claude_code_channel | …"
+        ),
     ),
     runtime_type: str = typer.Option(
         None,
@@ -8357,6 +8534,11 @@ def add_agent(
         "--allowed-users",
         help="Hermes plugin runtime only: comma-separated agent/user names allowed to mention this agent.",
     ),
+    connector_ref: str = typer.Option(
+        None,
+        "--connector-ref",
+        help="Outbound connector name (required for langgraph_composio; sets AX_GATEWAY_CONNECTOR_REF).",
+    ),
     start: bool = typer.Option(True, "--start/--no-start", help="Desired running state after registration"),
     as_json: bool = JSON_OPTION,
 ):
@@ -8401,6 +8583,7 @@ def add_agent(
             timeout_seconds=timeout_seconds,
             allow_all_users=allow_all_users,
             allowed_users=allowed_users,
+            connector_ref=connector_ref,
             start=start,
         )
     except (ValueError, LookupError) as exc:
@@ -8413,6 +8596,8 @@ def add_agent(
         err_console.print(f"[green]Managed agent ready:[/green] @{name}")
         if entry.get("template_label"):
             err_console.print(f"  type = {entry['template_label']}")
+        if entry.get("connector_ref"):
+            err_console.print(f"  connector_ref = {entry['connector_ref']}")
         if entry.get("asset_type_label"):
             err_console.print(f"  asset = {entry['asset_type_label']}")
         err_console.print(f"  desired_state = {entry['desired_state']}")
@@ -8465,6 +8650,11 @@ def update_agent(
             "Pass an empty string to clear."
         ),
     ),
+    connector_ref: str = typer.Option(
+        None,
+        "--connector-ref",
+        help="Outbound connector name for langgraph_composio (clears when passed as empty).",
+    ),
     desired_state: str = typer.Option(None, "--desired-state", help="running | stopped"),
     as_json: bool = JSON_OPTION,
 ):
@@ -8494,6 +8684,7 @@ def update_agent(
             timeout_seconds=timeout_seconds if timeout_seconds is not None else _UNSET,
             allow_all_users=allow_all_users if allow_all_users is not None else _UNSET,
             allowed_users=allowed_users if allowed_users is not None else _UNSET,
+            connector_ref=connector_ref if connector_ref is not None else _UNSET,
             desired_state=desired_state,
         )
     except (LookupError, ValueError) as exc:
@@ -8505,6 +8696,8 @@ def update_agent(
         return
     err_console.print(f"[green]Managed agent updated:[/green] @{name}")
     err_console.print(f"  type = {entry.get('template_label') or entry.get('runtime_type')}")
+    if entry.get("connector_ref"):
+        err_console.print(f"  connector_ref = {entry['connector_ref']}")
     err_console.print(f"  desired_state = {entry.get('desired_state')}")
     if entry.get("timeout_seconds"):
         err_console.print(f"  timeout = {entry.get('timeout_seconds')}s")
@@ -8810,6 +9003,13 @@ def inbox_for_agent(
 @agents_app.command("start")
 def start_agent(name: str = typer.Argument(..., help="Managed agent name")):
     """Set a managed agent's desired state to running."""
+    if active_gateway_pid() is None:
+        err_console.print(
+            f"[red]Gateway daemon is stopped — `agents start {name}` would only "
+            "set desired_state, no supervisor would bring the agent up.[/red]"
+        )
+        err_console.print("[yellow]Start it with `ax gateway start`, then retry.[/yellow]")
+        raise typer.Exit(1)
     try:
         _set_managed_agent_desired_state(name, "running")
     except LookupError:
@@ -9249,6 +9449,18 @@ def connectors_set(
         err_console.print(f"[red]Connector not found:[/red] {ref}")
         raise typer.Exit(1)
     config = dict(row.config)
+    _POLICY_LIST_KEYS = {"allowed_tools", "denied_tools", "allowed_toolkits", "denied_toolkits"}
+    if key in _POLICY_LIST_KEYS:
+        import json as _json
+
+        try:
+            parsed = _json.loads(value)
+            if isinstance(parsed, list):
+                value = parsed
+            else:
+                value = [str(parsed)]
+        except _json.JSONDecodeError:
+            value = [v.strip() for v in value.split(",") if v.strip()]
     config[key] = value
     updated = update_connector(ref, {"config": config})
     if as_json:
@@ -9317,6 +9529,7 @@ def connectors_call(
     from ..connectors import (
         ConnectorAuthError,
         ConnectorNotFoundError,
+        ConnectorPolicyError,
         ConnectorProviderError,
         execute_tool,
         find_connector,
@@ -9357,6 +9570,9 @@ def connectors_call(
         return
     try:
         result = execute_tool(row, tool, args, auth_env)
+    except ConnectorPolicyError as e:
+        err_console.print(f"[red]Blocked by policy:[/red] {e}")
+        raise typer.Exit(1)
     except ConnectorProviderError as e:
         err_console.print(f"[red]Provider error:[/red] {e}")
         raise typer.Exit(1)
@@ -9377,8 +9593,11 @@ def connectors_providers(as_json: bool = JSON_OPTION):
         print_json(providers)
         return
     for p in providers:
+        caps = ", ".join(p.get("capabilities", []))
         err_console.print(f"[bold]{p['name']}[/bold] — {p['description']}")
-        err_console.print(f"  Required auth: {', '.join(p['required_auth_keys'])}")
+        if caps:
+            err_console.print(f"  Capabilities: {caps}")
+        err_console.print(f"  Required auth: {', '.join(p['required_auth_keys']) or '(none)'}")
         if p.get("optional_auth_keys"):
             err_console.print(f"  Optional auth: {', '.join(p['optional_auth_keys'])}")
 
@@ -9632,3 +9851,301 @@ def connectors_auth_clear(
         err_console.print(f"[green]Auth removed for {row.name}[/green]")
     else:
         err_console.print(f"[yellow]No auth file found for {row.name}[/yellow]")
+
+
+# ── connectors tools ─────────────────────────────────────────────────────────
+
+
+@connectors_tools_app.command("list")
+def connectors_tools_list(
+    ref: str = typer.Argument(..., help="Connector name or ID"),
+    toolkit: str = typer.Option(None, "--toolkit", help="Filter by toolkit/app name"),
+    limit: int = typer.Option(0, "--limit", help="Cap results (0 = use policy limit)"),
+    as_json: bool = JSON_OPTION,
+):
+    """List tools available through a connector (filtered by policy)."""
+    from ..connectors import (
+        ConnectorAuthError,
+        ConnectorNotFoundError,
+        ConnectorProviderError,
+        find_connector,
+        list_tools,
+        read_auth,
+    )
+
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError:
+        err_console.print(f"[red]Connector not found:[/red] {ref}")
+        raise typer.Exit(1)
+    if not row.enabled:
+        err_console.print(f"[red]Connector {row.name!r} is disabled[/red]")
+        raise typer.Exit(1)
+    try:
+        auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
+    except ConnectorAuthError as e:
+        err_console.print(f"[red]Auth error:[/red] {e}")
+        raise typer.Exit(1)
+    try:
+        result = list_tools(row, auth_env)
+    except ConnectorProviderError as e:
+        err_console.print(f"[red]Provider error:[/red] {e}")
+        raise typer.Exit(1)
+
+    items = result.get("items", [])
+    if toolkit:
+        toolkit_lower = toolkit.lower()
+        items = [
+            i
+            for i in items
+            if toolkit_lower in str(i.get("appName", "")).lower() or toolkit_lower in str(i.get("toolkit", "")).lower()
+        ]
+    if limit and limit > 0:
+        items = items[:limit]
+
+    if as_json:
+        print_json({"connector": row.name, "provider": row.provider, "tools": items, "count": len(items)})
+        return
+    if not items:
+        err_console.print(f"No tools found for connector {row.name!r}.")
+        return
+    err_console.print(f"[bold]{row.name}[/bold] ({row.provider}) — {len(items)} tools:")
+    print_table(
+        ["Name", "Display Name", "Description"],
+        [
+            {
+                "name": str(i.get("name") or i.get("enum") or ""),
+                "displayName": str(i.get("displayName") or ""),
+                "description": str(i.get("description") or "")[:80],
+            }
+            for i in items
+        ],
+        keys=["name", "displayName", "description"],
+    )
+
+
+@connectors_tools_app.command("search")
+def connectors_tools_search(
+    ref: str = typer.Argument(..., help="Connector name or ID"),
+    use_case: str = typer.Option(..., "--use-case", "-u", help="Natural-language use case query"),
+    mode: str = typer.Option("auto", "--mode", "-m", help="Search mode: auto, intent, or catalog"),
+    limit: int = typer.Option(10, "--limit", help="Max results"),
+    as_json: bool = JSON_OPTION,
+):
+    """Search for tools matching a use case (intent or catalog mode)."""
+    from ..connectors import (
+        ConnectorAuthError,
+        ConnectorNotFoundError,
+        ConnectorProviderError,
+        find_connector,
+        read_auth,
+        search_tools,
+    )
+
+    if mode not in ("auto", "intent", "catalog"):
+        err_console.print(f"[red]Invalid mode:[/red] {mode!r}. Use auto, intent, or catalog.")
+        raise typer.Exit(1)
+
+    try:
+        row = find_connector(ref)
+    except ConnectorNotFoundError:
+        err_console.print(f"[red]Connector not found:[/red] {ref}")
+        raise typer.Exit(1)
+    if not row.enabled:
+        err_console.print(f"[red]Connector {row.name!r} is disabled[/red]")
+        raise typer.Exit(1)
+    try:
+        auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
+    except ConnectorAuthError as e:
+        err_console.print(f"[red]Auth error:[/red] {e}")
+        raise typer.Exit(1)
+    try:
+        result = search_tools(row, use_case, auth_env, limit=limit, mode=mode)
+    except ConnectorProviderError as e:
+        err_console.print(f"[red]Provider error:[/red] {e}")
+        raise typer.Exit(1)
+
+    items = result.get("items", [])
+    if as_json:
+        print_json({"connector": row.name, "query": use_case, "mode": mode, "tools": items, "count": len(items)})
+        return
+    if not items:
+        err_console.print(f"No tools found for query {use_case!r}.")
+        return
+    err_console.print(f"[bold]{row.name}[/bold] search ({mode}) — {len(items)} results:")
+    print_table(
+        ["Name", "Display Name", "Description"],
+        [
+            {
+                "name": str(i.get("name") or i.get("enum") or ""),
+                "displayName": str(i.get("displayName") or ""),
+                "description": str(i.get("description") or "")[:80],
+            }
+            for i in items
+        ],
+        keys=["name", "displayName", "description"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# audit sub-app — SIEM-compatible export of the activity.jsonl log for
+# ATO / STIG compliance review (issue #62). The actual format writers,
+# redactor, and loader live in ax_cli.audit; this command is a thin CLI
+# wrapper that pipes options through.
+# ---------------------------------------------------------------------------
+
+
+@audit_app.command("export")
+def audit_export(
+    output_format: str = typer.Option(
+        "jsonl",
+        "--format",
+        "-f",
+        help="Output format: jsonl (default, JSON Lines), cef (ArcSight Common Event Format), splunk (Splunk JSON).",
+    ),
+    since: str = typer.Option(
+        None,
+        "--since",
+        help=(
+            "ISO-8601 timestamp (e.g. 2026-05-01T00:00:00+00:00). "
+            "Only export events at or after this time (inclusive boundary)."
+        ),
+    ),
+    until: str = typer.Option(
+        None,
+        "--until",
+        help=(
+            "ISO-8601 timestamp. Only export events at or before this time "
+            "(inclusive boundary — events whose `ts` equals --until are included)."
+        ),
+    ),
+    event: list[str] = typer.Option(
+        None,
+        "--event",
+        help="Filter to specific event type(s). Repeatable (e.g. --event runtime_started --event runtime_stopped).",
+    ),
+    agent: list[str] = typer.Option(
+        None,
+        "--agent",
+        help="Filter to specific agent name(s). Repeatable.",
+    ),
+    redact: bool = typer.Option(
+        True,
+        "--redact/--no-redact",
+        help=(
+            "Mask credential-shaped fields (token, *_secret, *_key, Authorization). "
+            "Default: enabled. Use --no-redact to export raw values — refused when "
+            "writing to a file unless --i-understand-credentials-in-file is also set, "
+            "since the source activity.jsonl is 0o600 but file outputs inherit umask."
+        ),
+    ),
+    redact_message_content: bool = typer.Option(
+        False,
+        "--redact-content",
+        help=(
+            "Additionally mask user-authored message body fields (content, reply_preview). "
+            "Some audits require this; others require the content intact for context."
+        ),
+    ),
+    output: str = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write to file instead of stdout. Use '-' to force stdout. File is created with 0o600 perms.",
+    ),
+    allow_unredacted_file: bool = typer.Option(
+        False,
+        "--i-understand-credentials-in-file",
+        help=(
+            "Explicit acknowledgment required to combine --no-redact with -o/--output, since the "
+            "exported file may contain raw bearer tokens from log payloads."
+        ),
+    ),
+):
+    """Export the activity audit log in a SIEM-compatible format.
+
+    Reads ~/.ax/gateway/activity.jsonl, applies filters, redacts credential-
+    shaped fields by default, and renders the result as JSONL, CEF, or Splunk
+    JSON. File outputs are created with 0o600 perms to match the source log.
+
+    Examples:
+
+      ax gateway audit export --since 2026-05-01
+      ax gateway audit export --format cef --event connector_tool_failed
+      ax gateway audit export --format splunk --agent codex-bot -o /var/log/ax-audit.json
+    """
+    import sys
+    from pathlib import Path
+
+    from ..audit import export_events, load_activity_events
+
+    log_path = activity_log_path()
+
+    # Refuse to write potentially-secret-bearing raw events to a file unless the
+    # operator explicitly acknowledges (Andrew's #62 finding #1). stdout is fine
+    # because it inherits whatever the operator's shell environment provides.
+    is_file_output = bool(output) and output != "-"
+    if is_file_output and not redact and not allow_unredacted_file:
+        err_console.print(
+            "[red]Refusing to write --no-redact output to a file.[/red] "
+            "Add --i-understand-credentials-in-file to acknowledge that the file "
+            "may contain raw bearer tokens, or drop --no-redact."
+        )
+        raise typer.Exit(1)
+
+    stats: dict[str, int] = {}
+    try:
+        records = load_activity_events(
+            log_path,
+            since=since,
+            until=until,
+            events=event,
+            agents=agent,
+            stats=stats,
+        )
+    except (ValueError, OSError) as exc:
+        err_console.print(f"[red]Audit export failed:[/red] {exc}")
+        raise typer.Exit(1)
+
+    try:
+        rendered = export_events(
+            records,
+            output_format=output_format,
+            redact=redact,
+            redact_message_content=redact_message_content,
+        )
+    except ValueError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2)
+
+    if is_file_output:
+        out_path = Path(output)
+        out_path.write_text(rendered, encoding="utf-8")
+        # Match the source activity.jsonl perms (0o600) so the export doesn't
+        # silently widen the credential boundary the source already enforces.
+        try:
+            out_path.chmod(0o600)
+        except OSError:
+            # Best-effort on filesystems that don't honor unix perms (Windows
+            # NTFS via WSL2, some network mounts). The operator will see the
+            # file path and can secure it manually.
+            err_console.print(
+                f"[yellow]Warning:[/yellow] could not chmod {output} to 0o600 — "
+                "secure the file manually if it may contain sensitive event payloads."
+            )
+        err_console.print(f"[green]Wrote {len(records)} record(s) to {output}[/green] (format={output_format.lower()})")
+    else:
+        # Write to stdout directly so pipes (`| splunk hec`, `| grep`) work
+        # without Rich-formatting interference.
+        sys.stdout.write(rendered)
+        sys.stdout.flush()
+        err_console.print(f"[dim]Exported {len(records)} record(s) (format={output_format.lower()})[/dim]")
+    # Surface the skipped-line count so silent gaps in the audit trail are
+    # visible to the operator. An audit export that quietly loses lines can
+    # mask tampering or crashes mid-write.
+    skipped = stats.get("skipped", 0)
+    if skipped:
+        err_console.print(
+            f"[yellow]Note:[/yellow] {skipped} line(s) skipped (malformed JSON, "
+            "non-dict, or missing/unparseable `ts` on time-bounded export)."
+        )

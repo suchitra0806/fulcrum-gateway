@@ -1141,12 +1141,14 @@ class TestAgentsInboxCommand:
 
 class TestAgentsStartStopCommand:
     def test_start(self, monkeypatch):
+        monkeypatch.setattr(gw_cmd, "active_gateway_pid", lambda: 12345)
         monkeypatch.setattr(gw_cmd, "_set_managed_agent_desired_state", lambda name, state: {"ok": True})
         result = runner.invoke(app, ["gateway", "agents", "start", "bot1"])
         assert result.exit_code == 0
         assert "running" in _strip(result.output).lower()
 
     def test_start_not_found(self, monkeypatch):
+        monkeypatch.setattr(gw_cmd, "active_gateway_pid", lambda: 12345)
         monkeypatch.setattr(
             gw_cmd,
             "_set_managed_agent_desired_state",
@@ -1907,6 +1909,8 @@ class TestLocalInitCommand:
 
 class TestSpacesUseCommand:
     def test_json(self, monkeypatch):
+        # As of #82 the command is a full alias: it writes the gateway session
+        # (via apply_space_to_gateway_session) AND the CLI config (save_space_id).
         monkeypatch.setattr(
             gw_cmd,
             "_load_gateway_session_or_exit",
@@ -1915,13 +1919,27 @@ class TestSpacesUseCommand:
         monkeypatch.setattr(gw_cmd, "_load_gateway_user_client", lambda: MagicMock())
         monkeypatch.setattr(gw_cmd, "resolve_space_id", lambda client, explicit: "sp-2")
         monkeypatch.setattr(gw_cmd, "_space_name_for_id", lambda client, sid: "New Space")
-        monkeypatch.setattr(gw_cmd, "save_gateway_session", lambda s: Path("/tmp/session.json"))
-        monkeypatch.setattr(gw_cmd, "upsert_space_cache_entry", lambda *a, **kw: None)
-        monkeypatch.setattr(gw_cmd, "record_gateway_activity", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            gw_cmd,
+            "apply_space_to_gateway_session",
+            lambda sid, *, space_name=None: {
+                "updated": True,
+                "session_path": "/tmp/session.json",
+                "previous_space_id": "sp-1",
+                "space_id": sid,
+                "space_name": space_name,
+                "daemon_running": False,
+            },
+        )
+        saved = {}
+        monkeypatch.setattr("ax_cli.config.save_space_id", lambda sid, **kw: saved.update(sid=sid, **kw))
         result = runner.invoke(app, ["gateway", "spaces", "use", "sp-2", "--json"])
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data["space_id"] == "sp-2"
+        assert data["cli_scope"] == "local"
+        assert data["gateway_session"]["updated"] is True
+        assert saved == {"sid": "sp-2", "local": True}
 
 
 # ── CLI: gateway agents list text rendering ───────────────────────────

@@ -370,6 +370,17 @@ def _make_security_wrap(workdir: str):
     are default-allow (so the bridge can grow new tools without a strict
     registration burden); set AX_BRIDGE_STRICT_SECURITY=1 to flip the default
     to deny-on-unknown-tool.
+
+    **Degraded mode.** When ``ax_cli.runtimes.hermes.tools`` cannot be
+    imported (typical: running this example outside a full ax-cli install,
+    e.g. an IL2 bridge-only deployment), no path/command checks are
+    enforceable. Rather than refusing to run, the wrapper returns a
+    permissive passthrough so non-security demos still work — but it
+    publishes a ``kind: status, status: error`` event so the degradation
+    surfaces in ``ax gateway status`` and writes a one-line stderr warning
+    so it shows up in the operator's terminal too. Do not run a degraded
+    bridge in a deployment where tool sandboxing is part of the trust
+    boundary.
     """
     import json as _json
 
@@ -386,12 +397,23 @@ def _make_security_wrap(workdir: str):
         # Hermes vendor not installed (e.g. running this example outside a
         # full ax-cli install). The wrapper degrades to a permissive
         # passthrough so the bridge stays usable for non-security demos.
+        # Surface the degradation as both a status event (for `ax gateway
+        # status` consumers) and a stderr line (for any operator running
+        # the bridge directly) — a single activity-level event is too
+        # quiet for a security-relevant downgrade (#111).
+        warning = (
+            "security wrapper degraded: ax_cli.runtimes.hermes.tools not importable; "
+            "tool calls will pass through unchecked. Install ax-cli with hermes runtimes "
+            "to enforce path/command guards."
+        )
         emit_event(
             {
-                "kind": "activity",
-                "activity": "security wrapper degraded: hermes tools not importable; tool calls will pass through unchecked",
+                "kind": "status",
+                "status": "error",
+                "error_message": warning,
             }
         )
+        print(f"WARNING: {warning}", file=sys.stderr, flush=True)
 
         def _passthrough(request, execute):
             return execute(request)
@@ -737,7 +759,7 @@ def main() -> int:
             },
         }
     )
-    print(result.reply or f"LangGraph bridge for @{_agent_name()} finished without text.")
+    print(result.reply or f"LangGraph bridge for @{_agent_name()} finished without text.", flush=True)
     return 0
 
 

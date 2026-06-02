@@ -845,9 +845,7 @@ class TestDeriveConfidence:
     def test_sse_disconnected_returns_low(self):
         from ax_cli.gateway import _derive_confidence
 
-        level, reason, detail = _derive_confidence(
-            {}, mode="LIVE", liveness="stale", reachability="sse_disconnected"
-        )
+        level, reason, detail = _derive_confidence({}, mode="LIVE", liveness="stale", reachability="sse_disconnected")
         assert level == "LOW"
         assert reason == "sse_disconnected"
         assert "SSE subscription is down" in detail
@@ -855,9 +853,7 @@ class TestDeriveConfidence:
     def test_attach_required_still_returns_low(self):
         from ax_cli.gateway import _derive_confidence
 
-        level, reason, detail = _derive_confidence(
-            {}, mode="LIVE", liveness="stale", reachability="attach_required"
-        )
+        level, reason, detail = _derive_confidence({}, mode="LIVE", liveness="stale", reachability="attach_required")
         assert level == "LOW"
         assert reason == "attach_required"
 
@@ -3053,6 +3049,95 @@ class TestLoadGatewayUserClient:
         assert client is not None
         client.close()
 
+    def test_valid_session_returns_guarded_client(self, monkeypatch, tmp_path):
+        """#73: the loader wraps the exchange boundary so a rejected session PAT
+        surfaces as a typed error instead of a raw traceback."""
+        monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+        gw.save_gateway_session({"token": "axp_u_test.token", "base_url": "https://paxai.app"})
+        client = gw_cmd._load_gateway_user_client()
+        monkeypatch.setattr(
+            client._exchanger,
+            "get_token",
+            lambda *a, **k: (_ for _ in ()).throw(TestGatewayExchangeBoundary._exchange_error(401)),
+        )
+        with pytest.raises(gw_cmd.GatewaySessionRejectedError):
+            client._get_jwt()
+        client.close()
+
+
+class TestGatewayExchangeBoundary:
+    """Regression for #73: a rejected gateway session PAT must surface as
+    GatewaySessionRejectedError at the exchange boundary, not as a raw
+    httpx.HTTPStatusError that escapes every command as a Rich traceback."""
+
+    def _client(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+        client = gw_cmd.AxClient(base_url="https://paxai.app", token="axp_u_test.token")
+        gw_cmd._guard_gateway_exchange(client)
+        return client
+
+    @staticmethod
+    def _exchange_error(status: int, url: str = "https://paxai.app/auth/exchange"):
+        import httpx
+
+        request = httpx.Request("POST", url)
+        response = httpx.Response(status, request=request)
+        return httpx.HTTPStatusError("boom", request=request, response=response)
+
+    def test_exchange_401_becomes_typed_error(self, monkeypatch, tmp_path):
+        client = self._client(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            client._exchanger, "get_token", lambda *a, **k: (_ for _ in ()).throw(self._exchange_error(401))
+        )
+        with pytest.raises(gw_cmd.GatewaySessionRejectedError):
+            client._get_jwt()
+        client.close()
+
+    def test_exchange_403_becomes_typed_error(self, monkeypatch, tmp_path):
+        client = self._client(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            client._exchanger, "get_token", lambda *a, **k: (_ for _ in ()).throw(self._exchange_error(403))
+        )
+        with pytest.raises(gw_cmd.GatewaySessionRejectedError):
+            client._get_jwt()
+        client.close()
+
+    def test_non_exchange_url_passes_through(self, monkeypatch, tmp_path):
+        import httpx
+
+        client = self._client(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            client._exchanger,
+            "get_token",
+            lambda *a, **k: (_ for _ in ()).throw(self._exchange_error(401, url="https://paxai.app/api/v1/agents")),
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            client._get_jwt()
+        client.close()
+
+    def test_non_auth_status_passes_through(self, monkeypatch, tmp_path):
+        import httpx
+
+        client = self._client(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            client._exchanger, "get_token", lambda *a, **k: (_ for _ in ()).throw(self._exchange_error(500))
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            client._get_jwt()
+        client.close()
+
+    def test_guard_no_op_on_double_without_get_jwt(self):
+        """PR body contract: wrapping a client double that has no `_get_jwt`
+        (a test stand-in for AxClient) is a silent no-op, not a crash, and
+        leaves the double untouched."""
+
+        class _Double:
+            pass
+
+        double = _Double()
+        gw_cmd._guard_gateway_exchange(double)  # must not raise
+        assert not hasattr(double, "_get_jwt")
+
 
 class TestGatewaySessionStalenessWarning:
     """Regression for #74: warn when the gateway session predates the user
@@ -3099,6 +3184,118 @@ class TestGatewaySessionStalenessWarning:
         gw_cmd._load_gateway_user_client()
         stderr = capsys.readouterr().err
         assert "older than your user login" not in stderr
+
+    def test_no_warning_when_user_env_and_gateway_env_diverge(self, monkeypatch, tmp_path, capsys):
+        # Regression for #80: the gateway session resolves through
+        # gateway_environment() (AX_GATEWAY_ENV; ignores the active marker),
+        # while user.toml resolves through _resolve_user_env() (consults the
+        # active marker). When those disagree the mtime comparison would pair
+        # the default-env session against a *different* env's user.toml and
+        # false-positive. The two stores point at different environments here,
+        # so the check must skip silently rather than cry wolf.
+        from ax_cli.config import _set_active_user_env, _user_config_path
+
+        monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+        # Default-env gateway session, minted earlier from the default user.toml.
+        self._make_session(mtime=1_000_000.0)
+        # Operator later ran `axctl login --env staging`: fresh, newer staging
+        # user.toml + active marker flipped to staging. No AX_*_ENV env vars,
+        # so the gateway session stays default-scoped.
+        _set_active_user_env("staging")
+        staging_p = _user_config_path("staging")
+        staging_p.parent.mkdir(parents=True, exist_ok=True)
+        staging_p.write_text('token = "axp_u_staging.token"\nbase_url = "https://paxai.app"\n')
+        os.utime(staging_p, (2_000_000.0, 2_000_000.0))
+
+        gw_cmd._load_gateway_user_client()
+        stderr = capsys.readouterr().err
+        assert "older than your user login" not in stderr
+
+
+class TestApplySpaceToGatewaySession:
+    """issue #82: `ax spaces use` must keep the Gateway session pointed at the
+    same space as the CLI, atomically and daemon-independently."""
+
+    def test_returns_none_when_no_session(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+        assert gw.apply_space_to_gateway_session("space-b", space_name="Bee") is None
+
+    def test_updates_session_space(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+        monkeypatch.setattr(gw, "active_gateway_pid", lambda: None)
+        gw.save_gateway_session({"token": "axp_u_x", "space_id": "space-a", "space_name": "Ay"})
+
+        out = gw.apply_space_to_gateway_session("space-b", space_name="Bee")
+
+        assert out["updated"] is True
+        assert out["previous_space_id"] == "space-a"
+        assert out["space_id"] == "space-b"
+        assert out["daemon_running"] is False
+        # Persisted to disk.
+        reloaded = gw.load_gateway_session()
+        assert reloaded["space_id"] == "space-b"
+        assert reloaded["space_name"] == "Bee"
+
+    def test_noop_when_already_aligned(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+        monkeypatch.setattr(gw, "active_gateway_pid", lambda: None)
+        gw.save_gateway_session({"token": "axp_u_x", "space_id": "space-a", "space_name": "Ay"})
+        # Spy: a no-op must not emit a redundant audit event.
+        calls = []
+        monkeypatch.setattr(gw, "record_gateway_activity", lambda *a, **k: calls.append((a, k)))
+
+        out = gw.apply_space_to_gateway_session("space-a", space_name="Ay")
+
+        assert out["updated"] is False
+        assert out["space_id"] == "space-a"
+        assert calls == []
+
+    def test_reports_daemon_running(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+        monkeypatch.setattr(gw, "active_gateway_pid", lambda: 4321)
+        gw.save_gateway_session({"token": "axp_u_x", "space_id": "space-a"})
+
+        out = gw.apply_space_to_gateway_session("space-b", space_name="Bee")
+
+        assert out["updated"] is True
+        assert out["daemon_running"] is True
+
+
+class TestGatewaySpaceDivergenceWarning:
+    """issue #82: warn when the Gateway session space and CLI config space
+    diverge, mirroring the #74/#75 staleness-warning pattern. Fail-soft."""
+
+    def _setup(self, monkeypatch, tmp_path, *, session_space, cli_space):
+        # Drive both reads deterministically rather than depending on the
+        # ambient filesystem (cwd .ax/config.toml could otherwise leak in).
+        session = {"token": "axp_u_x", "base_url": "https://paxai.app"}
+        if session_space is not None:
+            session["space_id"] = session_space
+        monkeypatch.setattr(gw_cmd, "load_gateway_session", lambda: dict(session))
+        monkeypatch.setattr(
+            "ax_cli.config._load_config",
+            lambda: {"space_id": cli_space} if cli_space is not None else {},
+        )
+        # Keep the sibling token-staleness check silent.
+        monkeypatch.setattr(gw_cmd, "_warn_if_gateway_session_stale", lambda: None)
+
+    def test_warns_when_spaces_differ(self, monkeypatch, tmp_path, capsys):
+        self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-b")
+        gw_cmd._load_gateway_user_client()
+        stderr = capsys.readouterr().err
+        assert "Gateway space (space-a) differs from your CLI space (space-b)" in stderr
+        # Rich may wrap "ax" onto the previous line; match the unwrapped tail.
+        assert "spaces use <space>" in stderr
+
+    def test_no_warning_when_aligned(self, monkeypatch, tmp_path, capsys):
+        self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-a")
+        gw_cmd._load_gateway_user_client()
+        assert "differs from your CLI space" not in capsys.readouterr().err
+
+    def test_no_warning_when_cli_space_unset(self, monkeypatch, tmp_path, capsys):
+        self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space=None)
+        gw_cmd._load_gateway_user_client()
+        assert "differs from your CLI space" not in capsys.readouterr().err
 
 
 class TestLocalOriginSignature:

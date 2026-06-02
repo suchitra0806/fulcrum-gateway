@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import time
 from types import ModuleType
 from typing import Any
 
-from ..errors import ConnectorProviderError
+from ..activity import (
+    record_connector_tool_completed,
+    record_connector_tool_denied,
+    record_connector_tool_failed,
+    record_connector_tool_started,
+)
+from ..errors import ConnectorPolicyError, ConnectorProviderError
+from ..filtering import assert_tool_allowed, filter_tools, from_config
 from ..types import ConnectorRow
-from . import composio_adapter
+from . import composio_adapter, http_mcp_adapter
+from .registry import has_capability
 
 _ADAPTERS: dict[str, ModuleType] = {
     "composio": composio_adapter,
+    "http_mcp": http_mcp_adapter,
 }
 
 
@@ -50,15 +60,59 @@ def execute_tool(
     tool_slug: str,
     args: dict[str, Any],
     auth_env: dict[str, str],
+    *,
+    toolkit: str | None = None,
+    agent_name: str | None = None,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
+    policy = from_config(connector.config)
+    identity = {k: v for k, v in [("agent_name", agent_name), ("agent_id", agent_id)] if v}
+    try:
+        assert_tool_allowed(tool_slug, policy, toolkit=toolkit)
+    except ConnectorPolicyError as exc:
+        record_connector_tool_denied(connector, tool_slug, policy_detail=exc.policy_detail, **identity)
+        raise
+
+    record_connector_tool_started(connector, tool_slug, **identity)
+    t0 = time.monotonic()
+    try:
+        adapter = _get_adapter(connector.provider)
+        result = adapter.execute_tool(
+            tool_slug,
+            args,
+            auth_env,
+            connector.config,
+            connector.name,
+        )
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        record_connector_tool_failed(connector, tool_slug, error=str(exc), duration_ms=duration_ms, **identity)
+        raise
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    record_connector_tool_completed(connector, tool_slug, duration_ms=duration_ms, **identity)
+    return result
+
+
+def list_tools(
+    connector: ConnectorRow,
+    auth_env: dict[str, str],
 ) -> dict[str, Any]:
     adapter = _get_adapter(connector.provider)
-    return adapter.execute_tool(
-        tool_slug,
-        args,
-        auth_env,
-        connector.config,
-        connector.name,
-    )
+    if hasattr(adapter, "list_tools"):
+        result = adapter.list_tools(auth_env, connector.config, connector.name)
+        items = result.get("tools", [])
+    else:
+        result = adapter.search_tools(
+            "",
+            auth_env,
+            connector.config,
+            connector.name,
+            limit=200,
+        )
+        items = result.get("items", [])
+    policy = from_config(connector.config)
+    filtered = filter_tools(items, policy)
+    return {"items": filtered, "total": len(items), "filtered": len(filtered)}
 
 
 def search_tools(
@@ -68,13 +122,36 @@ def search_tools(
     *,
     apps: str | None = None,
     limit: int = 10,
+    mode: str = "auto",
 ) -> dict[str, Any]:
-    adapter = _get_adapter(connector.provider)
-    return adapter.search_tools(
-        query,
-        auth_env,
-        connector.config,
-        connector.name,
-        apps=apps,
-        limit=limit,
-    )
+    if mode == "intent" or (mode == "auto" and has_capability(connector.provider, "intent_search")):
+        if not has_capability(connector.provider, "intent_search"):
+            raise ConnectorProviderError(
+                connector.provider,
+                f"Provider {connector.provider!r} does not support intent search. Use --mode catalog.",
+            )
+        adapter = _get_adapter(connector.provider)
+        result = adapter.search_tools(
+            query,
+            auth_env,
+            connector.config,
+            connector.name,
+            apps=apps,
+            limit=limit,
+        )
+        items = result.get("items", [])
+    else:
+        list_result = list_tools(connector, auth_env)
+        query_lower = query.lower()
+        items = [
+            item
+            for item in list_result["items"]
+            if query_lower in str(item.get("name", "")).lower()
+            or query_lower in str(item.get("displayName", "")).lower()
+            or query_lower in str(item.get("description", "")).lower()
+        ]
+        items = items[:limit]
+
+    policy = from_config(connector.config)
+    filtered = filter_tools(items, policy)
+    return {"items": filtered}

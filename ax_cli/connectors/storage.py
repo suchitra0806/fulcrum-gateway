@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import paths as _paths
 from .errors import ConnectorError, ConnectorNotFoundError
 from .types import ConnectorRow
 
@@ -18,12 +19,6 @@ _REGISTRY_SCHEMA_VERSION = 1
 
 def _default_registry() -> dict[str, Any]:
     return {"version": _REGISTRY_SCHEMA_VERSION, "connectors": []}
-
-
-def _connectors_path() -> Path:
-    from ax_cli.gateway import gateway_dir
-
-    return gateway_dir() / "connectors.json"
 
 
 def _read_json(path: Path, *, default: dict[str, Any]) -> dict[str, Any]:
@@ -64,12 +59,8 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def connectors_registry_path() -> Path:
-    return _connectors_path()
-
-
 def load_connectors_registry() -> dict[str, Any]:
-    data = _read_json(_connectors_path(), default=_default_registry())
+    data = _read_json(_paths.connectors_registry_path(), default=_default_registry())
     data.setdefault("version", _REGISTRY_SCHEMA_VERSION)
     data.setdefault("connectors", [])
     return data
@@ -78,7 +69,7 @@ def load_connectors_registry() -> dict[str, Any]:
 def save_connectors_registry(data: dict[str, Any]) -> Path:
     payload = dict(data)
     payload["saved_at"] = _now_iso()
-    path = _connectors_path()
+    path = _paths.connectors_registry_path()
     _write_json(path, payload)
     return path
 

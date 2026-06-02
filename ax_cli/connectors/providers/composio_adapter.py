@@ -2,6 +2,8 @@
 
 All Composio API calls go through httpx. The adapter resolves settings
 from the connector config dict and the managed auth env dict.
+
+Targets the Composio v3 API (https://backend.composio.dev/api/v3).
 """
 
 from __future__ import annotations
@@ -11,25 +13,19 @@ from typing import Any
 
 import httpx
 
+from ..constants import CONNECT_TIMEOUT, DEFAULT_COMPOSIO_BASE_URL, READ_TIMEOUT
 from ..errors import ConnectorAuthError, ConnectorProviderError, classify_provider_error
 
 log = logging.getLogger("connectors.composio")
 
-DEFAULT_BASE_URL = "https://backend.composio.dev/api/v2"
-CONNECT_TIMEOUT = 10.0
-READ_TIMEOUT = 30.0
+DEFAULT_BASE_URL = DEFAULT_COMPOSIO_BASE_URL
 
 
 def _base_url(config: dict[str, Any]) -> str:
     url = str(config.get("composio_base_url") or DEFAULT_BASE_URL).rstrip("/")
+    if url.endswith("/v2"):
+        url = url[:-3] + "/v3"
     return url
-
-
-def _base_url_v1(config: dict[str, Any]) -> str:
-    v2 = _base_url(config)
-    if v2.endswith("/v2"):
-        return v2[:-3] + "/v1"
-    return v2
 
 
 def _api_key(auth_env: dict[str, str], connector_name: str) -> str:
@@ -49,6 +45,10 @@ def _headers(api_key: str) -> dict[str, str]:
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
+
+
+def _timeout() -> httpx.Timeout:
+    return httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=READ_TIMEOUT, pool=CONNECT_TIMEOUT)
 
 
 def _handle_error_response(resp: httpx.Response, context: str) -> None:
@@ -90,16 +90,16 @@ def search_tools(
 ) -> dict[str, Any]:
     base = _base_url(config)
     key = _api_key(auth_env, connector_name)
-    params: dict[str, Any] = {"useCase": query, "limit": limit}
+    params: dict[str, Any] = {"query": query, "limit": limit}
     if apps:
-        params["apps"] = apps
+        params["toolkit_slug"] = apps
 
     try:
         resp = httpx.get(
-            f"{base}/actions",
+            f"{base}/tools",
             params=params,
             headers=_headers(key),
-            timeout=httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=READ_TIMEOUT, pool=CONNECT_TIMEOUT),
+            timeout=_timeout(),
         )
     except httpx.TimeoutException as e:
         raise ConnectorProviderError("composio", f"Timeout searching tools: {e!r}") from e
@@ -116,13 +116,13 @@ def list_apps(
     connector_name: str,
 ) -> list[dict[str, Any]]:
     key = _api_key(auth_env, connector_name)
-    base_v1 = _base_url_v1(config)
+    base = _base_url(config)
     try:
         resp = httpx.get(
-            f"{base_v1}/connectedAccounts",
-            params={"showActiveOnly": "true"},
+            f"{base}/connected_accounts",
+            params={"statuses": "ACTIVE"},
             headers=_headers(key),
-            timeout=httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=READ_TIMEOUT, pool=CONNECT_TIMEOUT),
+            timeout=_timeout(),
         )
     except httpx.HTTPError as e:
         raise ConnectorProviderError("composio", f"HTTP error listing apps: {e!r}") from e
@@ -139,62 +139,60 @@ def initiate_connection(
 ) -> dict[str, Any]:
     key = _api_key(auth_env, connector_name)
     hdrs = _headers(key)
-    timeout = httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=READ_TIMEOUT, pool=CONNECT_TIMEOUT)
-    base_v1 = _base_url_v1(config)
+    timeout = _timeout()
+    base = _base_url(config)
 
-    # Look up the app to get its supported auth scheme
-    app_resp = httpx.get(
-        f"{base_v1}/apps/{app_name}",
+    # Look up the toolkit to get its supported auth scheme
+    toolkit_resp = httpx.get(
+        f"{base}/toolkits/{app_name}",
         headers=hdrs,
         timeout=timeout,
     )
-    _handle_error_response(app_resp, f"Look up app {app_name}")
-    app_data = app_resp.json()
-    app_uuid = app_data.get("appId")
-    if not app_uuid:
-        raise ConnectorProviderError("composio", f"App {app_name!r} not found in Composio")
+    _handle_error_response(toolkit_resp, f"Look up toolkit {app_name}")
+    toolkit_data = toolkit_resp.json()
 
-    auth_schemes = app_data.get("auth_schemes", [])
+    auth_schemes = toolkit_data.get("auth_schemes") or toolkit_data.get("composio_managed_auth_schemes") or []
     auth_mode = auth_schemes[0].get("auth_mode", "OAUTH2") if auth_schemes else "OAUTH2"
 
-    # Find or create an integration for this app
-    integrations_resp = httpx.get(
-        f"{base_v1}/integrations",
-        params={"appName": app_name},
+    # Find or create an auth_config for this toolkit
+    configs_resp = httpx.get(
+        f"{base}/auth_configs",
+        params={"toolkit_slug": app_name},
         headers=hdrs,
         timeout=timeout,
     )
-    _handle_error_response(integrations_resp, "List integrations")
-    items = integrations_resp.json().get("items", [])
+    _handle_error_response(configs_resp, "List auth configs")
+    items = configs_resp.json().get("items", [])
     if not items:
-        integration_body: dict[str, Any] = {
-            "appId": app_uuid,
+        auth_config_body: dict[str, Any] = {
+            "toolkit_slug": app_name,
             "name": f"ax-{app_name}",
-            "authScheme": auth_mode,
+            "auth_scheme": auth_mode,
         }
         if auth_mode == "OAUTH2":
-            integration_body["useComposioAuth"] = True
+            auth_config_body["use_composio_auth"] = True
         create_resp = httpx.post(
-            f"{base_v1}/integrations",
-            json=integration_body,
+            f"{base}/auth_configs",
+            json=auth_config_body,
             headers=hdrs,
             timeout=timeout,
         )
-        _handle_error_response(create_resp, f"Create integration for {app_name}")
-        integration_id = create_resp.json().get("id")
-        if not integration_id:
-            raise ConnectorProviderError("composio", f"Failed to create integration for {app_name!r}")
+        _handle_error_response(create_resp, f"Create auth config for {app_name}")
+        auth_config_id = create_resp.json().get("id")
+        if not auth_config_id:
+            raise ConnectorProviderError("composio", f"Failed to create auth config for {app_name!r}")
     else:
-        integration_id = items[0]["id"]
+        auth_config_id = items[0]["id"]
 
-    # Build the connected-account payload
+    # Build the connected-account payload (v3 schema)
     account_body: dict[str, Any] = {
-        "integrationId": integration_id,
-        "entityId": entity_id,
-        "data": {},
+        "auth_config": {"id": auth_config_id},
+        "connection": {
+            "user_id": entity_id,
+            "state": {"authScheme": auth_mode, "val": {}},
+        },
     }
     if auth_mode == "API_KEY":
-        # Prompt-style: look for <APP>_API_KEY in the connector's auth env
         app_key_var = f"{app_name.upper()}_API_KEY"
         app_key = auth_env.get(app_key_var, "").strip()
         if not app_key:
@@ -204,18 +202,17 @@ def initiate_connection(
                 f"Set the key first:\n"
                 f"  ax gateway connectors auth write {connector_name} {app_key_var}=<your key>",
             )
-        # Composio expects the key fields from the auth scheme
         field_names = (
             [f.get("name") for f in auth_schemes[0].get("fields", []) if f.get("name")] if auth_schemes else []
         )
         if field_names:
-            account_body["data"] = {field_names[0]: app_key}
+            account_body["connection"]["state"]["val"] = {field_names[0]: app_key}
         else:
-            account_body["data"] = {"api_key": app_key}
+            account_body["connection"]["state"]["val"] = {"api_key": app_key}
 
     try:
         resp = httpx.post(
-            f"{base_v1}/connectedAccounts",
+            f"{base}/connected_accounts",
             json=account_body,
             headers=hdrs,
             timeout=timeout,
@@ -236,27 +233,24 @@ def execute_tool(
     base = _base_url(config)
     key = _api_key(auth_env, connector_name)
 
-    body: dict[str, Any] = {"input": args}
+    body: dict[str, Any] = {"arguments": args}
 
     connected_account_id = (
         auth_env.get("COMPOSIO_CONNECTED_ACCOUNT_ID", "").strip()
         or str(config.get("connected_account_id") or "").strip()
     )
     if connected_account_id:
-        body["connectedAccountId"] = connected_account_id
+        body["connected_account_id"] = connected_account_id
     else:
         entity_id = auth_env.get("COMPOSIO_ENTITY_ID", "").strip() or str(config.get("entity_id") or "default").strip()
-        app_name = str(config.get("app_name") or "").strip()
-        body["entityId"] = entity_id
-        if app_name:
-            body["appName"] = app_name
+        body["entity_id"] = entity_id
 
     try:
         resp = httpx.post(
-            f"{base}/actions/{tool_slug}/execute",
+            f"{base}/tools/execute/{tool_slug}",
             json=body,
             headers=_headers(key),
-            timeout=httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT, write=READ_TIMEOUT, pool=CONNECT_TIMEOUT),
+            timeout=_timeout(),
         )
     except httpx.TimeoutException as e:
         raise ConnectorProviderError("composio", f"Timeout executing {tool_slug}: {e!r}") from e

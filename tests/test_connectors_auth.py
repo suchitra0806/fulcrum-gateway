@@ -26,7 +26,7 @@ def tmp_gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         auth_dir.mkdir(parents=True, exist_ok=True)
         return auth_dir
 
-    monkeypatch.setattr("ax_cli.connectors.auth._auth_dir", _fake_auth_dir)
+    monkeypatch.setattr("ax_cli.connectors.paths.auth_dir", _fake_auth_dir)
     return tmp_path
 
 
@@ -61,7 +61,7 @@ class TestEnvSerialization:
         assert result == {"KEY": "val"}
 
     def test_parse_quoted_values(self):
-        text = 'KEY="hello world"\nSINGLE=\'quoted\'\n'
+        text = "KEY=\"hello world\"\nSINGLE='quoted'\n"
         result = _parse_env(text)
         assert result["KEY"] == "hello world"
         assert result["SINGLE"] == "quoted"

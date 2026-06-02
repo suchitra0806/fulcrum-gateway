@@ -1,12 +1,21 @@
 import json
 from unittest.mock import MagicMock
 
+import pytest
 from typer.testing import CliRunner
 
 from ax_cli.commands.spaces import _bound_agent_allows_space, _find_space, _space_items, _space_label
 from ax_cli.main import app
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ax_home(monkeypatch, tmp_path):
+    """`ax spaces use` now syncs the Gateway session (issue #82), so these
+    tests must not read or write the real ~/.ax/gateway state. Point
+    AX_CONFIG_DIR at a throwaway dir for every test in this module."""
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
 
 
 # ---------- _space_items ----------
@@ -337,9 +346,7 @@ def test_members_text(monkeypatch):
 
 def test_members_with_explicit_space_id(monkeypatch):
     client = MagicMock()
-    client.list_space_members.return_value = [
-        {"id": "u4", "display_name": "dave", "type": "human", "role": "admin"}
-    ]
+    client.list_space_members.return_value = [{"id": "u4", "display_name": "dave", "type": "human", "role": "admin"}]
     monkeypatch.setattr("ax_cli.commands.spaces.get_client", lambda: client)
 
     result = runner.invoke(app, ["spaces", "members", "explicit-sid", "--json"])
@@ -494,3 +501,132 @@ def test_spaces_use_global_saves_global_config(monkeypatch):
     assert result.exit_code == 0, result.output
     assert saved == {"space_id": "team-space", "local": False}
     assert json.loads(result.output)["scope"] == "global"
+
+
+# ---------- spaces use ↔ gateway session sync (issue #82) ----------
+
+
+class _SyncFakeClient:
+    """Minimal client whose single space matches the resolved sid so
+    `_find_space` returns a row with a friendly name to pass to the sync."""
+
+    def list_spaces(self):
+        return {"spaces": [{"id": "team-space", "slug": "ax-cli-dev", "name": "aX CLI Dev"}]}
+
+    def whoami(self):
+        return {}
+
+
+def _wire_spaces_use(monkeypatch, gw_sync_result):
+    """Stub get_client/save_space_id/resolve_space_id and capture the gateway
+    sync call. Returns the captured-calls dict."""
+    captured = {}
+    monkeypatch.setattr("ax_cli.commands.spaces.get_client", lambda: _SyncFakeClient())
+    monkeypatch.setattr("ax_cli.commands.spaces.save_space_id", lambda sid, **kw: captured.update(saved_sid=sid))
+    monkeypatch.setattr("ax_cli.commands.spaces.resolve_space_id", lambda c, explicit=None: "team-space")
+
+    def fake_apply(space_id, *, space_name=None):
+        captured["sync_sid"] = space_id
+        captured["sync_name"] = space_name
+        return gw_sync_result
+
+    # `use_space` lazily does `from ..gateway import apply_space_to_gateway_session`,
+    # so patch the name on the source module.
+    monkeypatch.setattr("ax_cli.gateway.apply_space_to_gateway_session", fake_apply)
+    return captured
+
+
+def test_spaces_use_syncs_gateway_session_when_present(monkeypatch):
+    captured = _wire_spaces_use(
+        monkeypatch,
+        {
+            "updated": True,
+            "session_path": "/tmp/session.json",
+            "previous_space_id": "old-space",
+            "space_id": "team-space",
+            "space_name": "aX CLI Dev",
+            "daemon_running": False,
+        },
+    )
+
+    result = runner.invoke(app, ["spaces", "use", "ax-cli-dev", "--json"])
+
+    assert result.exit_code == 0, result.output
+    # The clean friendly name (space_row["name"]) is forwarded, not the slug label.
+    assert captured["sync_sid"] == "team-space"
+    assert captured["sync_name"] == "aX CLI Dev"
+    payload = json.loads(result.output)
+    assert payload["gateway_session"]["updated"] is True
+    assert payload["gateway_session"]["space_id"] == "team-space"
+
+
+def test_spaces_use_text_reports_gateway_sync(monkeypatch):
+    _wire_spaces_use(
+        monkeypatch,
+        {
+            "updated": True,
+            "session_path": "/tmp/session.json",
+            "previous_space_id": "old-space",
+            "space_id": "team-space",
+            "space_name": "aX CLI Dev",
+            "daemon_running": False,
+        },
+    )
+
+    result = runner.invoke(app, ["spaces", "use", "ax-cli-dev"])
+
+    assert result.exit_code == 0, result.output
+    assert "Gateway session also set to aX CLI Dev" in result.output
+    # No daemon running → no restart warning.
+    assert "restart it" not in result.output
+
+
+def test_spaces_use_warns_restart_when_daemon_running(monkeypatch):
+    _wire_spaces_use(
+        monkeypatch,
+        {
+            "updated": True,
+            "session_path": "/tmp/session.json",
+            "previous_space_id": "old-space",
+            "space_id": "team-space",
+            "space_name": "aX CLI Dev",
+            "daemon_running": True,
+        },
+    )
+
+    result = runner.invoke(app, ["spaces", "use", "ax-cli-dev"])
+
+    assert result.exit_code == 0, result.output
+    assert "Gateway daemon is running" in result.output
+    assert "restart it" in result.output
+
+
+def test_spaces_use_silent_when_no_gateway_session(monkeypatch):
+    # apply_space_to_gateway_session returns None → Gateway never logged in.
+    captured = _wire_spaces_use(monkeypatch, None)
+
+    result = runner.invoke(app, ["spaces", "use", "ax-cli-dev", "--json"])
+
+    assert result.exit_code == 0, result.output
+    # CLI config still written; sync attempted but produced nothing.
+    assert captured["saved_sid"] == "team-space"
+    assert json.loads(result.output)["gateway_session"] is None
+
+
+def test_spaces_use_survives_gateway_sync_error(monkeypatch):
+    # A gateway-side failure must never break the primary CLI-config write.
+    monkeypatch.setattr("ax_cli.commands.spaces.get_client", lambda: _SyncFakeClient())
+    saved = {}
+    monkeypatch.setattr("ax_cli.commands.spaces.save_space_id", lambda sid, **kw: saved.update(sid=sid))
+    monkeypatch.setattr("ax_cli.commands.spaces.resolve_space_id", lambda c, explicit=None: "team-space")
+
+    def boom(space_id, *, space_name=None):
+        raise RuntimeError("gateway dir unreadable")
+
+    monkeypatch.setattr("ax_cli.gateway.apply_space_to_gateway_session", boom)
+
+    result = runner.invoke(app, ["spaces", "use", "ax-cli-dev", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert saved["sid"] == "team-space"
+    assert json.loads(result.output)["gateway_session"] is None

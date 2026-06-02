@@ -24,6 +24,15 @@ class ConnectorAuthError(ConnectorError):
         super().__init__(f"Auth error for connector {connector_name!r}: {detail}")
 
 
+class ConnectorPolicyError(ConnectorError):
+    """Raised when a tool is blocked by the connector's tool policy."""
+
+    def __init__(self, tool_slug: str, policy_detail: str) -> None:
+        self.tool_slug = tool_slug
+        self.policy_detail = policy_detail
+        super().__init__(f"Tool {tool_slug!r} blocked by policy: {policy_detail}")
+
+
 class ConnectorProviderError(ConnectorError):
     """Raised when a provider adapter call fails."""
 

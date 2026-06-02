@@ -18,7 +18,7 @@ runner = CliRunner()
 @pytest.fixture()
 def tmp_gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
-        "ax_cli.connectors.storage._connectors_path",
+        "ax_cli.connectors.paths.connectors_registry_path",
         lambda: tmp_path / "connectors.json",
     )
     auth_dir = tmp_path / "connectors" / "auth"
@@ -27,19 +27,24 @@ def tmp_gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         auth_dir.mkdir(parents=True, exist_ok=True)
         return auth_dir
 
-    monkeypatch.setattr("ax_cli.connectors.auth._auth_dir", _fake_auth_dir)
+    monkeypatch.setattr("ax_cli.connectors.paths.auth_dir", _fake_auth_dir)
     return tmp_path
 
 
 @pytest.fixture()
 def seeded_connector(tmp_gateway: Path) -> ConnectorRow:
-    row = ConnectorRow.create("test-conn", "composio", managed_auth=True, config={
-        "composio_base_url": "https://backend.composio.dev/api/v2",
-        "entity_id": "default",
-        "connected_account_id": None,
-        "app_name": None,
-        "classification": None,
-    })
+    row = ConnectorRow.create(
+        "test-conn",
+        "composio",
+        managed_auth=True,
+        config={
+            "composio_base_url": "https://backend.composio.dev/api/v3",
+            "entity_id": "default",
+            "connected_account_id": None,
+            "app_name": None,
+            "classification": None,
+        },
+    )
     add_connector(row)
     return row
 
@@ -143,6 +148,42 @@ class TestConnectorsSet:
     def test_set_not_found(self, tmp_gateway: Path):
         result = runner.invoke(connectors_app, ["set", "nonexistent", "key", "val"])
         assert result.exit_code == 1
+
+    def test_set_policy_json_array(self, seeded_connector: ConnectorRow):
+        result = runner.invoke(
+            connectors_app,
+            ["set", "test-conn", "allowed_tools", '["GITHUB_*", "JIRA_*"]', "--json"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["config"]["allowed_tools"] == ["GITHUB_*", "JIRA_*"]
+
+    def test_set_policy_comma_separated(self, seeded_connector: ConnectorRow):
+        result = runner.invoke(
+            connectors_app,
+            ["set", "test-conn", "denied_toolkits", "slack,salesforce", "--json"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["config"]["denied_toolkits"] == ["slack", "salesforce"]
+
+    def test_set_policy_single_value(self, seeded_connector: ConnectorRow):
+        result = runner.invoke(
+            connectors_app,
+            ["set", "test-conn", "allowed_toolkits", "github", "--json"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["config"]["allowed_toolkits"] == ["github"]
+
+    def test_set_non_policy_key_stays_string(self, seeded_connector: ConnectorRow):
+        result = runner.invoke(
+            connectors_app,
+            ["set", "test-conn", "entity_id", '["not", "parsed"]', "--json"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["config"]["entity_id"] == '["not", "parsed"]'
 
 
 # ── connectors providers ─────────────────────────────────────────────────────
