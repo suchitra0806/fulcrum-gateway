@@ -26,3 +26,4 @@ gateway-hermes-sentinel.log
 .env.local
 .env.*
 .DS_Store
+/channel

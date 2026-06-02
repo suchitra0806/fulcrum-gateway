@@ -6663,10 +6663,14 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
                         )
                     except UpstreamRateLimitedError as exc:
                         retry_after = exc.retry_after_seconds or 30
+                        _rl_session = load_gateway_session() or {}
+                        _rl_host = (
+                            (_rl_session.get("base_url") or "paxai.app").replace("https://", "").replace("http://", "")
+                        )
                         _write_json_response(
                             self,
                             {
-                                "error": "Upstream rate-limited (paxai.app returned 429).",
+                                "error": f"Upstream rate-limited ({_rl_host} returned 429).",
                                 "error_class": "rate_limited",
                                 "retry_after_seconds": retry_after,
                                 "operator_action": (
@@ -10139,8 +10143,8 @@ def connectors_connect(
     if as_json:
         print_json(result)
         return
-    status = result.get("connectionStatus", "?")
-    url = result.get("redirectUrl", "")
+    status = result.get("connectionStatus") or result.get("status", "?")
+    url = result.get("redirectUrl") or result.get("redirect_url", "")
     err_console.print(f"[bold]Connection status:[/bold] {status}")
     if url:
         err_console.print(f"[bold]Open this URL to authorize:[/bold] {url}")

@@ -1118,12 +1118,14 @@
       state.lastRenderMode = "connect";
       state.rowsByName.clear();
       clearChildren(region);
-      const cmd = "ax gateway login --url https://paxai.app";
+      const platformUrl = state.baseUrl || "https://paxai.app";
+      const platformHost = platformUrl.replace(/^https?:\/\//, "");
+      const cmd = "ax gateway login --url " + platformUrl;
       const card = makeEl("div", { class: "connect-card" }, [
         makeEl("h3", null, ["Connect this Gateway to aX"]),
         makeEl("p", null, [
           "Create a user PAT with CLI scope from ",
-          makeEl("a", { href: "https://paxai.app", target: "_blank", rel: "noopener" }, ["paxai.app"]),
+          makeEl("a", { href: platformUrl, target: "_blank", rel: "noopener" }, [platformHost]),
           " → Settings → Credentials, then run this in your terminal:",
         ]),
         makeEl("div", { class: "cli-block" }, [
@@ -2852,7 +2854,8 @@
         if (err.status === 429 && err.payload && err.payload.error_class === "rate_limited") {
           const retryAfter = err.payload.retry_after_seconds || 30;
           const action = err.payload.operator_action || `Wait ${retryAfter} seconds and try again.`;
-          formError.textContent = `Rate-limited by paxai.app — retry in ${retryAfter}s. ${action}`;
+          const rlHost = (state.baseUrl || "paxai.app").replace(/^https?:\/\//, "");
+          formError.textContent = `Rate-limited by ${rlHost} — retry in ${retryAfter}s. ${action}`;
         } else {
           formError.textContent = err.message || "Connection failed.";
         }
