@@ -9,6 +9,7 @@ with a real ~/.ax directory.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -3268,16 +3269,22 @@ class TestGatewaySpaceDivergenceWarning:
     def _setup(self, monkeypatch, tmp_path, *, session_space, cli_space):
         # Drive both reads deterministically rather than depending on the
         # ambient filesystem (cwd .ax/config.toml could otherwise leak in).
+        # Isolate gateway_dir() so the once-per-state marker (issue #159) is
+        # written under tmp_path, not the real ~/.ax/gateway.
+        monkeypatch.setenv("AX_GATEWAY_DIR", str(tmp_path / "gateway"))
         session = {"token": "axp_u_x", "base_url": "https://paxai.app"}
         if session_space is not None:
             session["space_id"] = session_space
         monkeypatch.setattr(gw_cmd, "load_gateway_session", lambda: dict(session))
+        self._set_cli_space(monkeypatch, cli_space)
+        # Keep the sibling token-staleness check silent.
+        monkeypatch.setattr(gw_cmd, "_warn_if_gateway_session_stale", lambda: None)
+
+    def _set_cli_space(self, monkeypatch, cli_space):
         monkeypatch.setattr(
             "ax_cli.config._load_config",
             lambda: {"space_id": cli_space} if cli_space is not None else {},
         )
-        # Keep the sibling token-staleness check silent.
-        monkeypatch.setattr(gw_cmd, "_warn_if_gateway_session_stale", lambda: None)
 
     def test_warns_when_spaces_differ(self, monkeypatch, tmp_path, capsys):
         self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-b")
@@ -3296,6 +3303,50 @@ class TestGatewaySpaceDivergenceWarning:
         self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space=None)
         gw_cmd._load_gateway_user_client()
         assert "differs from your CLI space" not in capsys.readouterr().err
+
+    def test_warns_only_once_for_same_divergence(self, monkeypatch, tmp_path, capsys):
+        # issue #159: the same divergence state should warn once, then stay quiet.
+        self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-b")
+        gw_cmd._warn_if_gateway_space_divergent()
+        assert "differs from your CLI space" in capsys.readouterr().err
+        gw_cmd._warn_if_gateway_space_divergent()
+        assert "differs from your CLI space" not in capsys.readouterr().err
+
+    def test_rewarns_when_divergence_state_changes(self, monkeypatch, tmp_path, capsys):
+        self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-b")
+        gw_cmd._warn_if_gateway_space_divergent()
+        capsys.readouterr()  # drain the first warning
+        # CLI space moves to a different value → new divergence state → warn again.
+        self._set_cli_space(monkeypatch, "space-c")
+        gw_cmd._warn_if_gateway_space_divergent()
+        assert "differs from your CLI space (space-c)" in capsys.readouterr().err
+
+    def test_realignment_resets_then_rewarns(self, monkeypatch, tmp_path, capsys):
+        self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-b")
+        gw_cmd._warn_if_gateway_space_divergent()
+        capsys.readouterr()
+        # Re-align: no warning, and the marker is cleared.
+        self._set_cli_space(monkeypatch, "space-a")
+        gw_cmd._warn_if_gateway_space_divergent()
+        assert "differs from your CLI space" not in capsys.readouterr().err
+        # Diverging again re-warns because the marker was cleared on realignment.
+        self._set_cli_space(monkeypatch, "space-b")
+        gw_cmd._warn_if_gateway_space_divergent()
+        assert "differs from your CLI space" in capsys.readouterr().err
+
+    def test_divergence_check_failure_logs_debug_and_stays_silent(self, monkeypatch, tmp_path, capsys, caplog):
+        # issue #160: the fail-soft handler must swallow errors for operators but
+        # leave a debug-level trace so a swallowed programming error is visible.
+        self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-b")
+
+        def _boom():
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("ax_cli.config._load_config", _boom)
+        with caplog.at_level(logging.DEBUG, logger="ax.gateway"):
+            gw_cmd._warn_if_gateway_space_divergent()  # must not raise
+        assert "differs from your CLI space" not in capsys.readouterr().err
+        assert any("space-divergence check failed" in r.message for r in caplog.records)
 
 
 class TestLocalOriginSignature:
