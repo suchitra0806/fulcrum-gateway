@@ -57,6 +57,21 @@ RUNTIME_STALE_AFTER_SECONDS = 75.0
 RUNTIME_HIDDEN_AFTER_SECONDS = 15 * 60.0  # default: hide stale agents after 15 min
 SETUP_ERROR_BACKOFF_SCHEDULE = (30.0, 60.0, 120.0, 300.0, 600.0)
 SETUP_ERROR_MAX_CONSECUTIVE = 10
+
+
+def _setup_error_signature(error: str) -> str:
+    """SHA-256 hex digest of a setup-error message for dedup (#34).
+
+    The previous shape (``error[:120]``) collided when two distinct
+    failures shared a long common prefix — a deep stack trace through
+    the same import path, for instance — and the consecutive-error
+    counter incorrectly kept incrementing across what were really
+    different errors. A hash sidesteps the issue without growing the
+    on-disk field size.
+    """
+    return hashlib.sha256(error.encode("utf-8", errors="replace")).hexdigest()
+
+
 # active = visible, normal operation
 # hidden = system auto-hid because of staleness; auto-restores on reconnect
 # archived = user explicitly disabled; sticky (no auto-restore); requires explicit `agents restore`
@@ -5133,7 +5148,15 @@ class ManagedAgentRuntime:
             return dict(self._state)
 
     def _record_setup_error(self, error: str) -> None:
-        signature = error[:120]
+        # SHA-256 over the full error string, not a fixed-length prefix:
+        # a 120-char prefix made two distinct errors that happened to share
+        # a long leading path or exception class look identical, so the
+        # auto-disable counter mis-attributed them to the same root cause
+        # and incremented past the threshold when it should have reset
+        # (#34). Hashing the full error gives O(1) signature size with no
+        # false dedup. Full error text still lives on ``last_error`` /
+        # activity events for operator-facing debugging.
+        signature = _setup_error_signature(error)
         with self._state_lock:
             prev_sig = self._state.get("last_setup_error_signature")
             prev_count = int(self._state.get("consecutive_setup_errors") or 0)

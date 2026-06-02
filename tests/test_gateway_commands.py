@@ -7972,7 +7972,9 @@ def test_auto_disable_after_max_consecutive_errors(monkeypatch, tmp_path):
             "token_file": str(token_file),
             "last_runtime_error_at": long_ago,
             "consecutive_setup_errors": gateway_core.SETUP_ERROR_MAX_CONSECUTIVE - 1,
-            "last_setup_error_signature": f"Gateway-managed token file is missing: {token_file}"[:120],
+            "last_setup_error_signature": gateway_core._setup_error_signature(
+                f"Gateway-managed token file is missing: {token_file}"
+            ),
         },
         client_factory=lambda **kwargs: object(),
     )
@@ -8247,7 +8249,9 @@ def test_different_error_signature_resets_consecutive_count(monkeypatch, tmp_pat
 
     runtime._record_setup_error("Python binary not found: /new/path")
     assert runtime.entry["consecutive_setup_errors"] == 1
-    assert runtime.entry["last_setup_error_signature"] == "Python binary not found: /new/path"[:120]
+    assert runtime.entry["last_setup_error_signature"] == gateway_core._setup_error_signature(
+        "Python binary not found: /new/path"
+    )
 
 
 def test_same_error_signature_increments_consecutive_count(monkeypatch, tmp_path):
@@ -8263,13 +8267,50 @@ def test_same_error_signature_increments_consecutive_count(monkeypatch, tmp_path
             "base_url": "https://paxai.app",
             "runtime_type": "echo",
             "consecutive_setup_errors": 3,
-            "last_setup_error_signature": error_msg[:120],
+            "last_setup_error_signature": gateway_core._setup_error_signature(error_msg),
         },
         client_factory=lambda **kwargs: object(),
     )
 
     runtime._record_setup_error(error_msg)
     assert runtime.entry["consecutive_setup_errors"] == 4
+
+
+def test_distinct_errors_sharing_long_prefix_do_not_falsely_dedup(monkeypatch, tmp_path):
+    """#34: two distinct errors that share a long common prefix (e.g. the
+    same exception class + same module path in a deep stack trace) must
+    not be treated as the same error by the consecutive-count dedup. The
+    old 120-char prefix signature collided on that pattern and made the
+    counter creep toward auto-disable when the root cause was actually
+    changing under it."""
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+
+    common_prefix = "ValueError: " + ("x" * 130) + ": "
+    error_a = common_prefix + "cause_A"
+    error_b = common_prefix + "cause_B"
+    # Both first 120 chars are identical — the old shape considered them
+    # the same error. SHA-256 over the full string does not.
+    assert error_a[:120] == error_b[:120]
+    assert gateway_core._setup_error_signature(error_a) != gateway_core._setup_error_signature(error_b)
+
+    runtime = gateway_core.ManagedAgentRuntime(
+        {
+            "name": "long-prefix-bug",
+            "agent_id": "agent-lpb",
+            "space_id": "space-1",
+            "base_url": "https://paxai.app",
+            "runtime_type": "echo",
+        },
+        client_factory=lambda **kwargs: object(),
+    )
+
+    runtime._record_setup_error(error_a)
+    assert runtime.entry["consecutive_setup_errors"] == 1
+    runtime._record_setup_error(error_b)
+    # Different root cause → counter resets to 1, not increments to 2.
+    assert runtime.entry["consecutive_setup_errors"] == 1, (
+        "distinct errors sharing a 120-char prefix were falsely deduped (#34 regression)"
+    )
 
 
 def test_hermes_plugin_setup_error_increments_consecutive_count(monkeypatch, tmp_path):
@@ -8332,7 +8373,7 @@ def test_hermes_plugin_setup_error_eventually_auto_disables(monkeypatch, tmp_pat
             "hermes_bin": "/skip-step-1-bin-resolution",
             "token_file": str(token_file),
             "consecutive_setup_errors": gateway_core.SETUP_ERROR_MAX_CONSECUTIVE - 1,
-            "last_setup_error_signature": seed_error_msg[:120],
+            "last_setup_error_signature": gateway_core._setup_error_signature(seed_error_msg),
         },
         client_factory=lambda **kwargs: object(),
     )
@@ -8343,6 +8384,7 @@ def test_hermes_plugin_setup_error_eventually_auto_disables(monkeypatch, tmp_pat
         "hermes_plugin did not auto-disable after MAX consecutive setup errors"
     )
     assert "Auto-disabled" in str(runtime.entry.get("setup_disabled_reason") or "")
+
 
 
 # -- Active-space simplification (single source of truth) ---------------------
