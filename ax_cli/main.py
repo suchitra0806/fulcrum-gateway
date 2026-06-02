@@ -218,3 +218,16 @@ def main():
             # turns into a process exit inside an app() call. main() is outside
             # that boundary, so convert it to an explicit sys.exit here.
             sys.exit(exit_exc.exit_code)
+    except httpx.RequestError as exc:
+        # Transport-level failures a command didn't catch locally: timeouts
+        # (ConnectTimeout/ReadTimeout/WriteTimeout/PoolTimeout), network
+        # read/write errors, and protocol errors. ConnectError keeps its own
+        # message above; this is the catch-all so the rest surface as one
+        # actionable line instead of a 30+ line traceback — completing the
+        # #73/#137 fix beyond HTTPStatusError (#163).
+        typer.echo(
+            f"Error: could not complete the aX API request ({type(exc).__name__}). "
+            "Check your network connection and that the server is reachable, then retry.",
+            err=True,
+        )
+        sys.exit(1)

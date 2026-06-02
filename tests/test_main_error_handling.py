@@ -56,3 +56,41 @@ def test_connect_error_still_handled(monkeypatch, capsys):
 
     assert exc_info.value.code == 1
     assert "cannot reach aX API" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        httpx.ReadTimeout("read timed out"),
+        httpx.ConnectTimeout("connect timed out"),
+        httpx.PoolTimeout("pool timed out"),
+        httpx.ReadError("connection reset"),
+        httpx.RemoteProtocolError("server disconnected"),
+    ],
+)
+def test_transport_errors_map_to_actionable_line_not_traceback(monkeypatch, capsys, exc):
+    # #163: timeouts / network / protocol errors that escape a command used to
+    # reach the operator as a raw traceback. They now get one actionable line.
+    monkeypatch.setattr(main_mod, "app", _raise(exc))
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_mod.main()
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "could not complete the aX API request" in err
+    assert type(exc).__name__ in err  # names the failure mode for debugging
+    assert "Traceback" not in err
+
+
+def test_connect_error_message_wins_over_broad_request_error(monkeypatch, capsys):
+    # ConnectError is also an httpx.RequestError; its specific "is the server
+    # running?" message must still win (its branch is ordered first).
+    monkeypatch.setattr(main_mod, "app", _raise(httpx.ConnectError("refused")))
+
+    with pytest.raises(SystemExit):
+        main_mod.main()
+
+    err = capsys.readouterr().err
+    assert "cannot reach aX API" in err
+    assert "could not complete the aX API request" not in err
