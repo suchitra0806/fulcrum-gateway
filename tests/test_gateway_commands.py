@@ -3551,6 +3551,8 @@ def test_render_gateway_ui_page_contains_local_dashboard_shell():
     assert "/api/agents/&lt;name&gt;" in page
     assert "refreshMs = 2000" in page
     assert "Gateway Agent Setup" in page
+    assert "Outbound Connectors" in page
+    assert "/api/connectors" in page
     assert "gateway-agent-setup" in page
     assert "Agent Type" in page
     assert "Output" in page
