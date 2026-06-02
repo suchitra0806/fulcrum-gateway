@@ -1130,6 +1130,166 @@ def test_gateway_agents_add_claude_code_channel_registers_gateway_identity_runni
     assert "BEGIN ax-gateway-agent-context" in claude_md.read_text()
 
 
+def test_gateway_agents_add_autogen_scaffolds_workdir_and_copies_bridge(monkeypatch, tmp_path):
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+    gateway_core.save_gateway_session(
+        {
+            "token": "axp_u_test.token",
+            "base_url": "https://paxai.app",
+            "space_id": "space-1",
+            "username": "madtank",
+        }
+    )
+    monkeypatch.setattr(gateway_cmd, "_load_gateway_user_client", lambda: _FakeUserClient())
+    monkeypatch.setattr(gateway_cmd, "_find_agent_in_space", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        gateway_cmd,
+        "_create_agent_in_space",
+        lambda *args, **kwargs: {"id": "agent-autogen-1", "name": "autogen-bot"},
+    )
+    monkeypatch.setattr(gateway_cmd, "_polish_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gateway_cmd, "_mint_agent_pat", lambda *args, **kwargs: ("axp_a_agent.secret", "mgmt"))
+
+    agent_workdir = tmp_path / "autogen-bot"
+    result = runner.invoke(
+        app,
+        [
+            "gateway",
+            "agents",
+            "add",
+            "autogen-bot",
+            "--template",
+            "autogen",
+            "--workdir",
+            str(agent_workdir),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    # Workdir scaffolded and bridge file copied so the agent runs without a
+    # manual `mkdir + cp` step (#130).
+    assert agent_workdir.is_dir()
+    copied_bridge = agent_workdir / "autogen_bridge.py"
+    assert copied_bridge.is_file()
+    # exec_command rewritten to point at the workdir-local copy, not the
+    # source path under examples/.
+    assert payload["exec_command"].endswith("autogen_bridge.py")
+    assert str(copied_bridge.resolve()) in payload["exec_command"]
+    assert "examples" not in payload["exec_command"]
+    assert payload["workdir"] == str(agent_workdir.resolve())
+
+
+def test_gateway_agents_add_langgraph_composio_scaffolds_workdir_and_copies_bridge(monkeypatch, tmp_path):
+    # Regression guard for #149: langgraph_composio landed (PR #124) without a
+    # bridge_source field, so --workdir registrations fell through
+    # _scaffold_bridge_workdir and hit the manual mkdir+cp gap. With the field
+    # present the composio template scaffolds like the other bridge templates.
+    from ax_cli.connectors import types as connector_types
+
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+    gateway_core.save_gateway_session(
+        {
+            "token": "axp_u_test.token",
+            "base_url": "https://paxai.app",
+            "space_id": "space-1",
+            "username": "madtank",
+        }
+    )
+    monkeypatch.setattr(gateway_cmd, "_load_gateway_user_client", lambda: _FakeUserClient())
+    monkeypatch.setattr(gateway_cmd, "_find_agent_in_space", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        gateway_cmd,
+        "_create_agent_in_space",
+        lambda *args, **kwargs: {"id": "agent-composio-1", "name": "composio-bot"},
+    )
+    monkeypatch.setattr(gateway_cmd, "_polish_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gateway_cmd, "_mint_agent_pat", lambda *args, **kwargs: ("axp_a_agent.secret", "mgmt"))
+    # langgraph_composio requires --connector-ref; resolve it to an enabled row.
+    monkeypatch.setattr(
+        "ax_cli.connectors.find_connector",
+        lambda _ref: connector_types.ConnectorRow.create("my_composio", "composio"),
+    )
+
+    agent_workdir = tmp_path / "composio-bot"
+    result = runner.invoke(
+        app,
+        [
+            "gateway",
+            "agents",
+            "add",
+            "composio-bot",
+            "--template",
+            "langgraph_composio",
+            "--connector-ref",
+            "my_composio",
+            "--workdir",
+            str(agent_workdir),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert agent_workdir.is_dir()
+    copied_bridge = agent_workdir / "langgraph_composio_bridge.py"
+    assert copied_bridge.is_file()
+    assert payload["exec_command"].endswith("langgraph_composio_bridge.py")
+    assert str(copied_bridge.resolve()) in payload["exec_command"]
+    assert "examples" not in payload["exec_command"]
+    assert payload["workdir"] == str(agent_workdir.resolve())
+
+
+def test_gateway_agents_add_with_explicit_exec_skips_bridge_scaffold(monkeypatch, tmp_path):
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+    gateway_core.save_gateway_session(
+        {
+            "token": "axp_u_test.token",
+            "base_url": "https://paxai.app",
+            "space_id": "space-1",
+            "username": "madtank",
+        }
+    )
+    monkeypatch.setattr(gateway_cmd, "_load_gateway_user_client", lambda: _FakeUserClient())
+    monkeypatch.setattr(gateway_cmd, "_find_agent_in_space", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        gateway_cmd,
+        "_create_agent_in_space",
+        lambda *args, **kwargs: {"id": "agent-custom-1", "name": "custom-bot"},
+    )
+    monkeypatch.setattr(gateway_cmd, "_polish_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gateway_cmd, "_mint_agent_pat", lambda *args, **kwargs: ("axp_a_agent.secret", "mgmt"))
+
+    agent_workdir = tmp_path / "custom-bot"
+    result = runner.invoke(
+        app,
+        [
+            "gateway",
+            "agents",
+            "add",
+            "custom-bot",
+            "--template",
+            "autogen",
+            "--workdir",
+            str(agent_workdir),
+            "--exec",
+            "python my_custom_bridge.py",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    # Operator's --exec is the source of truth; we don't copy the template
+    # bridge or rewrite their command.
+    assert payload["exec_command"] == "python my_custom_bridge.py"
+    assert not (agent_workdir / "autogen_bridge.py").exists()
+
+
 def test_claude_code_channel_ignores_stale_mailbox_backlog_for_presence():
     annotated = gateway_core.annotate_runtime_health(
         {

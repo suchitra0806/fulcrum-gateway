@@ -102,6 +102,7 @@ from ..gateway import (
     write_gateway_ui_state,
 )
 from ..gateway_runtime_types import (
+    _bridge_python,
     agent_template_definition,
     agent_template_list,
     runtime_type_definition,
@@ -1413,6 +1414,43 @@ def _normalize_connector_ref(connector_ref: str) -> str:
     return row.name
 
 
+def _scaffold_bridge_workdir(
+    template: dict | None,
+    *,
+    explicit_workdir: str | None,
+    explicit_exec: str | None,
+) -> str | None:
+    """Scaffold a bridge-template workdir so the registered agent runs without
+    a manual copy step (#130).
+
+    When the operator passes ``--workdir`` for a template that ships a bridge
+    file (langgraph, autogen, strands), create the workdir, copy the bridge
+    into it, and return a rewritten exec_command pointing at the workdir
+    copy. Returns ``None`` if nothing was scaffolded, in which case the
+    caller keeps its existing exec_command.
+
+    Skipped when the operator supplied ``--exec`` (their command is the
+    source of truth) or when the bridge source file isn't on disk (e.g. a
+    PyPI install where ``examples/`` wasn't shipped — leaving the original
+    exec_command in place at least surfaces a clear path in the subprocess
+    error).
+    """
+    if not template or not explicit_workdir or explicit_exec:
+        return None
+    bridge_source_str = str((template.get("defaults") or {}).get("bridge_source") or "").strip()
+    if not bridge_source_str:
+        return None
+    bridge_source = Path(bridge_source_str)
+    if not bridge_source.is_file():
+        return None
+    workdir_path = Path(explicit_workdir).expanduser().resolve()
+    workdir_path.mkdir(parents=True, exist_ok=True)
+    target = workdir_path / bridge_source.name
+    if not target.exists():
+        shutil.copyfile(bridge_source, target)
+    return f"{_bridge_python()} {target}"
+
+
 def _register_managed_agent(
     *,
     name: str,
@@ -1437,6 +1475,7 @@ def _register_managed_agent(
         raise ValueError("Managed agent name is required.")
     template = None
     explicit_workdir = str(workdir or "").strip() or None
+    explicit_exec = str(exec_cmd or "").strip() or None
     if template_id:
         try:
             template = agent_template_definition(template_id)
@@ -1470,6 +1509,10 @@ def _register_managed_agent(
             "Template LangGraph + Composio requires --connector-ref <name>. "
             "Register a connector first: ax gateway connectors add <name> --provider composio --managed-auth"
         )
+    scaffolded_exec = _scaffold_bridge_workdir(template, explicit_workdir=explicit_workdir, explicit_exec=explicit_exec)
+    if scaffolded_exec:
+        exec_cmd = scaffolded_exec
+        workdir = str(Path(explicit_workdir).expanduser().resolve())
     _validate_runtime_registration(runtime_type, exec_cmd)
     timeout_effective = _normalize_timeout_seconds(timeout_seconds)
 
