@@ -34,7 +34,6 @@ tests/test_groq_sdk_runtime.py.
 
 from __future__ import annotations
 
-import importlib
 import os
 import sys
 import tempfile
@@ -60,18 +59,11 @@ if _EXAMPLES_DIR not in sys.path:
 
 import langgraph_bridge  # noqa: E402
 
-
 # ── Helpers ────────────────────────────────────────────────────────────────
-
-
-def _reload_bridge():
-    """Reload the bridge module so env var changes take effect.
-
-    The bridge module reads env vars inside functions (not at import time)
-    for its actual config, but reload covers the unlikely case of any
-    module-level state that observed env vars on first import.
-    """
-    importlib.reload(langgraph_bridge)
+# _reload_bridge() lived here historically but was moved to
+# tests/test_langgraph_bridge_dotenv.py alongside its only caller
+# (TestLoadDotenvIntoEnviron). The langgraph-gated tests below do not
+# need it.
 
 
 # ── 1. _max_iterations clamps to floor/ceiling ────────────────────────────
@@ -105,17 +97,20 @@ def test_max_iterations_invalid_value_falls_back(monkeypatch):
 # ── 2 + 3. Env-var parsing for tools-disabled and strict-security ────────
 
 
-@pytest.mark.parametrize("value,expected", [
-    ("1", True),
-    ("true", True),
-    ("yes", True),
-    ("on", True),
-    ("TRUE", True),
-    ("0", False),
-    ("false", False),
-    ("", False),
-    ("nope", False),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("1", True),
+        ("true", True),
+        ("yes", True),
+        ("on", True),
+        ("TRUE", True),
+        ("0", False),
+        ("false", False),
+        ("", False),
+        ("nope", False),
+    ],
+)
 def test_tools_disabled_env(monkeypatch, value, expected):
     monkeypatch.setenv("AX_BRIDGE_TOOLS_DISABLED", value)
     assert langgraph_bridge._tools_disabled() is expected
@@ -126,15 +121,18 @@ def test_tools_disabled_unset(monkeypatch):
     assert langgraph_bridge._tools_disabled() is False
 
 
-@pytest.mark.parametrize("value,expected", [
-    ("1", True),
-    ("true", True),
-    ("yes", True),
-    ("on", True),
-    ("0", False),
-    ("false", False),
-    ("", False),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("1", True),
+        ("true", True),
+        ("yes", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("", False),
+    ],
+)
 def test_strict_security_env(monkeypatch, value, expected):
     monkeypatch.setenv("AX_BRIDGE_STRICT_SECURITY", value)
     assert langgraph_bridge._strict_security() is expected
@@ -355,9 +353,7 @@ def test_toolnode_with_security_wrap_intercepts_blocked_write(monkeypatch, tmp_p
     content = getattr(rejection, "content", "")
     assert "Write denied" in content or "error" in content.lower()
     # Critical: the underlying tool function must NOT have run
-    assert sentinel_fired["value"] is False, (
-        "Security wrapper failed to intercept: write_file actually executed"
-    )
+    assert sentinel_fired["value"] is False, "Security wrapper failed to intercept: write_file actually executed"
 
 
 def test_toolnode_with_security_wrap_passes_through_allowed_call(monkeypatch, tmp_path):
@@ -469,216 +465,3 @@ def test_multi_node_graph_compiles_without_nameerror(monkeypatch, tmp_path):
     )
     assert result.used_llm is True
     assert "stub final answer" in result.reply
-
-
-# ── 11. _load_dotenv_into_environ() unit coverage (issue #112) ────────────
-#
-# The .env loader (~50 lines, lines 87-136 of the bridge) runs at module
-# import as an os.environ side effect. Pre-this-PR there were no tests
-# for any of its behaviors, and the _reload_bridge() helper at the top
-# of this file was dead code. Sean filed #112 from PR #86 review finding
-# #3 calling out the gap. This class pins the six behaviors named in the
-# issue plus a missing-file silent fallback, the emit_event surface, and
-# the previously-dead _reload_bridge() helper.
-
-
-class TestLoadDotenvIntoEnviron:
-    """#112: unit coverage for _load_dotenv_into_environ()."""
-
-    # Test keys prefixed so they cannot collide with any real .env that may
-    # have leaked into os.environ at the original module import.
-    KEY_A = "_TEST_LANGGRAPH_DOTENV_KEY_A"
-    KEY_B = "_TEST_LANGGRAPH_DOTENV_KEY_B"
-
-    def _clean_keys(self, monkeypatch):
-        for k in (self.KEY_A, self.KEY_B):
-            monkeypatch.delenv(k, raising=False)
-
-    def test_parses_simple_key_value_pairs(self, monkeypatch, tmp_path):
-        self._clean_keys(monkeypatch)
-        env_file = tmp_path / "explicit.env"
-        env_file.write_text(f"{self.KEY_A}=alpha\n{self.KEY_B}=beta\n")
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(env_file))
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert os.environ[self.KEY_A] == "alpha"
-        assert os.environ[self.KEY_B] == "beta"
-
-    def test_strips_double_quotes(self, monkeypatch, tmp_path):
-        self._clean_keys(monkeypatch)
-        env_file = tmp_path / "quoted.env"
-        env_file.write_text(f'{self.KEY_A}="double quoted value"\n')
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(env_file))
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert os.environ[self.KEY_A] == "double quoted value"
-
-    def test_strips_single_quotes(self, monkeypatch, tmp_path):
-        self._clean_keys(monkeypatch)
-        env_file = tmp_path / "quoted.env"
-        env_file.write_text(f"{self.KEY_A}='single quoted value'\n")
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(env_file))
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert os.environ[self.KEY_A] == "single quoted value"
-
-    def test_preserves_mismatched_quotes(self, monkeypatch, tmp_path):
-        # The strip condition requires matching outer quotes; a mismatched
-        # pair (open with " close with ') is left intact, so the operator
-        # sees the literal value rather than a silently-mangled string.
-        self._clean_keys(monkeypatch)
-        env_file = tmp_path / "mismatched.env"
-        env_file.write_text(f'{self.KEY_A}="not really closed\'\n')
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(env_file))
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert os.environ[self.KEY_A] == "\"not really closed'"
-
-    def test_does_not_overwrite_existing_env_var(self, monkeypatch, tmp_path):
-        # Pre-set the env var; the loader must not clobber it.
-        self._clean_keys(monkeypatch)
-        monkeypatch.setenv(self.KEY_A, "preset-by-operator")
-        env_file = tmp_path / "explicit.env"
-        env_file.write_text(f"{self.KEY_A}=loaded-from-file\n")
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(env_file))
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert os.environ[self.KEY_A] == "preset-by-operator"
-
-    def test_explicit_env_file_takes_precedence_over_cwd(self, monkeypatch, tmp_path):
-        self._clean_keys(monkeypatch)
-        explicit = tmp_path / "explicit.env"
-        explicit.write_text(f"{self.KEY_A}=from-explicit\n")
-        (tmp_path / ".env").write_text(f"{self.KEY_A}=from-cwd\n")
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(explicit))
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert os.environ[self.KEY_A] == "from-explicit"
-
-    def test_returns_after_first_match(self, monkeypatch, tmp_path):
-        # When the explicit file is found and loaded, cwd/.env must NOT be
-        # consulted; KEY_B (only present in cwd/.env) stays unset.
-        self._clean_keys(monkeypatch)
-        explicit = tmp_path / "explicit.env"
-        explicit.write_text(f"{self.KEY_A}=from-explicit\n")
-        (tmp_path / ".env").write_text(f"{self.KEY_B}=from-cwd\n")
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(explicit))
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert os.environ[self.KEY_A] == "from-explicit"
-        assert self.KEY_B not in os.environ
-
-    def test_skips_comment_lines(self, monkeypatch, tmp_path):
-        self._clean_keys(monkeypatch)
-        env_file = tmp_path / "commented.env"
-        env_file.write_text(
-            "# a comment that should be ignored\n"
-            f"{self.KEY_A}=alpha\n"
-            f"# {self.KEY_B}=this_should_not_load\n"
-        )
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(env_file))
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert os.environ[self.KEY_A] == "alpha"
-        assert self.KEY_B not in os.environ
-
-    def test_skips_lines_without_equals_sign(self, monkeypatch, tmp_path):
-        self._clean_keys(monkeypatch)
-        env_file = tmp_path / "malformed.env"
-        env_file.write_text(f"this_line_has_no_equals\n{self.KEY_A}=alpha\n")
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(env_file))
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert os.environ[self.KEY_A] == "alpha"
-
-    def test_skips_lines_with_empty_keys(self, monkeypatch, tmp_path):
-        # A `=value` line has an empty key after partition + strip; the
-        # `if not key` guard must drop it before os.environ[""] = value.
-        self._clean_keys(monkeypatch)
-        env_file = tmp_path / "empty_key.env"
-        env_file.write_text(f"=orphaned_value\n{self.KEY_A}=alpha\n")
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(env_file))
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert os.environ[self.KEY_A] == "alpha"
-        # Empty key never written to os.environ.
-        assert "" not in os.environ
-
-    def test_silent_on_missing_file(self, monkeypatch, tmp_path):
-        # AX_BRIDGE_ENV_FILE points at a non-existent path; the loader
-        # tries the next candidate and falls through without raising.
-        self._clean_keys(monkeypatch)
-        nonexistent = tmp_path / "does-not-exist.env"
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(nonexistent))
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert self.KEY_A not in os.environ
-
-    def test_emit_event_fires_with_loaded_path(self, monkeypatch, tmp_path):
-        self._clean_keys(monkeypatch)
-        env_file = tmp_path / "explicit.env"
-        env_file.write_text(f"{self.KEY_A}=alpha\n")
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(env_file))
-        monkeypatch.chdir(tmp_path)
-        captured: list[dict] = []
-        monkeypatch.setattr(
-            langgraph_bridge, "emit_event", lambda payload: captured.append(payload)
-        )
-
-        langgraph_bridge._load_dotenv_into_environ()
-
-        assert len(captured) == 1
-        event = captured[0]
-        assert event["kind"] == "activity"
-        assert "loaded .env from" in event["activity"]
-        assert str(env_file) in event["activity"]
-
-    def test_reload_bridge_helper_loads_explicit_env_file(self, monkeypatch, tmp_path):
-        # Coverage for _reload_bridge(): the test helper at the top of the
-        # file existed but had no caller before this PR (#112 names this
-        # gap). The helper reloads the bridge module, which triggers the
-        # module-level _load_dotenv_into_environ() side effect. This pins
-        # the helper's behavior so a future refactor doesn't silently
-        # break it.
-        self._clean_keys(monkeypatch)
-        env_file = tmp_path / "reload.env"
-        env_file.write_text(f"{self.KEY_A}=reloaded\n")
-        monkeypatch.setenv("AX_BRIDGE_ENV_FILE", str(env_file))
-        monkeypatch.chdir(tmp_path)
-
-        _reload_bridge()
-
-        assert os.environ[self.KEY_A] == "reloaded"
