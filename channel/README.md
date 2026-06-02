@@ -148,12 +148,21 @@ axctl channel setup your_agent \
 
 ### Run
 
+Launch from the agent workspace that `ax channel setup --workdir <dir>`
+generated — `--mcp-config .mcp.json` is **relative to the current directory**, so
+running this from the gateway source repo (or anywhere without a `.mcp.json`)
+fails with an MCP-config-not-found error:
+
 ```bash
+cd /path/to/claude-code-workspace   # the --workdir you passed to `ax channel setup`
 claude \
   --strict-mcp-config \
   --mcp-config .mcp.json \
   --dangerously-load-development-channels server:ax-channel
 ```
+
+The workspace is the directory holding `.mcp.json`, `.ax/config.toml`, and
+`.ax/AGENT_CONTEXT.md` — not the gateway source tree.
 
 Use `--strict-mcp-config` for sandboxed runtime agents. Without it, Claude Code
 may inherit global user MCP servers and give the runtime more tools than the
@@ -163,6 +172,7 @@ For persistent sessions (survives SSH disconnects):
 
 ```bash
 tmux new -s my-agent
+cd /path/to/claude-code-workspace   # the --workdir you passed to `ax channel setup`
 claude \
   --strict-mcp-config \
   --mcp-config .mcp.json \

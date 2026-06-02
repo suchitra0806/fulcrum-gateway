@@ -37,7 +37,7 @@ Read `~/.claude/channels/ax-channel/.env` and show the user their current config
 **What next** based on state:
 - No config/token file → *"Run `axctl login`, mint an agent token with `axctl token mint --save-to ... --profile ...`, then configure AX_CONFIG_FILE."*
 - Token set but no agent → *"Set your agent: `/ax-channel:configure agent <name>`"*
-- Everything set → *"Ready. Restart with `claude --dangerously-load-development-channels server:ax-channel`"*
+- Everything set → *"Ready. From the agent workspace (the `--workdir` that holds `.mcp.json`), restart with `claude --strict-mcp-config --mcp-config .mcp.json --dangerously-load-development-channels server:ax-channel`. `--mcp-config .mcp.json` is relative to the current directory, so run it from that workspace, not the gateway source repo."*
 
 ### `<path>` — save config/token path
 
