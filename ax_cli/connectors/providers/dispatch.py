@@ -7,6 +7,7 @@ from types import ModuleType
 from typing import Any
 
 from ..activity import (
+    new_invocation_id,
     record_connector_tool_completed,
     record_connector_tool_denied,
     record_connector_tool_failed,
@@ -67,13 +68,14 @@ def execute_tool(
 ) -> dict[str, Any]:
     policy = from_config(connector.config)
     identity = {k: v for k, v in [("agent_name", agent_name), ("agent_id", agent_id)] if v}
+    invocation_ctx = {**identity, "invocation_id": new_invocation_id()}
     try:
         assert_tool_allowed(tool_slug, policy, toolkit=toolkit)
     except ConnectorPolicyError as exc:
-        record_connector_tool_denied(connector, tool_slug, policy_detail=exc.policy_detail, **identity)
+        record_connector_tool_denied(connector, tool_slug, policy_detail=exc.policy_detail, **invocation_ctx)
         raise
 
-    record_connector_tool_started(connector, tool_slug, **identity)
+    record_connector_tool_started(connector, tool_slug, **invocation_ctx)
     t0 = time.monotonic()
     try:
         adapter = _get_adapter(connector.provider)
@@ -86,10 +88,10 @@ def execute_tool(
         )
     except Exception as exc:
         duration_ms = int((time.monotonic() - t0) * 1000)
-        record_connector_tool_failed(connector, tool_slug, error=str(exc), duration_ms=duration_ms, **identity)
+        record_connector_tool_failed(connector, tool_slug, error=str(exc), duration_ms=duration_ms, **invocation_ctx)
         raise
     duration_ms = int((time.monotonic() - t0) * 1000)
-    record_connector_tool_completed(connector, tool_slug, duration_ms=duration_ms, **identity)
+    record_connector_tool_completed(connector, tool_slug, duration_ms=duration_ms, **invocation_ctx)
     return result
 
 
