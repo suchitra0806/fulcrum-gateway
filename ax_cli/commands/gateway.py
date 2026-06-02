@@ -9017,10 +9017,7 @@ def add_agent(
     template_id: str = typer.Option(
         None,
         "--template",
-        help=(
-            "Agent template: echo_test | ollama | hermes | langgraph | langgraph_composio | "
-            "sentinel_cli | claude_code_channel | …"
-        ),
+        help="Agent template: " + " | ".join(t["id"] for t in agent_template_list()),
     ),
     runtime_type: str = typer.Option(
         None,
