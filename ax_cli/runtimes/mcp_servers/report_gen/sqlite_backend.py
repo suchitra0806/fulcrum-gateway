@@ -22,23 +22,29 @@ from typing import Any
 from .synthetic_db import ensure_database, open_readonly
 
 _shared_conn: sqlite3.Connection | None = None
+_shared_db_path: str = ""
 
 
 def _get_shared_connection() -> sqlite3.Connection:
-    global _shared_conn
+    # Safe to share across calls because stdio_server.py dispatches one request
+    # at a time in a synchronous blocking loop — there is no concurrent access.
+    # If report_gen ever moves to threaded/async dispatch this assumption breaks.
+    global _shared_conn, _shared_db_path
     if _shared_conn is None:
         db_path = ensure_database()
         _shared_conn = open_readonly(db_path)
         _shared_conn.row_factory = sqlite3.Row
+        _shared_db_path = str(db_path)
     return _shared_conn
 
 
 def _close_shared_connection() -> None:
     """Close and reset the shared connection. Intended for test teardown."""
-    global _shared_conn
+    global _shared_conn, _shared_db_path
     if _shared_conn is not None:
         _shared_conn.close()
         _shared_conn = None
+        _shared_db_path = ""
 
 
 class SqliteBackend:
@@ -47,11 +53,8 @@ class SqliteBackend:
     def get_schema(self) -> dict[str, Any]:
         conn = _get_shared_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-        )
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
         table_names = [r[0] for r in cursor.fetchall()]
-        db_path = ensure_database()
         tables = []
         for table_name in table_names:
             cursor.execute(f"PRAGMA table_info({table_name})")
@@ -86,7 +89,7 @@ class SqliteBackend:
             )
         return {
             "backend": "sqlite",
-            "database": str(db_path),
+            "database": _shared_db_path,
             "synthetic": True,
             "tables": tables,
         }
