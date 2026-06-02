@@ -505,6 +505,9 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
                 "exec_command": (
                     f"{_bridge_python()} {repo_root / 'examples' / 'gateway_langgraph_composio' / 'langgraph_composio_bridge.py'}"
                 ),
+                "bridge_source": str(
+                    repo_root / "examples" / "gateway_langgraph_composio" / "langgraph_composio_bridge.py"
+                ),
                 "workdir": str(repo_root),
             },
             "signals": runtime_signals["exec"],
