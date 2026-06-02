@@ -6202,7 +6202,9 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
                     except UpstreamRateLimitedError as exc:
                         retry_after = exc.retry_after_seconds or 30
                         _rl_session = load_gateway_session() or {}
-                        _rl_host = (_rl_session.get("base_url") or "paxai.app").replace("https://", "").replace("http://", "")
+                        _rl_host = (
+                            (_rl_session.get("base_url") or "paxai.app").replace("https://", "").replace("http://", "")
+                        )
                         _write_json_response(
                             self,
                             {
