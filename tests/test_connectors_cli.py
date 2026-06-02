@@ -185,6 +185,15 @@ class TestConnectorsSet:
         data = json.loads(result.output)
         assert data["config"]["entity_id"] == '["not", "parsed"]'
 
+    def test_set_policy_rejects_invalid_fnmatch(self, seeded_connector: ConnectorRow):
+        result = runner.invoke(
+            connectors_app,
+            ["set", "test-conn", "allowed_tools", "[unclosed"],
+        )
+        assert result.exit_code == 1
+        assert "Invalid policy pattern" in result.output
+        assert "unbalanced" in result.output
+
 
 # ── connectors providers ─────────────────────────────────────────────────────
 

@@ -96,7 +96,10 @@ ax gateway connectors set composio-main tools_limit 100
 **Semantics:**
 - `allowed_tools`: if set, tool name must match at least one pattern
 - `denied_tools`: tool name must NOT match any pattern
+- `allowed_toolkits`: if set, tool must carry an `appName`/`toolkit` field that matches at least one pattern. Tools **without** toolkit metadata are **denied** (fail closed). For providers like `http_mcp` that do not attach toolkit fields, use `allowed_tools` instead of `allowed_toolkits`.
+- `denied_toolkits`: toolkit name must NOT match any pattern
 - Deny always takes precedence over allow
+- Policy patterns use Python `fnmatch` syntax; malformed patterns (for example unbalanced `[`) are rejected at config write time
 - Policy is enforced at both discovery (`tools list`/`tools search`) and execution (`call`)
 
 ## Auth management

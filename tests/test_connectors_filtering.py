@@ -10,6 +10,8 @@ from ax_cli.connectors.filtering import (
     assert_tool_allowed,
     filter_tools,
     from_config,
+    validate_fnmatch_pattern,
+    validate_policy_patterns,
 )
 
 # ── from_config ──────────────────────────────────────────────────────────────
@@ -59,6 +61,29 @@ class TestFromConfig:
     def test_single_string_becomes_list(self):
         policy = from_config({"allowed_tools": "GITHUB_*"})
         assert policy.allowed_tools == ["GITHUB_*"]
+
+    def test_rejects_unbalanced_brackets(self):
+        with pytest.raises(ValueError, match="unbalanced"):
+            from_config({"allowed_tools": ["[unclosed"]})
+
+    def test_rejects_empty_pattern(self):
+        with pytest.raises(ValueError, match="must not be empty"):
+            from_config({"denied_tools": ["GITHUB_*", "  "]})
+
+    def test_validate_policy_patterns_accepts_valid_config(self):
+        validate_policy_patterns({"allowed_toolkits": ["github", "jira"]})
+
+
+# ── fnmatch validation ───────────────────────────────────────────────────────
+
+
+class TestFnmatchValidation:
+    def test_validate_fnmatch_pattern_accepts_wildcard(self):
+        validate_fnmatch_pattern("GITHUB_*", field="allowed_tools")
+
+    def test_validate_fnmatch_pattern_rejects_unbalanced_brackets(self):
+        with pytest.raises(ValueError, match="unbalanced"):
+            validate_fnmatch_pattern("[unclosed", field="allowed_tools")
 
 
 # ── filter_tools ─────────────────────────────────────────────────────────────
@@ -204,8 +229,9 @@ class TestAssertToolAllowed:
 
     def test_toolkit_none_with_allowlist_at_execution(self):
         policy = ToolFilterPolicy(allowed_toolkits=["github"])
-        with pytest.raises(ConnectorPolicyError):
+        with pytest.raises(ConnectorPolicyError) as exc_info:
             assert_tool_allowed("UNKNOWN_TOOL", policy, toolkit=None)
+        assert "no toolkit metadata" in exc_info.value.policy_detail
 
     def test_toolkit_none_without_policy_passes(self):
         policy = ToolFilterPolicy()

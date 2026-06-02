@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
-from fnmatch import fnmatch
+import re
+from fnmatch import fnmatch, translate
 from typing import Any
 
 from .constants import (
@@ -17,6 +18,13 @@ from .constants import (
 )
 from .errors import ConnectorPolicyError
 
+POLICY_PATTERN_KEYS = (
+    KEY_ALLOWED_TOOLS,
+    KEY_DENIED_TOOLS,
+    KEY_ALLOWED_TOOLKITS,
+    KEY_DENIED_TOOLKITS,
+)
+
 
 @dataclasses.dataclass(frozen=True)
 class ToolFilterPolicy:
@@ -27,7 +35,34 @@ class ToolFilterPolicy:
     tools_limit: int = DEFAULT_TOOLS_LIMIT
 
 
+def validate_fnmatch_pattern(pattern: str, *, field: str) -> None:
+    """Raise ValueError when an operator-supplied fnmatch pattern is unusable."""
+    if not pattern.strip():
+        raise ValueError(f"{field}: pattern must not be empty")
+    if pattern.count("[") != pattern.count("]"):
+        raise ValueError(f"{field}: unbalanced '[' / ']' in fnmatch pattern {pattern!r}")
+    try:
+        re.compile(translate(pattern))
+    except re.error as exc:
+        raise ValueError(f"{field}: invalid fnmatch pattern {pattern!r}: {exc}") from exc
+
+
+def _validate_pattern_list(patterns: list[str], *, field: str) -> list[str]:
+    for pattern in patterns:
+        validate_fnmatch_pattern(pattern, field=field)
+    return patterns
+
+
+def validate_policy_patterns(config: dict[str, Any]) -> None:
+    """Validate fnmatch patterns for any policy keys present in config."""
+    for key in POLICY_PATTERN_KEYS:
+        if key not in config:
+            continue
+        _validate_pattern_list(_as_list(config.get(key)), field=key)
+
+
 def from_config(config: dict[str, Any]) -> ToolFilterPolicy:
+    validate_policy_patterns(config)
     limit = config.get(KEY_TOOLS_LIMIT, DEFAULT_TOOLS_LIMIT)
     if isinstance(limit, str):
         try:
@@ -36,10 +71,10 @@ def from_config(config: dict[str, Any]) -> ToolFilterPolicy:
             limit = DEFAULT_TOOLS_LIMIT
     limit = max(1, min(int(limit), MAX_TOOLS_LIMIT))
     return ToolFilterPolicy(
-        allowed_tools=_as_list(config.get(KEY_ALLOWED_TOOLS)),
-        denied_tools=_as_list(config.get(KEY_DENIED_TOOLS)),
-        allowed_toolkits=_as_list(config.get(KEY_ALLOWED_TOOLKITS)),
-        denied_toolkits=_as_list(config.get(KEY_DENIED_TOOLKITS)),
+        allowed_tools=_validate_pattern_list(_as_list(config.get(KEY_ALLOWED_TOOLS)), field=KEY_ALLOWED_TOOLS),
+        denied_tools=_validate_pattern_list(_as_list(config.get(KEY_DENIED_TOOLS)), field=KEY_DENIED_TOOLS),
+        allowed_toolkits=_validate_pattern_list(_as_list(config.get(KEY_ALLOWED_TOOLKITS)), field=KEY_ALLOWED_TOOLKITS),
+        denied_toolkits=_validate_pattern_list(_as_list(config.get(KEY_DENIED_TOOLKITS)), field=KEY_DENIED_TOOLKITS),
         tools_limit=limit,
     )
 
@@ -76,6 +111,22 @@ def _toolkit_allowed(toolkit: str | None, policy: ToolFilterPolicy) -> bool:
     return True
 
 
+def _toolkit_policy_error(tool_slug: str, toolkit: str | None, policy: ToolFilterPolicy) -> ConnectorPolicyError:
+    if policy.denied_toolkits and toolkit and _matches_any(toolkit, policy.denied_toolkits):
+        return ConnectorPolicyError(
+            tool_slug,
+            f"toolkit {toolkit!r} matched denied toolkit pattern in {policy.denied_toolkits}",
+        )
+    if not toolkit and policy.allowed_toolkits:
+        return ConnectorPolicyError(
+            tool_slug,
+            "no toolkit metadata: allowed_toolkits is set but this tool has no "
+            f"app/toolkit field (allowed: {policy.allowed_toolkits})",
+        )
+    detail = f"toolkit {toolkit!r}" if toolkit else "no toolkit"
+    return ConnectorPolicyError(tool_slug, f"{detail} not in allowed toolkits {policy.allowed_toolkits}")
+
+
 def filter_tools(items: list[dict[str, Any]], policy: ToolFilterPolicy) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for item in items:
@@ -97,9 +148,4 @@ def assert_tool_allowed(tool_slug: str, policy: ToolFilterPolicy, *, toolkit: st
     if policy.allowed_tools and not _matches_any(tool_slug, policy.allowed_tools):
         raise ConnectorPolicyError(tool_slug, f"did not match any allowed pattern in {policy.allowed_tools}")
     if not _toolkit_allowed(toolkit, policy):
-        detail = f"toolkit {toolkit!r}" if toolkit else "no toolkit"
-        if policy.denied_toolkits and toolkit and _matches_any(toolkit, policy.denied_toolkits):
-            raise ConnectorPolicyError(
-                tool_slug, f"{detail} matched denied toolkit pattern in {policy.denied_toolkits}"
-            )
-        raise ConnectorPolicyError(tool_slug, f"{detail} not in allowed toolkits {policy.allowed_toolkits}")
+        raise _toolkit_policy_error(tool_slug, toolkit, policy)
