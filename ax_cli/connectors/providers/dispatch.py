@@ -88,9 +88,7 @@ def execute_tool(
         )
     except Exception as exc:
         duration_ms = int((time.monotonic() - t0) * 1000)
-        record_connector_tool_failed(
-            connector, tool_slug, error=str(exc), duration_ms=duration_ms, **invocation_ctx
-        )
+        record_connector_tool_failed(connector, tool_slug, error=str(exc), duration_ms=duration_ms, **invocation_ctx)
         raise
     duration_ms = int((time.monotonic() - t0) * 1000)
     record_connector_tool_completed(connector, tool_slug, duration_ms=duration_ms, **invocation_ctx)
