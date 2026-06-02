@@ -474,10 +474,17 @@ def test_multi_node_graph_compiles_without_nameerror(monkeypatch, tmp_path):
     monkeypatch.setenv("AX_BRIDGE_MAX_ITERATIONS", "5")
 
     class _StubChatModel:
-        """Stand-in for ChatGroq.bind_tools(...) that returns a final
-        assistant message immediately (no tool calls), so the graph
-        terminates after one iteration.
+        """Stand-in for ChatGroq.bind_tools(...) that yields a final
+        assistant message via a one-chunk stream, so the graph terminates
+        after one iteration. `.stream()` is the multi-node tier's call site
+        (#113); `.invoke()` is kept for symmetry with any sibling caller
+        that wants the non-streaming shape.
         """
+
+        def stream(self, messages, *args, **kwargs):
+            from langchain_core.messages import AIMessageChunk
+
+            yield AIMessageChunk(content="stub final answer", tool_calls=[])
 
         def invoke(self, messages, *args, **kwargs):
             return AIMessage(content="stub final answer", tool_calls=[])
@@ -577,3 +584,179 @@ def test_load_mcp_tools_emits_one_event_per_warning(monkeypatch):
     activities = {e["activity"] for e in activity_events}
     assert "[mcp-adapter] srv_a: failed to initialize: err A" in activities
     assert "[mcp-adapter] srv_b: failed to initialize: err B" in activities
+
+
+# ── 12. Multi-node streaming heartbeat (issue #113) ───────────────────────
+#
+# The multi-node tier previously called `chat.invoke()` synchronously,
+# leaving the activity feed silent during long tool-deciding iterations
+# (Sean filed #113 from PR #86 review finding #4). The new
+# `_stream_chat_with_heartbeat` helper iterates `chat.stream()`,
+# accumulates AIMessageChunks for the final return, and emits throttled
+# `kind: activity` heartbeats with a rolling preview. These tests pin
+# the heartbeat contract, the chunk accumulation, and the tool-call
+# preservation through chunk-add.
+
+
+def _stub_chat(chunks):
+    """Build a stand-in chat object whose `.stream()` yields the given chunks."""
+
+    class _Stub:
+        def stream(self, messages, *args, **kwargs):
+            for chunk in chunks:
+                yield chunk
+
+    return _Stub()
+
+
+def test_stream_chat_with_heartbeat_accumulates_content(monkeypatch):
+    """Single-token-at-a-time stream accumulates into one final AIMessageChunk."""
+    from langchain_core.messages import AIMessageChunk
+
+    chunks = [
+        AIMessageChunk(content="Hello"),
+        AIMessageChunk(content=", "),
+        AIMessageChunk(content="world!"),
+    ]
+    monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
+
+    result = langgraph_bridge._stream_chat_with_heartbeat(
+        _stub_chat(chunks), messages=[], model_name="stub-model", iteration=1, max_iter=5
+    )
+
+    assert result is not None
+    assert result.content == "Hello, world!"
+
+
+def test_stream_chat_with_heartbeat_preserves_tool_calls(monkeypatch):
+    """Tool-call deltas across chunks survive the chunk-add accumulation."""
+    from langchain_core.messages import AIMessageChunk
+
+    chunks = [
+        AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {"name": "echo", "args": '{"message":', "id": "call-1", "index": 0},
+            ],
+        ),
+        AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {"name": None, "args": ' "hi"}', "id": None, "index": 0},
+            ],
+        ),
+    ]
+    monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
+
+    result = langgraph_bridge._stream_chat_with_heartbeat(
+        _stub_chat(chunks), messages=[], model_name="stub-model", iteration=1, max_iter=5
+    )
+
+    assert result is not None
+    # Either tool_calls or tool_call_chunks should carry the merged echo call.
+    merged = result.tool_calls or result.tool_call_chunks
+    assert merged, f"expected merged tool call(s), got {result!r}"
+    first = merged[0]
+    assert (first.get("name") or "") == "echo"
+
+
+def test_stream_chat_with_heartbeat_emits_first_chunk_status(monkeypatch):
+    """A status:processing event fires once when the first chunk arrives."""
+    from langchain_core.messages import AIMessageChunk
+
+    captured: list[dict] = []
+    monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: captured.append(payload))
+
+    chunks = [AIMessageChunk(content="x")]
+    langgraph_bridge._stream_chat_with_heartbeat(
+        _stub_chat(chunks), messages=[], model_name="stub-model", iteration=2, max_iter=10
+    )
+
+    status_events = [e for e in captured if e.get("kind") == "status" and e.get("status") == "processing"]
+    assert len(status_events) == 1, f"expected exactly one first-chunk status event, got {captured!r}"
+    # The status message names the iteration and the model, so an operator
+    # watching the activity feed can correlate the heartbeat with the loop.
+    assert "Iteration 2/10" in status_events[0]["message"]
+    assert "stub-model" in status_events[0]["message"]
+
+
+def test_stream_chat_with_heartbeat_throttles_activity_events(monkeypatch):
+    """Heartbeat activity event fires when chunks span the heartbeat window."""
+    from langchain_core.messages import AIMessageChunk
+
+    # Drive time.monotonic manually so the heartbeat windowing is
+    # deterministic. First chunk: t=0 (no activity event yet — last_activity_at
+    # is 0 and now-0 == 0 < HEARTBEAT_SECONDS, but the first-chunk-seen status
+    # always fires). Second chunk: t=2.0 (>= HEARTBEAT_SECONDS, activity event
+    # fires). Third chunk: t=2.1 (< HEARTBEAT_SECONDS since last, no event).
+    clock = iter([0.0, 2.0, 2.1])
+    monkeypatch.setattr(langgraph_bridge.time, "monotonic", lambda: next(clock))
+
+    captured: list[dict] = []
+    monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: captured.append(payload))
+
+    chunks = [
+        AIMessageChunk(content="hello "),
+        AIMessageChunk(content="world "),
+        AIMessageChunk(content="extra"),
+    ]
+    langgraph_bridge._stream_chat_with_heartbeat(
+        _stub_chat(chunks), messages=[], model_name="stub-model", iteration=1, max_iter=5
+    )
+
+    activity_events = [e for e in captured if e.get("kind") == "activity"]
+    # Exactly one heartbeat activity event in this window (between the
+    # initial t=0.0 burst and the close-spaced t=2.1 burst).
+    assert len(activity_events) == 1, (
+        f"expected one heartbeat activity event, got {[c.get('kind') for c in captured]!r}"
+    )
+    # The preview should include the accumulated text up to the heartbeat.
+    assert "hello world" in activity_events[0]["activity"]
+
+
+def test_stream_chat_with_heartbeat_tolerates_empty_chunks(monkeypatch):
+    """Chunks with empty/None content do not crash the accumulator."""
+    from langchain_core.messages import AIMessageChunk
+
+    chunks = [
+        AIMessageChunk(content=""),
+        AIMessageChunk(content="real text"),
+        AIMessageChunk(content=""),
+    ]
+    monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: None)
+
+    result = langgraph_bridge._stream_chat_with_heartbeat(
+        _stub_chat(chunks), messages=[], model_name="stub-model", iteration=1, max_iter=5
+    )
+
+    assert result is not None
+    assert result.content == "real text"
+
+
+def test_stream_chat_with_heartbeat_preview_caps_at_max_chars(monkeypatch):
+    """Rolling preview is capped at PREVIEW_MAX_CHARS with an ellipsis prefix."""
+    from langchain_core.messages import AIMessageChunk
+
+    # Force a heartbeat after one big chunk: t=0 first chunk (no heartbeat),
+    # t=2.0 second chunk (heartbeat fires).
+    clock = iter([0.0, 2.0])
+    monkeypatch.setattr(langgraph_bridge.time, "monotonic", lambda: next(clock))
+
+    captured: list[dict] = []
+    monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: captured.append(payload))
+
+    long_text = "x" * (langgraph_bridge.PREVIEW_MAX_CHARS * 3)
+    chunks = [AIMessageChunk(content=long_text), AIMessageChunk(content="tail")]
+    langgraph_bridge._stream_chat_with_heartbeat(
+        _stub_chat(chunks), messages=[], model_name="stub-model", iteration=1, max_iter=5
+    )
+
+    activity_events = [e for e in captured if e.get("kind") == "activity"]
+    assert activity_events, "expected at least one heartbeat activity event"
+    payload = activity_events[0]["activity"]
+    # The model name and ": " prefix, plus the "..." truncation marker, plus
+    # the tail of the preview text. The preview tail must be capped.
+    assert payload.startswith("stub-model: ")
+    preview = payload.removeprefix("stub-model: ")
+    assert preview.startswith("...")
+    assert len(preview) <= langgraph_bridge.PREVIEW_MAX_CHARS
