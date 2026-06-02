@@ -255,6 +255,10 @@ def _warn_if_gateway_space_divergent() -> None:
     call. Best-effort and fails closed silently: never raises, never blocks.
     """
     try:
+        # Intentional private-symbol import: no public accessor exposes the
+        # merged config's space_id, and this read is deliberately the same
+        # local TOML merge the runtime client uses. Kept private on purpose
+        # rather than widening config.py's public surface for one caller (#162).
         from ..config import _load_config
 
         session_space = str(load_gateway_session().get("space_id") or "").strip()
