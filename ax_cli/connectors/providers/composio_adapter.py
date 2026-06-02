@@ -152,7 +152,11 @@ def initiate_connection(
     toolkit_data = toolkit_resp.json()
 
     auth_schemes = toolkit_data.get("auth_schemes") or toolkit_data.get("composio_managed_auth_schemes") or []
-    auth_mode = auth_schemes[0].get("auth_mode", "OAUTH2") if auth_schemes else "OAUTH2"
+    if auth_schemes:
+        first = auth_schemes[0]
+        auth_mode = first.get("auth_mode", "OAUTH2") if isinstance(first, dict) else str(first)
+    else:
+        auth_mode = "OAUTH2"
 
     # Find or create an auth_config for this toolkit
     configs_resp = httpx.get(

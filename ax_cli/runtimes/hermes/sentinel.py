@@ -53,6 +53,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 # Config
 # ---------------------------------------------------------------------------
 
+
 def _load_config() -> dict:
     for p in [Path(".ax/config.toml"), Path.home() / ".ax" / "config.toml"]:
         if p.exists():
@@ -68,32 +69,41 @@ def parse_args():
     parser = argparse.ArgumentParser(description="CLI agent v2 for aX")
     parser.add_argument("--dry-run", action="store_true", help="Watch only")
     parser.add_argument("--agent", type=str, help="Override agent name")
-    parser.add_argument("--workdir", type=str, default=None,
-                        help="Working directory (default: agents/<agent_name>/)")
-    parser.add_argument("--model", type=str, default=None,
-                        help="Model to use (default: CLI default)")
-    parser.add_argument("--timeout", type=int, default=300,
-                        help="Max seconds per invocation")
-    parser.add_argument("--update-interval", type=float, default=2.0,
-                        help="Seconds between reply edits for streaming")
-    parser.add_argument("--allowed-tools", type=str, default=None,
-                        help="Comma-separated tools to allow (default: all)")
-    parser.add_argument("--system-prompt", type=str, default=None,
-                        help="Additional system prompt")
-    parser.add_argument("--runtime",
-                        choices=["claude", "codex", "claude_cli", "codex_cli", "openai_sdk", "hermes_sdk", "groq_sdk", "mistral_sdk", "gemini_sdk", "leapfrog_sdk"],
-                        default="claude",
-                        help="Runtime plugin: claude/claude_cli (subprocess), "
-                             "codex/codex_cli (subprocess), openai_sdk (SDK), "
-                             "groq_sdk (SDK), mistral_sdk (SDK), gemini_sdk (SDK), leapfrog_sdk (SDK)")
-    parser.add_argument("--disable-codex-mcp", action="store_true",
-                        help="Disable inherited Codex MCP servers for listener runs")
+    parser.add_argument("--workdir", type=str, default=None, help="Working directory (default: agents/<agent_name>/)")
+    parser.add_argument("--model", type=str, default=None, help="Model to use (default: CLI default)")
+    parser.add_argument("--timeout", type=int, default=300, help="Max seconds per invocation")
+    parser.add_argument("--update-interval", type=float, default=2.0, help="Seconds between reply edits for streaming")
+    parser.add_argument("--allowed-tools", type=str, default=None, help="Comma-separated tools to allow (default: all)")
+    parser.add_argument("--system-prompt", type=str, default=None, help="Additional system prompt")
+    parser.add_argument(
+        "--runtime",
+        choices=[
+            "claude",
+            "codex",
+            "claude_cli",
+            "codex_cli",
+            "openai_sdk",
+            "hermes_sdk",
+            "groq_sdk",
+            "mistral_sdk",
+            "gemini_sdk",
+            "leapfrog_sdk",
+        ],
+        default="claude",
+        help="Runtime plugin: claude/claude_cli (subprocess), "
+        "codex/codex_cli (subprocess), openai_sdk (SDK), "
+        "groq_sdk (SDK), mistral_sdk (SDK), gemini_sdk (SDK), leapfrog_sdk (SDK)",
+    )
+    parser.add_argument(
+        "--disable-codex-mcp", action="store_true", help="Disable inherited Codex MCP servers for listener runs"
+    )
     return parser.parse_args()
 
 
 # ---------------------------------------------------------------------------
 # Session Store — maps thread (parent_id) to session_id for continuity
 # ---------------------------------------------------------------------------
+
 
 class SessionStore:
     """Thread-safe mapping of conversation threads to CLI session IDs."""
@@ -139,7 +149,7 @@ class HistoryStore:
             return [dict(item) for item in history]
 
     def set(self, thread_id: str, history: list[dict]):
-        trimmed = [dict(item) for item in history[-self._max_messages:]]
+        trimmed = [dict(item) for item in history[-self._max_messages :]]
         with self._lock:
             self._store[thread_id] = trimmed
             if len(self._store) > self._max_threads:
@@ -155,6 +165,7 @@ class HistoryStore:
 # API Client
 # ---------------------------------------------------------------------------
 
+
 class AxAPI:
     """Thin wrapper for the aX REST API.
 
@@ -163,8 +174,9 @@ class AxAPI:
     auth module isn't available (e.g. on prod without auth-spec-001).
     """
 
-    def __init__(self, base_url: str, token: str, agent_name: str,
-                 agent_id: str, internal_api_key: str = "", space_id: str = ""):
+    def __init__(
+        self, base_url: str, token: str, agent_name: str, agent_id: str, internal_api_key: str = "", space_id: str = ""
+    ):
         self.base_url = base_url.rstrip("/")
         self._raw_token = token
         self.token = token  # may be replaced by JWT below
@@ -179,6 +191,7 @@ class AxAPI:
         if token.startswith("axp_"):
             try:
                 from ax_cli.token_cache import TokenExchanger
+
                 exchanger = TokenExchanger(base_url, token)
                 # Warm the cache — exchange once at startup.
                 # Sentinels always use agent_access when they have an agent_id.
@@ -205,9 +218,8 @@ class AxAPI:
         if self._exchanger:
             try:
                 from ax_cli.client import _RetryOnAuthClient
-                self._client = _RetryOnAuthClient(
-                    inner, lambda: self._get_fresh_jwt(force=True)
-                )
+
+                self._client = _RetryOnAuthClient(inner, lambda: self._get_fresh_jwt(force=True))
                 log.debug("401 auto-retry enabled")
             except ImportError:
                 self._client = inner
@@ -220,7 +232,8 @@ class AxAPI:
         # both axp_a_ (agent-bound) and axp_u_ (user PATs used by sentinels).
         if self.agent_id:
             jwt = self._exchanger.get_token(
-                "agent_access", agent_id=self.agent_id,
+                "agent_access",
+                agent_id=self.agent_id,
                 scope="messages tasks context agents spaces search",
                 force_refresh=force,
             )
@@ -407,9 +420,14 @@ class AxAPI:
             sse_token = self._get_fresh_jwt() if self._exchanger else self.token
         except Exception:
             sse_token = self._raw_token  # Fall back to PAT (works on prod)
-        sse_client = httpx.Client(timeout=httpx.Timeout(
-            connect=10.0, read=90.0, write=10.0, pool=10.0,
-        ))
+        sse_client = httpx.Client(
+            timeout=httpx.Timeout(
+                connect=10.0,
+                read=90.0,
+                write=10.0,
+                pool=10.0,
+            )
+        )
         return sse_client.stream(
             "GET",
             f"{self.base_url}/api/v1/sse/messages",
@@ -423,6 +441,7 @@ class AxAPI:
 # ---------------------------------------------------------------------------
 # SSE Parser
 # ---------------------------------------------------------------------------
+
 
 def iter_sse(response: httpx.Response):
     event_type = None
@@ -449,14 +468,17 @@ def iter_sse(response: httpx.Response):
 # CLI Runners
 # ---------------------------------------------------------------------------
 
-def _build_claude_cmd(message: str, workdir: str, args,
-                      session_id: str | None = None) -> list[str]:
+
+def _build_claude_cmd(message: str, workdir: str, args, session_id: str | None = None) -> list[str]:
     cmd = [
-        "claude", "-p",
-        "--output-format", "stream-json",
+        "claude",
+        "-p",
+        "--output-format",
+        "stream-json",
         "--verbose",
         "--dangerously-skip-permissions",
-        "--add-dir", "/home/ax-agent/shared/repos",
+        "--add-dir",
+        "/home/ax-agent/shared/repos",
     ]
     if session_id:
         cmd.extend(["--resume", session_id])
@@ -469,8 +491,7 @@ def _build_claude_cmd(message: str, workdir: str, args,
     return cmd
 
 
-def _build_codex_cmd(message: str, workdir: str, args,
-                     session_id: str | None = None) -> list[str]:
+def _build_codex_cmd(message: str, workdir: str, args, session_id: str | None = None) -> list[str]:
     # Per-agent sandbox override. Default (unset) preserves legacy behavior
     # (full bypass) for agents that legitimately need cross-repo access like
     # sentinels. Set CODEX_SANDBOX=workspace-write in the agent launcher to
@@ -479,23 +500,26 @@ def _build_codex_cmd(message: str, workdir: str, args,
     sandbox_mode = os.environ.get("CODEX_SANDBOX", "").strip()
     if sandbox_mode == "workspace-write":
         sandbox_flags = [
-            "--sandbox", "workspace-write",
-            "--ask-for-approval", "never",
+            "--sandbox",
+            "workspace-write",
+            "--ask-for-approval",
+            "never",
         ]
     else:
         sandbox_flags = ["--dangerously-bypass-approvals-and-sandbox"]
 
     cmd = [
-        "codex", "exec",
+        "codex",
+        "exec",
         "--json",
         *sandbox_flags,
         "--skip-git-repo-check",
-        "-C", workdir,
+        "-C",
+        workdir,
     ]
     if session_id:
         # Codex uses `codex exec resume --last` or by session ID
-        cmd = ["codex", "exec", "resume", session_id, "--json",
-               *sandbox_flags]
+        cmd = ["codex", "exec", "resume", session_id, "--json", *sandbox_flags]
     if args.disable_codex_mcp:
         cmd.extend(["-c", "mcp_servers.ax-platform.enabled=false"])
     if args.model:
@@ -595,6 +619,7 @@ def _parse_codex_stream(proc) -> tuple[str, str | None]:
 # Runtime plugin bridge — connects agnostic runtimes to aX message plumbing
 # ---------------------------------------------------------------------------
 
+
 def _run_via_runtime_plugin(
     runtime_name: str,
     message: str,
@@ -619,12 +644,16 @@ def _run_via_runtime_plugin(
     history_thread_id = thread_id or parent_id or "default"
     existing_session = sessions.get(history_thread_id)
 
-    log.info(f"Runtime: {runtime_name} in {workdir}"
-             + (f" (session {existing_session[:12]})" if existing_session else " (new)")
-             + f" reply={parent_id[:12]} history={history_thread_id[:24]}")
+    log.info(
+        f"Runtime: {runtime_name} in {workdir}"
+        + (f" (session {existing_session[:12]})" if existing_session else " (new)")
+        + f" reply={parent_id[:12]} history={history_thread_id[:24]}"
+    )
 
     stream_edits = os.environ.get("AX_SENTINEL_STREAM_EDITS", "0").lower() in {
-        "1", "true", "yes",
+        "1",
+        "true",
+        "yes",
     }
 
     # Signal: processing started (SSE-only, may fail on prod without internal API key)
@@ -789,10 +818,13 @@ def _run_via_runtime_plugin(
     claude_md = Path(workdir) / "CLAUDE.md"
     if agents_md.exists():
         system_prompt = agents_md.read_text()
+        log.info("Loaded system prompt from %s (%d chars)", agents_md, len(system_prompt))
     elif claude_md.exists():
         system_prompt = claude_md.read_text()
+        log.info("Loaded system prompt from %s (%d chars)", claude_md, len(system_prompt))
     else:
         system_prompt = None
+        log.warning("No AGENTS.md or CLAUDE.md found in %s", workdir)
 
     # Build extra args
     extra = {
@@ -893,9 +925,11 @@ def _run_via_runtime_plugin(
     elif result.exit_reason == "timeout":
         final += f"\n\n---\n⏱️ Timed out ({result.elapsed_seconds}s)."
     elif result.exit_reason == "iteration_limit":
-        final += (f"\n\n---\n🔄 Reached iteration limit "
-                  f"({result.tool_count} tools, {result.elapsed_seconds}s). "
-                  f"Reply to continue where I left off.")
+        final += (
+            f"\n\n---\n🔄 Reached iteration limit "
+            f"({result.tool_count} tools, {result.elapsed_seconds}s). "
+            f"Reply to continue where I left off."
+        )
 
     if not final:
         final = f"Completed ({result.elapsed_seconds}s) — no text output."
@@ -909,7 +943,9 @@ def _run_via_runtime_plugin(
             content=final,
             parent_id=parent_id,
             message_type="reply",
-            metadata=_reply_metadata(final=True) if stream_edits else {
+            metadata=_reply_metadata(final=True)
+            if stream_edits
+            else {
                 "top_level_ingress": False,
                 "routing": {"mode": "direct_mention", "source": "sse_agent"},
             },
@@ -920,16 +956,24 @@ def _run_via_runtime_plugin(
     if reply_id and len(final) > 50:
         api.request_summary(reply_id)
 
-    log.info(f"Runtime {runtime_name}: {result.exit_reason} "
-             f"({len(final)} chars, {result.tool_count} tools, {result.elapsed_seconds}s)")
+    log.info(
+        f"Runtime {runtime_name}: {result.exit_reason} "
+        f"({len(final)} chars, {result.tool_count} tools, {result.elapsed_seconds}s)"
+    )
     return final
 
 
-def run_cli(message: str, workdir: str, args, api: AxAPI,
-            parent_id: str, space_id: str,
-            sessions: SessionStore,
-            histories: HistoryStore,
-            thread_id: str | None = None) -> str:
+def run_cli(
+    message: str,
+    workdir: str,
+    args,
+    api: AxAPI,
+    parent_id: str,
+    space_id: str,
+    sessions: SessionStore,
+    histories: HistoryStore,
+    thread_id: str | None = None,
+) -> str:
     """Run an agent runtime and stream output back to aX.
 
     Delegates to the configured runtime plugin. Runtimes are agnostic —
@@ -945,10 +989,27 @@ def run_cli(message: str, workdir: str, args, api: AxAPI,
         runtime_name = "codex_cli"
 
     # Check if this is a plugin runtime (not the legacy subprocess path)
-    if runtime_name in ("claude_cli", "codex_cli", "openai_sdk", "hermes_sdk", "groq_sdk", "mistral_sdk", "gemini_sdk", "leapfrog_sdk"):
+    if runtime_name in (
+        "claude_cli",
+        "codex_cli",
+        "openai_sdk",
+        "hermes_sdk",
+        "groq_sdk",
+        "mistral_sdk",
+        "gemini_sdk",
+        "leapfrog_sdk",
+    ):
         return _run_via_runtime_plugin(
-            runtime_name, message, workdir, args, api,
-            parent_id, space_id, sessions, histories, thread_id=thread_id,
+            runtime_name,
+            message,
+            workdir,
+            args,
+            api,
+            parent_id,
+            space_id,
+            sessions,
+            histories,
+            thread_id=thread_id,
         )
 
     # ── Legacy subprocess path (fallback, should not be reached) ────
@@ -960,8 +1021,10 @@ def run_cli(message: str, workdir: str, args, api: AxAPI,
     else:
         cmd = _build_claude_cmd(message, workdir, args, existing_session)
 
-    log.info(f"Running {args.runtime} in {workdir}"
-             + (f" (resuming session {existing_session[:12]})" if existing_session else " (new session)"))
+    log.info(
+        f"Running {args.runtime} in {workdir}"
+        + (f" (resuming session {existing_session[:12]})" if existing_session else " (new session)")
+    )
 
     # Signal: we're processing
     api.signal_processing(parent_id, "started", space_id=space_id)
@@ -1249,8 +1312,7 @@ def run_cli(message: str, workdir: str, args, api: AxAPI,
     if reply_id:
         api.edit_message(reply_id, final_content)
     else:
-        api.send_message(space_id=space_id, content=final_content,
-                         parent_id=parent_id)
+        api.send_message(space_id=space_id, content=final_content, parent_id=parent_id)
 
     # Signal: done (with reason)
     api.signal_processing(parent_id, "completed", space_id=space_id)
@@ -1267,6 +1329,7 @@ def run_cli(message: str, workdir: str, args, api: AxAPI,
 # ---------------------------------------------------------------------------
 # Mention detection
 # ---------------------------------------------------------------------------
+
 
 def get_author_name(event_data: dict) -> str:
     author = event_data.get("author", "")
@@ -1298,12 +1361,7 @@ def resolve_history_thread_id(
     """
     scope = os.environ.get("AX_SENTINEL_HISTORY_SCOPE", "space").strip().lower()
     msg_id = str(event_data.get("id") or "")
-    parent_id = str(
-        event_data.get("parent_id")
-        or event_data.get("parentId")
-        or event_data.get("thread_id")
-        or ""
-    )
+    parent_id = str(event_data.get("parent_id") or event_data.get("parentId") or event_data.get("thread_id") or "")
     conversation_id = str(event_data.get("conversation_id") or "")
 
     if scope in {"message", "per_message"}:
@@ -1335,8 +1393,8 @@ def is_mentioned(event_data: dict, agent_name: str) -> bool:
 
 def strip_mention(content: str, agent_name: str) -> str:
     import re
-    stripped = re.sub(rf"@{re.escape(agent_name)}\b", "", content,
-                      flags=re.IGNORECASE)
+
+    stripped = re.sub(rf"@{re.escape(agent_name)}\b", "", content, flags=re.IGNORECASE)
     return stripped.strip()
 
 
@@ -1359,17 +1417,30 @@ def _is_ax_noise(event_data: dict) -> bool:
         # aX relay patterns — concierge rephrasing user messages
         lowered = content.lower()
         relay_patterns = [
-            " is asking:", " is asking ", " says ", " says:", " wants ",
-            " is requesting", " is inquiring", " is currently ",
-            "request processed", " has requested",
+            " is asking:",
+            " is asking ",
+            " says ",
+            " says:",
+            " wants ",
+            " is requesting",
+            " is inquiring",
+            " is currently ",
+            "request processed",
+            " has requested",
         ]
         if any(pat in lowered for pat in relay_patterns):
             return True
         # aX acknowledgment echoes — concierge confirms agent progress updates.
         # These cause cascade loops: agent sends progress → aX acks with @agent → agent wakes.
         ack_patterns = [
-            "acknowledged", "got it.", "noted.", "roger", "status recorded",
-            "storing the", "clear blocker", "options:",
+            "acknowledged",
+            "got it.",
+            "noted.",
+            "roger",
+            "status recorded",
+            "storing the",
+            "clear blocker",
+            "options:",
         ]
         if any(pat in lowered for pat in ack_patterns):
             return True
@@ -1414,6 +1485,7 @@ def should_respond(event_data: dict, agent_name: str, agent_id: str = "") -> boo
 # Worker thread — processes mentions from the queue
 # ---------------------------------------------------------------------------
 
+
 def _is_paused(agent_name: str) -> bool:
     """Check if this agent (or all agents) are paused via file flags."""
     pause_all = Path.home() / ".ax" / "sentinel_pause"
@@ -1421,9 +1493,15 @@ def _is_paused(agent_name: str) -> bool:
     return pause_all.exists() or pause_one.exists()
 
 
-def mention_worker(q: queue.Queue, api_holder: list, agent_name: str,
-                   space_id: str, args, sessions: SessionStore,
-                   histories: HistoryStore):
+def mention_worker(
+    q: queue.Queue,
+    api_holder: list,
+    agent_name: str,
+    space_id: str,
+    args,
+    sessions: SessionStore,
+    histories: HistoryStore,
+):
     """Background worker that processes mentions sequentially from a queue.
 
     api_holder is a single-element list [api] so the main thread can swap
@@ -1452,7 +1530,9 @@ def mention_worker(q: queue.Queue, api_holder: list, agent_name: str,
         # Pause gate: hold the message, don't process it
         while _is_paused(agent_name):
             if not _was_paused:
-                log.info(f"PAUSED — holding {q.qsize()+1} messages (touch ~/.ax/sentinel_pause to pause, rm to resume)")
+                log.info(
+                    f"PAUSED — holding {q.qsize() + 1} messages (touch ~/.ax/sentinel_pause to pause, rm to resume)"
+                )
                 _was_paused = True
             time.sleep(2.0)
         if _was_paused:
@@ -1515,9 +1595,12 @@ def mention_worker(q: queue.Queue, api_holder: list, agent_name: str,
                 _rate_limit_backoff += 1
                 if _rate_limit_backoff >= 5:
                     # Too many consecutive rate limits — pause completely
-                    log.error(f"Rate limited {_rate_limit_backoff} times in a row — "
-                              f"PAUSING agent. Remove ~/.ax/sentinel_pause to resume.")
+                    log.error(
+                        f"Rate limited {_rate_limit_backoff} times in a row — "
+                        f"PAUSING agent. Remove ~/.ax/sentinel_pause to resume."
+                    )
                     from pathlib import Path
+
                     Path(f"{Path.home()}/.ax/sentinel_pause").touch()
                     # Also drain the queue so we don't hammer on resume
                     drained = 0
@@ -1530,10 +1613,11 @@ def mention_worker(q: queue.Queue, api_holder: list, agent_name: str,
                             break
                     log.warning(f"Drained {drained} queued messages to prevent cascade on resume")
                 else:
-                    cooldown = 60 * (2 ** _rate_limit_backoff)  # 120s, 240s, 480s, 960s
+                    cooldown = 60 * (2**_rate_limit_backoff)  # 120s, 240s, 480s, 960s
                     _rate_limit_until = time.time() + cooldown
-                    log.warning(f"Rate limit backoff #{_rate_limit_backoff}/5 — "
-                                f"cooling down {cooldown}s before next message")
+                    log.warning(
+                        f"Rate limit backoff #{_rate_limit_backoff}/5 — cooling down {cooldown}s before next message"
+                    )
             else:
                 log.warning("CLI returned empty response")
         except Exception as e:
@@ -1546,20 +1630,16 @@ def mention_worker(q: queue.Queue, api_holder: list, agent_name: str,
 # Main loop
 # ---------------------------------------------------------------------------
 
+
 def run(args):
     cfg = _load_config()
 
     token = os.environ.get("AX_TOKEN", cfg.get("token", ""))
-    base_url = os.environ.get("AX_BASE_URL",
-                              cfg.get("base_url", "http://localhost:8002"))
-    agent_name = args.agent or os.environ.get("AX_AGENT_NAME",
-                                               cfg.get("agent_name", ""))
+    base_url = os.environ.get("AX_BASE_URL", cfg.get("base_url", "http://localhost:8002"))
+    agent_name = args.agent or os.environ.get("AX_AGENT_NAME", cfg.get("agent_name", ""))
     agent_id = os.environ.get("AX_AGENT_ID", cfg.get("agent_id", ""))
     space_id = os.environ.get("AX_SPACE_ID", cfg.get("space_id", ""))
-    internal_api_key = (
-        os.environ.get("INTERNAL_DISPATCH_API_KEY")
-        or os.environ.get("AGENT_RUNNER_API_KEY", "")
-    )
+    internal_api_key = os.environ.get("INTERNAL_DISPATCH_API_KEY") or os.environ.get("AGENT_RUNNER_API_KEY", "")
 
     if not token:
         log.error(
@@ -1624,17 +1704,17 @@ def run(args):
                     if event_type == "connected":
                         if isinstance(data, dict):
                             log.info(
-                                f"Connected — space={data.get('space_id', space_id)[:12]} "
-                                f"user={data.get('user', '?')}"
+                                f"Connected — space={data.get('space_id', space_id)[:12]} user={data.get('user', '?')}"
                             )
                         else:
                             log.info("Connected to SSE stream")
-                        log.info(f"Listening for @{agent_name} mentions... "
-                                 f"(sessions: {sessions.count()}, queue: {mention_queue.qsize()})")
+                        log.info(
+                            f"Listening for @{agent_name} mentions... "
+                            f"(sessions: {sessions.count()}, queue: {mention_queue.qsize()})"
+                        )
                         continue
 
-                    if event_type in ("bootstrap", "heartbeat",
-                                      "identity_bootstrap", "ping"):
+                    if event_type in ("bootstrap", "heartbeat", "identity_bootstrap", "ping"):
                         continue
 
                     if event_type in ("message", "mention"):
@@ -1648,14 +1728,16 @@ def run(args):
                         if should_respond(data, agent_name, agent_id):
                             seen_ids.add(msg_id)
                             if len(seen_ids) > SEEN_MAX:
-                                to_keep = list(seen_ids)[-SEEN_MAX // 2:]
+                                to_keep = list(seen_ids)[-SEEN_MAX // 2 :]
                                 seen_ids = set(to_keep)
 
                             # Queue the mention — SSE listener never blocks
                             try:
                                 mention_queue.put_nowait(data)
-                                log.info(f"Queued mention from @{get_author_name(data)} "
-                                         f"(queue depth: {mention_queue.qsize()})")
+                                log.info(
+                                    f"Queued mention from @{get_author_name(data)} "
+                                    f"(queue depth: {mention_queue.qsize()})"
+                                )
                             except queue.Full:
                                 log.warning("Queue full — dropping mention")
 

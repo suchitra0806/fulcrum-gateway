@@ -195,7 +195,7 @@ def _resolve_provider_config(model: str | None) -> dict:
         return {
             "provider": "openrouter",
             "api_mode": "chat_completions",
-            "base_url": "https://openrouter.ai/api/v1",
+            "base_url": os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
             "api_key": os.environ.get("OPENROUTER_API_KEY", ""),
             "model": model_name,
         }
@@ -388,7 +388,14 @@ def _register_connector_tools(workdir: str) -> None:
                 return json.dumps({"error": f"Error listing apps: {e}"})
             if not items:
                 return "No connected apps found"
-            return "\n".join(f"{a.get('appName', '?')}  status={a.get('status', '?')}" for a in items)
+
+            def _app_name(a: dict) -> str:
+                tk = a.get("toolkit")
+                if isinstance(tk, dict):
+                    return tk.get("slug", "?")
+                return a.get("appName") or "?"
+
+            return "\n".join(f"{_app_name(a)}  status={a.get('status', '?')}" for a in items)
 
         if tool_name == "connector_search":
             from ax_cli.connectors import search_tools

@@ -239,7 +239,8 @@ def test_provider_config_bedrock(monkeypatch):
     assert cfg["_bedrock"] is True
 
 
-def test_provider_config_openrouter():
+def test_provider_config_openrouter(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
     cfg = _resolve_provider_config("openrouter:anthropic/claude-sonnet-4.6")
     assert cfg["provider"] == "openrouter"
     assert cfg["api_mode"] == "chat_completions"
