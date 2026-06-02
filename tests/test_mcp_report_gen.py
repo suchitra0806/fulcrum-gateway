@@ -127,6 +127,12 @@ def test_check_sql_readonly_rejects_writes(sql):
         _check_sql_readonly(sql)
 
 
+def test_check_sql_readonly_rejects_select_into():
+    """SELECT INTO creates a table in Postgres — sqlglot parses it as Select+Into, not Create."""
+    with pytest.raises(ReadOnlyViolation):
+        _check_sql_readonly("SELECT * INTO new_table FROM theater", dialect="postgres")
+
+
 def test_check_sql_readonly_rejects_cte_smuggled_delete():
     """The classic attack the cheap startswith-SELECT check misses."""
     sql = "WITH x AS (DELETE FROM theater WHERE id = 1 RETURNING *) SELECT * FROM x"
