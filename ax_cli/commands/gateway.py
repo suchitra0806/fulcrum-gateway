@@ -9453,6 +9453,8 @@ def connectors_set(
     if key in _POLICY_LIST_KEYS:
         import json as _json
 
+        from ..connectors.filtering import validate_policy_patterns
+
         try:
             parsed = _json.loads(value)
             if isinstance(parsed, list):
@@ -9461,6 +9463,11 @@ def connectors_set(
                 value = [str(parsed)]
         except _json.JSONDecodeError:
             value = [v.strip() for v in value.split(",") if v.strip()]
+        try:
+            validate_policy_patterns({key: value})
+        except ValueError as exc:
+            err_console.print(f"[red]Invalid policy pattern:[/red] {exc}")
+            raise typer.Exit(1)
     config[key] = value
     updated = update_connector(ref, {"config": config})
     if as_json:
