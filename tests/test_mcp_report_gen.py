@@ -9,6 +9,10 @@ import pytest
 # sqlglot is gated behind the [mcp] optional-extra; tests need it.
 sqlglot = pytest.importorskip("sqlglot")
 
+from ax_cli.runtimes.mcp_servers.report_gen.sqlite_backend import (  # noqa: E402
+    _close_shared_connection,
+    _get_shared_connection,
+)
 from ax_cli.runtimes.mcp_servers.report_gen.synthetic_db import (  # noqa: E402
     seed_database,
 )
@@ -35,6 +39,7 @@ def isolated_db(tmp_path_factory, monkeypatch_session=None):
     os.environ["AX_REPORT_GEN_DB_PATH"] = str(db_path)
     seed_database(db_path)
     yield db_path
+    _close_shared_connection()
     if prior is None:
         os.environ.pop("AX_REPORT_GEN_DB_PATH", None)
     else:
@@ -175,6 +180,26 @@ def test_run_query_rejects_cte_smuggled_delete_via_error_code():
         "WITH x AS (DELETE FROM theater WHERE id = 1 RETURNING *) SELECT * FROM x"
     )
     assert result["code"] == "READONLY_VIOLATION"
+
+
+# --- Connection reuse ---
+
+
+def test_shared_connection_is_reused_across_calls():
+    conn1 = _get_shared_connection()
+    conn2 = _get_shared_connection()
+    assert conn1 is conn2
+
+
+def test_run_query_clears_progress_handler_so_next_query_is_not_interrupted():
+    # If the progress handler from a previous query were left active, its
+    # deadline would already be in the past and the next query would abort
+    # immediately with TIMEOUT. Two back-to-back queries verify the handler
+    # is cleared between calls.
+    r1 = run_query("SELECT name FROM theater LIMIT 1")
+    assert "error" not in r1
+    r2 = run_query("SELECT name FROM theater LIMIT 1")
+    assert "error" not in r2
 
 
 # --- Connection-level read-only is the backstop layer ---
