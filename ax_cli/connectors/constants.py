@@ -10,6 +10,7 @@ READ_TIMEOUT = 30.0
 
 DEFAULT_TOOLS_LIMIT = 50
 MAX_TOOLS_LIMIT = 200
+MAX_ACTIVITY_ERROR_LEN = 1024
 
 # Config key names for tool policy fields
 KEY_ALLOWED_TOOLS = "allowed_tools"
