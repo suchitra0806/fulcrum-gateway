@@ -313,6 +313,31 @@ ax send "review the radar continuity card" --to <agent>
 
 Why UUID rather than slug? Slug / name forms go through `_resolve_space_ref` which calls `list_spaces` upstream — under load that 429s. UUID short-circuits before any upstream call. Post-PR #172 there is a persistent local cache that makes slugs cheap on the second use, but the first cold lookup can still 429.
 
+**`--json` output shape** (as of PR #123):
+
+```json
+{
+  "session_path": "/path/to/session.json",
+  "space_id": "<uuid>",
+  "space_name": "<name>",
+  "cli_scope": "local",
+  "gateway_session": { "space_id": "<uuid>", "space_name": "<name>", ... }
+}
+```
+
+Field notes for script consumers:
+
+- **`cli_scope`** — new in PR #123. `"local"` when the space was written to a
+  project-local `.ax/config.toml`; `"global"` when `--global` was passed.
+- **`gateway_session`** — new in PR #123. The full Gateway session dict after the
+  write, or `null` if no Gateway session file exists on this machine.
+- **`session_path`** — now nullable. Previously always a string; it is `null`
+  when there is no Gateway session (i.e. `gateway_session` is also `null`).
+  Scripts that assumed a non-null string here will need a null-check:
+  ```bash
+  session_path=$(ax gateway spaces use "$SPACE_ID" --json | jq -r '.session_path // empty')
+  ```
+
 **Per-message space override** (operator path):
 
 ```bash
