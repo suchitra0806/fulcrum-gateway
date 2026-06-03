@@ -1345,7 +1345,42 @@ def resolve_space_id(client: AxClient, *, explicit: str | None = None) -> str:
 
     cfg = _load_config().get("space_id")
     if cfg:
-        return _resolve_space_ref(client, str(cfg), source="config")
+        configured = str(cfg)
+        # A configured UUID can go stale: in-memory / ephemeral backends reassign
+        # space ids on every restart, leaving a pinned space_id that no longer
+        # exists. Returning it blindly routes writes into a void (the server
+        # accepts the message but the UI never shows it). Validate the pin against
+        # the live space list and fall back to the default space when it's gone.
+        # (Slugs / names already flow through _resolve_space_ref, which validates
+        # by construction; the UUID fast-path is what skipped validation.)
+        if _is_uuid_like(configured):
+            try:
+                space_list = _space_items(client.list_spaces())
+            except Exception:
+                # Can't verify (offline, rate-limited, …) — preserve prior
+                # behavior and trust the pin rather than blocking the command.
+                return configured
+            known_ids = {str(s.get("id") or s.get("space_id") or "") for s in space_list}
+            if configured in known_ids:
+                return configured
+            if len(space_list) == 1:
+                fresh = str(space_list[0].get("id") or space_list[0].get("space_id"))
+                typer.echo(
+                    f"Warning: configured space_id '{configured}' no longer exists; "
+                    f"falling back to the only available space '{fresh}'. "
+                    "Clear 'space_id' from your .ax config to silence this.",
+                    err=True,
+                )
+                return fresh
+            typer.echo(
+                f"Warning: configured space_id '{configured}' no longer exists. "
+                "Pass --space/--space-id or set AX_SPACE_ID to choose among the "
+                f"{len(space_list)} available spaces.",
+                err=True,
+            )
+            # Fall through to auto-detect below, which fails closed on ambiguity.
+        else:
+            return _resolve_space_ref(client, configured, source="config")
 
     # Fallback: auto-detect from user's spaces
     spaces = client.list_spaces()
