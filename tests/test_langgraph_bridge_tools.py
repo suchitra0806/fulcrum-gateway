@@ -34,7 +34,6 @@ tests/test_groq_sdk_runtime.py.
 
 from __future__ import annotations
 
-import importlib
 import os
 import sys
 import tempfile
@@ -60,18 +59,11 @@ if _EXAMPLES_DIR not in sys.path:
 
 import langgraph_bridge  # noqa: E402
 
-
 # ── Helpers ────────────────────────────────────────────────────────────────
-
-
-def _reload_bridge():
-    """Reload the bridge module so env var changes take effect.
-
-    The bridge module reads env vars inside functions (not at import time)
-    for its actual config, but reload covers the unlikely case of any
-    module-level state that observed env vars on first import.
-    """
-    importlib.reload(langgraph_bridge)
+# _reload_bridge() lived here historically but was moved to
+# tests/test_langgraph_bridge_dotenv.py alongside its only caller
+# (TestLoadDotenvIntoEnviron). The langgraph-gated tests below do not
+# need it.
 
 
 # ── 1. _max_iterations clamps to floor/ceiling ────────────────────────────
@@ -105,17 +97,20 @@ def test_max_iterations_invalid_value_falls_back(monkeypatch):
 # ── 2 + 3. Env-var parsing for tools-disabled and strict-security ────────
 
 
-@pytest.mark.parametrize("value,expected", [
-    ("1", True),
-    ("true", True),
-    ("yes", True),
-    ("on", True),
-    ("TRUE", True),
-    ("0", False),
-    ("false", False),
-    ("", False),
-    ("nope", False),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("1", True),
+        ("true", True),
+        ("yes", True),
+        ("on", True),
+        ("TRUE", True),
+        ("0", False),
+        ("false", False),
+        ("", False),
+        ("nope", False),
+    ],
+)
 def test_tools_disabled_env(monkeypatch, value, expected):
     monkeypatch.setenv("AX_BRIDGE_TOOLS_DISABLED", value)
     assert langgraph_bridge._tools_disabled() is expected
@@ -126,15 +121,18 @@ def test_tools_disabled_unset(monkeypatch):
     assert langgraph_bridge._tools_disabled() is False
 
 
-@pytest.mark.parametrize("value,expected", [
-    ("1", True),
-    ("true", True),
-    ("yes", True),
-    ("on", True),
-    ("0", False),
-    ("false", False),
-    ("", False),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("1", True),
+        ("true", True),
+        ("yes", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("", False),
+    ],
+)
 def test_strict_security_env(monkeypatch, value, expected):
     monkeypatch.setenv("AX_BRIDGE_STRICT_SECURITY", value)
     assert langgraph_bridge._strict_security() is expected
@@ -389,9 +387,7 @@ def test_toolnode_with_security_wrap_intercepts_blocked_write(monkeypatch, tmp_p
     content = getattr(rejection, "content", "")
     assert "Write denied" in content or "error" in content.lower()
     # Critical: the underlying tool function must NOT have run
-    assert sentinel_fired["value"] is False, (
-        "Security wrapper failed to intercept: write_file actually executed"
-    )
+    assert sentinel_fired["value"] is False, "Security wrapper failed to intercept: write_file actually executed"
 
 
 def test_toolnode_with_security_wrap_passes_through_allowed_call(monkeypatch, tmp_path):
