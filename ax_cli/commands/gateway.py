@@ -10465,12 +10465,29 @@ def connectors_tools_list(
 @connectors_tools_app.command("search")
 def connectors_tools_search(
     ref: str = typer.Argument(..., help="Connector name or ID"),
-    use_case: str = typer.Option(..., "--use-case", "-u", help="Natural-language use case query"),
+    query: str = typer.Argument(
+        None,
+        help="Natural-language use case query (e.g. 'list github prs'). Required.",
+    ),
+    use_case: str = typer.Option(
+        None,
+        "--use-case",
+        "-u",
+        help="Deprecated alias for the positional QUERY argument; kept for backward compatibility.",
+    ),
     mode: str = typer.Option("auto", "--mode", "-m", help="Search mode: auto, intent, or catalog"),
     limit: int = typer.Option(10, "--limit", help="Max results"),
     as_json: bool = JSON_OPTION,
 ):
-    """Search for tools matching a use case (intent or catalog mode)."""
+    """Search for tools matching a use case (intent or catalog mode).
+
+    The query goes as a positional argument:
+
+        ax gateway connectors tools search <ref> "list github prs"
+
+    ``--use-case`` is accepted as a deprecated alias and emits a hint when used
+    alone. Passing both the positional QUERY and ``--use-case`` fails closed.
+    """
     from ..connectors import (
         ConnectorAuthError,
         ConnectorNotFoundError,
@@ -10479,6 +10496,20 @@ def connectors_tools_search(
         read_auth,
         search_tools,
     )
+
+    if query and use_case:
+        err_console.print("[red]Pass the query as a positional argument or via --use-case, not both.[/red]")
+        raise typer.Exit(1)
+    if not query and not use_case:
+        err_console.print(
+            "[red]Missing query.[/red] Pass it as the second positional argument: "
+            '[cyan]ax gateway connectors tools search <ref> "<query>"[/cyan]'
+        )
+        raise typer.Exit(1)
+    if use_case and not query:
+        err_console.print("[yellow]--use-case is deprecated;[/yellow] pass the query as a positional argument instead.")
+        query = use_case
+    use_case = query
 
     if mode not in ("auto", "intent", "catalog"):
         err_console.print(f"[red]Invalid mode:[/red] {mode!r}. Use auto, intent, or catalog.")
