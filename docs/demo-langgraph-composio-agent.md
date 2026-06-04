@@ -29,7 +29,9 @@ ax gateway status             # should show daemon.running=true, healthy
 ax gateway connectors add demo --provider composio --managed-auth
 ax gateway connectors auth write demo COMPOSIO_API_KEY=<your-composio-key>
 ax gateway connectors show demo
-# Should show provider=composio, auth.managed=true, auth.complete=true
+# Should list the connector with provider=composio and managed auth
+ax gateway connectors auth status demo
+# Should show the COMPOSIO_API_KEY entry with 0o600 permissions
 
 # 5. Register the LangGraph + Composio agent bound to that connector
 ax gateway agents add lgc-demo \
@@ -49,6 +51,8 @@ AX_GATEWAY_CONNECTOR_REF=demo \
 AX_MENTION_CONTENT="list github pull requests for my org" \
 .venv/bin/python examples/gateway_langgraph_composio/langgraph_composio_bridge.py
 # Should print a reply listing matched Composio tool slugs and exit cleanly
+# Note the slugs in the output: those are the ground-truth slugs for this
+# catalog version, and the RUN: example in Step 3 should reuse one of them.
 
 # 7. Send a UI smoke test to make sure the agent shows up in the workspace
 ax send "@lgc-demo list github pull requests for my org" --space ax-gateway
@@ -116,8 +120,8 @@ The reply looks like:
 ```
 LangGraph+Composio (@lgc-demo) via connector 'demo':
   search mode = ai-classified, matched = 6
-  - GITHUB_LIST_PULL_REQUESTS: List pull requests ...
-  - GITHUB_GET_PULL_REQUEST: Get a single pull request ...
+  - GITHUB_LIST_PRS: List pull requests ...
+  - GITHUB_GET_PR: Get a single pull request ...
   - ...
   Tip: append RUN:<TOOL_SLUG> {"key": "value"} to execute a matched tool.
 ```
@@ -131,29 +135,29 @@ LangGraph+Composio (@lgc-demo) via connector 'demo':
 
 ### Step 3. Tool execution via RUN: directive (1 min, the wow moment)
 
-In the chat input, append a `RUN:` directive to ask the agent to call a specific tool.
+In the chat input, combine the natural-language search prompt with a `RUN:` directive to ask the agent to call a specific tool. The bridge searches and executes on the same mention, so a combined prompt keeps the demo crisp.
 
 ```
-@lgc-demo RUN:GITHUB_LIST_PULL_REQUESTS {"owner":"FulcrumDefense","repo":"fulcrum-gateway","state":"open"}
+@lgc-demo list github pull requests for my org RUN:GITHUB_LIST_PRS {"owner":"FulcrumDefense","repo":"fulcrum-gateway","state":"open"}
 ```
+
+Use whichever slug Step 2's search response returned. Composio versions slug names independently of any catalog snapshot, so the live response in Step 2 is the source of truth.
 
 Press send. Watch the activity feed.
 
-Expected sequence on screen.
-
 1. **Processing** status, then the same search round as before
-2. Tool call **composio/GITHUB_LIST_PULL_REQUESTS** with status `tool_call` and the JSON arguments
-3. Tool result **composio/GITHUB_LIST_PULL_REQUESTS** with `tool_complete`, `duration_ms`, and a `data` preview
-4. Reply renders with `RUN:GITHUB_LIST_PULL_REQUESTS -> ok` plus a truncated data preview
+2. Tool call **composio/GITHUB_LIST_PRS** with status `tool_call` and the JSON arguments
+3. Tool result **composio/GITHUB_LIST_PRS** with `tool_complete`, `duration_ms`, and a `data` preview
+4. Reply renders with `RUN:GITHUB_LIST_PRS → ok` plus a truncated data preview
 
 The reply looks like:
 
 ```
 LangGraph+Composio (@lgc-demo) via connector 'demo':
   search mode = ai-classified, matched = 6
-  - GITHUB_LIST_PULL_REQUESTS: ...
+  - GITHUB_LIST_PRS: ...
   - ...
-  RUN:GITHUB_LIST_PULL_REQUESTS -> ok
+  RUN:GITHUB_LIST_PRS → ok
     data = [{"number": 209, "title": "fix(hermes): enrich ...", ...}, ...]
 ```
 
@@ -196,16 +200,16 @@ Compare the activity feed.
 
 ### Step 5. Closing (1 min)
 
-Show `ax gateway connectors activity` in a terminal as the closer.
+Show `ax gateway activity` in a terminal as the closer. Connector calls are recorded to `activity.jsonl` as `connector_tool_started`, `connector_tool_completed`, and `connector_tool_failed` events.
 
 ```
-ax gateway connectors activity --connector-ref demo --limit 5
+ax gateway activity --agent lgc-demo --limit 5
 ```
 
 Point out.
 
-- Each tool call is timestamped, attributed to `lgc-demo`
-- Each row carries the call status (`ok` or `error`) and the elapsed time
+- Each connector call is timestamped, attributed to `lgc-demo`
+- Each row carries the call event (`connector_tool_started` / `connector_tool_completed` / `connector_tool_failed`) and the elapsed time
 - The Composio API key never appears anywhere in the activity log
 
 > "Gateway is the trust boundary and the audit surface. The agent
@@ -247,13 +251,13 @@ baseline today. Each one is a clear next-step PR.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Agent shows `error` state in `agents show` | Composio connector not registered or auth incomplete | `ax gateway connectors show demo` should show `auth.complete=true`; if not, re-run `ax gateway connectors auth write demo COMPOSIO_API_KEY=...` |
-| Bridge replies with `search mode = stub` and zero tools matched | Composio API key not set in the connector, or the connector ref env var was not seen by the bridge | Check `ax gateway connectors show demo` then re-register the agent so the new env routes through |
-| Bridge replies with `RUN:<SLUG> -> failed` and `error = ...` | The tool slug is real but the arguments JSON is missing required keys or has the wrong types | Read the Composio tool spec for that slug and adjust the JSON in the RUN: directive |
+| Agent shows `error` state in `agents show` | Composio connector not registered or auth incomplete | `ax gateway connectors auth status demo` should list `COMPOSIO_API_KEY` with `0o600` permissions; if not, re-run `ax gateway connectors auth write demo COMPOSIO_API_KEY=...` |
+| Bridge replies with `search mode = stub` and zero tools matched | Composio API key not set in the connector, or the connector ref env var was not seen by the bridge | Check `ax gateway connectors auth status demo` then re-register the agent so the new env routes through |
+| Bridge replies with `RUN:<SLUG> → failed` and `error = ...` | The tool slug is real but the arguments JSON is missing required keys or has the wrong types | Read the Composio tool spec for that slug and adjust the JSON in the RUN: directive |
 | Bridge raises `RUN:<SLUG> arguments must be valid JSON` | The JSON after the slug is malformed (unbalanced braces, missing quotes) | Pass a valid JSON object; quote keys and string values |
 | `exit_reason=crashed` with import errors for `ax_cli.connectors` | Editable install missing or stale | `uv pip install -e .` in the gateway repo |
 | Agent does not show up in workspace participant list | Agent registered but Gateway daemon not running | `ax gateway status` to confirm `daemon.running=true`, then `ax gateway start` if needed |
-| Activity feed shows tool_start but no tool_result | Composio API timeout or network stall | `ax gateway connectors activity --connector-ref demo` to see what landed server-side; may need to retry |
+| Activity feed shows `connector_tool_started` but no `connector_tool_completed` | Composio API timeout or network stall | `ax gateway activity --agent lgc-demo` to see what landed in `activity.jsonl`; may need to retry |
 
 ---
 
