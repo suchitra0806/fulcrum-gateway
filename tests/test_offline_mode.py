@@ -4,7 +4,6 @@ hermes env, channel setup, smoke command, and OfflineAgentQueues.
 
 import json
 import threading
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,7 +12,6 @@ from ax_cli import gateway as gateway_core
 from ax_cli.commands import gateway as gateway_cmd
 from ax_cli.offline_client import OfflineAxClient
 from ax_cli.offline_sse import OfflineAgentQueues, agent_name_from_token, extract_mentions, make_token
-
 
 # ---------------------------------------------------------------------------
 # OfflineAgentQueues
@@ -281,6 +279,7 @@ def test_smoke_echo_returns_echo_response(monkeypatch, tmp_path):
     gateway_core.save_gateway_session({"token": "offline", "base_url": "http://localhost:8765", "space_id": "s1"})
 
     from typer.testing import CliRunner
+
     from ax_cli.main import app
     runner = CliRunner()
     result = runner.invoke(app, ["gateway", "agents", "smoke", "echo-bot", "--message", "hello"])
@@ -296,6 +295,7 @@ def test_smoke_echo_uses_default_message(monkeypatch, tmp_path):
     gateway_core.save_gateway_session({"token": "offline", "base_url": "http://localhost:8765", "space_id": "s1"})
 
     from typer.testing import CliRunner
+
     from ax_cli.main import app
     runner = CliRunner()
     result = runner.invoke(app, ["gateway", "agents", "smoke", "echo-bot"])
@@ -323,6 +323,7 @@ def test_smoke_channel_not_connected_when_no_subscriber(monkeypatch, tmp_path):
     fake_resp.raise_for_status = MagicMock()
 
     from typer.testing import CliRunner
+
     from ax_cli.main import app
     runner = CliRunner()
     with patch("httpx.post", return_value=fake_resp):
@@ -358,6 +359,7 @@ def test_smoke_channel_shows_reply_from_log(monkeypatch, tmp_path):
     t = threading.Thread(target=_write_reply, daemon=True)
 
     from typer.testing import CliRunner
+
     from ax_cli.main import app
     runner = CliRunner()
 

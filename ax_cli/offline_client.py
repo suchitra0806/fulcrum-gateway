@@ -113,6 +113,7 @@ class OfflineAxClient:
         agent_id: str | None = None,
     ):
         import os as _os
+
         _warn_once()
         self.base_url = base_url or _os.environ.get("AX_LOCAL_GATEWAY_URL") or "http://localhost:8765"
         self.token = token
@@ -176,6 +177,7 @@ class OfflineAxClient:
         message_type: str = "text",
     ) -> dict:
         import httpx
+
         body: dict = {"content": content, "space_id": space_id, "channel": channel}
         if parent_id:
             body["parent_id"] = parent_id
@@ -324,7 +326,9 @@ class OfflineAxClient:
     def delete_context(self, key: str, *, space_id: str | None = None) -> int:
         return 204
 
-    def promote_context(self, space_id: str, key: str, *, artifact_type: str = "RESEARCH", agent_id: str | None = None) -> dict:
+    def promote_context(
+        self, space_id: str, key: str, *, artifact_type: str = "RESEARCH", agent_id: str | None = None
+    ) -> dict:
         return {"ok": True}
 
     # --- Search ---
@@ -359,11 +363,14 @@ class OfflineAxClient:
 
     def connect_sse(self, *, space_id: str | None = None, timeout=None):
         import httpx
+
         token = f"offline-{self.agent_name}" if self.agent_name else "offline-unknown"
         params: dict = {"token": token}
         if space_id:
             params["space_id"] = space_id
-        client = httpx.Client(base_url=self.base_url, timeout=httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0))
+        client = httpx.Client(
+            base_url=self.base_url, timeout=httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
+        )
         return client.stream("GET", "/api/v1/sse/messages", params=params)
 
     # --- Management ---
@@ -382,7 +389,9 @@ class OfflineAxClient:
     ) -> dict:
         return {"id": str(uuid4()), "agent_id": agent_id, "token": f"axp_a_offline_{str(uuid4())[:8]}"}
 
-    def mgmt_issue_enrollment(self, *, name: str | None = None, expires_in_hours: int = 1, audience: str = "cli") -> dict:
+    def mgmt_issue_enrollment(
+        self, *, name: str | None = None, expires_in_hours: int = 1, audience: str = "cli"
+    ) -> dict:
         return {"code": f"offline-enrollment-{str(uuid4())[:8]}"}
 
     def mgmt_revoke_credential(self, credential_id: str) -> dict:

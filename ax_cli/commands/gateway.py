@@ -6406,6 +6406,7 @@ class _GatewayUiServer(ThreadingHTTPServer):
 def _offline_auth_exchange(handler: BaseHTTPRequestHandler, body: dict) -> None:
     """POST /auth/exchange — return a fake JWT that encodes the agent name."""
     from ..offline_sse import make_token
+
     agent_name = str(body.get("agent_name") or "").strip()
     if not agent_name:
         auth = str(handler.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
@@ -6431,6 +6432,7 @@ def _offline_replies_path() -> Path:
 def _offline_message_post(handler: BaseHTTPRequestHandler, body: dict) -> None:
     """POST /api/v1/messages — deliver to the mentioned agent's queue."""
     from ..offline_sse import OfflineAgentQueues, extract_mentions
+
     message = {
         "id": str(__import__("uuid").uuid4()),
         "content": str(body.get("content") or ""),
@@ -6463,6 +6465,7 @@ def _offline_sse_stream(handler: BaseHTTPRequestHandler, token: str) -> None:
     import queue as _queue
 
     from ..offline_sse import OfflineAgentQueues, agent_name_from_token, sse_frame
+
     agent_name = agent_name_from_token(token)
     if not agent_name:
         _write_json_response(handler, {"error": "invalid token"}, status=HTTPStatus.UNAUTHORIZED)
@@ -6656,6 +6659,7 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
             if os.environ.get("AX_OFFLINE"):
                 if parsed.path == "/api/v1/sse/messages":
                     from urllib.parse import parse_qs as _parse_qs
+
                     token = str((_parse_qs(parsed.query).get("token") or [""])[0]).strip()
                     _offline_sse_stream(self, token)
                     return
@@ -6807,7 +6811,11 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
                     if parsed.path == "/api/v1/messages":
                         _offline_message_post(self, body)
                         return
-                    if parsed.path in ("/api/v1/agents/heartbeat", "/api/v1/agents/processing-status", "/api/v1/tool-calls"):
+                    if parsed.path in (
+                        "/api/v1/agents/heartbeat",
+                        "/api/v1/agents/processing-status",
+                        "/api/v1/tool-calls",
+                    ):
                         _write_json_response(self, {"status": "ok"})
                         return
                 if parsed.path.startswith("/api/templates/") and parsed.path.endswith("/install"):
@@ -9502,13 +9510,18 @@ def smoke_agent(
             if not command:
                 err_console.print("[red]exec runtime requires exec_command in the registry entry.[/red]")
                 raise typer.Exit(1)
-            timeout = gateway_core.runtime_timeout_seconds(entry) if hasattr(gateway_core, "runtime_timeout_seconds") else None
+            timeout = (
+                gateway_core.runtime_timeout_seconds(entry)
+                if hasattr(gateway_core, "runtime_timeout_seconds")
+                else None
+            )
             response = gateway_core._run_exec_handler(command, message, entry, timeout_seconds=timeout)
             result = {"agent": name, "runtime_type": runtime_type, "prompt": message, "response": response}
         elif runtime_type in _channel_runtimes:
             import time as _time
 
             import httpx as _httpx
+
             gateway_url = os.environ.get("AX_LOCAL_GATEWAY_URL") or "http://localhost:8765"
             payload = {
                 "content": f"@{name} {message}".strip(),
@@ -9553,8 +9566,11 @@ def smoke_agent(
                     break
                 _time.sleep(1.0)
             result = {
-                "agent": name, "runtime_type": runtime_type, "prompt": message,
-                "delivered": True, "message_id": sent_id,
+                "agent": name,
+                "runtime_type": runtime_type,
+                "prompt": message,
+                "delivered": True,
+                "message_id": sent_id,
                 "response": reply_content or "[no reply within 60s — check agent session]",
             }
         else:

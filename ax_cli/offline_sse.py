@@ -66,7 +66,7 @@ def make_token(agent_name: str) -> str:
 def agent_name_from_token(token: str) -> str | None:
     if not token.startswith(_TOKEN_PREFIX):
         return None
-    name = token[len(_TOKEN_PREFIX):]
+    name = token[len(_TOKEN_PREFIX) :]
     return name if name else None
 
 
