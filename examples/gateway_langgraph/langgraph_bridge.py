@@ -331,28 +331,31 @@ def _load_mcp_tools() -> list:
     try:
         from ax_cli.runtimes.mcp_servers.langchain_adapter import load_mcps_from_env
     except Exception as exc:  # noqa: BLE001
-        emit_event({"status": "activity", "activity": f"MCP adapter import failed; skipping MCP tools ({exc})"})
+        emit_event({"kind": "activity", "activity": f"MCP adapter import failed; skipping MCP tools ({exc})"})
         return []
     try:
         debug = os.environ.get("AX_MCP_DEBUG", "").lower() in {"1", "true", "yes", "on"}
         tools, clients = load_mcps_from_env(debug=debug)
     except Exception as exc:  # noqa: BLE001
-        emit_event({"status": "activity", "activity": f"MCP load failed; skipping MCP tools ({exc})"})
+        emit_event({"kind": "activity", "activity": f"MCP load failed; skipping MCP tools ({exc})"})
         return []
     if not tools:
         return []
     _MCP_CLIENTS.extend(clients)
     if not getattr(_load_mcp_tools, "_atexit_registered", False):
         import atexit
+
         atexit.register(_close_mcp_clients)
         _load_mcp_tools._atexit_registered = True  # type: ignore[attr-defined]
-    emit_event({
-        "status": "activity",
-        "activity": (
-            f"registered {len(tools)} MCP tool(s) from {len(clients)} server(s): "
-            + ", ".join(getattr(t, "name", "?") for t in tools)
-        ),
-    })
+    emit_event(
+        {
+            "kind": "activity",
+            "activity": (
+                f"registered {len(tools)} MCP tool(s) from {len(clients)} server(s): "
+                + ", ".join(getattr(t, "name", "?") for t in tools)
+            ),
+        }
+    )
     return tools
 
 
