@@ -18,6 +18,7 @@ Start here and follow in order:
 | [Module Guide: gateway.py](module-guide-gateway.md) | Contributors | Section-by-section code map with line ranges and key functions |
 | [Release Process](release-process.md) | Maintainers | Versioning, PyPI publishing, changelog generation |
 | [Operator QA Runbook](operator-qa-runbook.md) | Operators | Manual and automated QA checks for Gateway |
+| [Offline Development](offline-development.md) | Contributors | Developing and smoke-testing agents without platform access |
 
 ## Scenarios (step-by-step task guides)
 

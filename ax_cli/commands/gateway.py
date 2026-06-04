@@ -341,6 +341,11 @@ def _guard_gateway_exchange(client: AxClient) -> None:
 
 
 def _load_gateway_user_client() -> AxClient:
+    if os.environ.get("AX_OFFLINE"):
+        from ax_cli.offline_client import OfflineAxClient
+
+        return OfflineAxClient()
+
     session = load_gateway_session()
     if not session:
         err_console.print("[red]Gateway is not logged in.[/red] Run `ax gateway login` first.")
@@ -360,6 +365,10 @@ def _load_gateway_user_client() -> AxClient:
 
 
 def _load_gateway_session_or_exit() -> dict:
+    if os.environ.get("AX_OFFLINE"):
+        _gw_url = os.environ.get("AX_LOCAL_GATEWAY_URL") or "http://localhost:8765"
+        return {"token": "offline", "base_url": _gw_url, "space_id": "00000000-0000-0000-0000-000000000001"}
+
     session = load_gateway_session()
     if not session:
         err_console.print("[red]Gateway is not logged in.[/red] Run `ax gateway login` first.")
@@ -515,6 +524,13 @@ def _with_registry_refs(registry: dict, agent: dict) -> dict:
 
 
 def _load_managed_agent_client(entry: dict) -> AxClient:
+    if os.environ.get("AX_OFFLINE"):
+        from ax_cli.offline_client import OfflineAxClient
+
+        return OfflineAxClient(
+            agent_name=str(entry.get("name") or "") or None,
+            agent_id=str(entry.get("agent_id") or "") or None,
+        )
     try:
         token = load_gateway_managed_agent_token(entry)
     except ValueError as exc:
@@ -3561,7 +3577,12 @@ def _send_gateway_test_to_managed_agent(
         else:
             sender_name = _resolve_invoking_principal()
             if not sender_name:
-                raise _no_invoking_principal_error()
+                if os.environ.get("AX_OFFLINE"):
+                    normalized_author = "user"
+                else:
+                    raise _no_invoking_principal_error()
+
+    if normalized_author == "agent":
         result = _send_from_managed_agent(
             name=sender_name,
             content=prompt,
@@ -6382,6 +6403,97 @@ class _GatewayUiServer(ThreadingHTTPServer):
     daemon_threads = True
 
 
+def _offline_auth_exchange(handler: BaseHTTPRequestHandler, body: dict) -> None:
+    """POST /auth/exchange — return a fake JWT that encodes the agent name."""
+    from ..offline_sse import make_token
+    agent_name = str(body.get("agent_name") or "").strip()
+    if not agent_name:
+        auth = str(handler.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+        registry = load_gateway_registry()
+        for entry in registry.get("agents", []):
+            path = agent_token_path(str(entry.get("name") or ""))
+            try:
+                if path.exists() and path.read_text().strip() == auth:
+                    agent_name = str(entry.get("name") or "")
+                    break
+            except OSError:
+                pass
+    if not agent_name:
+        _write_json_response(handler, {"error": "agent not found"}, status=HTTPStatus.UNAUTHORIZED)
+        return
+    _write_json_response(handler, {"access_token": make_token(agent_name), "token_type": "bearer"})
+
+
+def _offline_replies_path() -> Path:
+    return gateway_dir() / "offline-replies.jsonl"
+
+
+def _offline_message_post(handler: BaseHTTPRequestHandler, body: dict) -> None:
+    """POST /api/v1/messages — deliver to the mentioned agent's queue."""
+    from ..offline_sse import OfflineAgentQueues, extract_mentions
+    message = {
+        "id": str(__import__("uuid").uuid4()),
+        "content": str(body.get("content") or ""),
+        "space_id": str(body.get("space_id") or "00000000-0000-0000-0000-000000000001"),
+        "channel": str(body.get("channel") or "main"),
+        "author": body.get("author") or "offline-user",
+    }
+    if body.get("parent_id"):
+        message["parent_id"] = str(body["parent_id"])
+    mentioned = extract_mentions(message["content"])
+    bus = OfflineAgentQueues.get()
+    delivered = [name for name in mentioned if bus.deliver(name, message)]
+    if message["author"] != "offline-user":
+        try:
+            p = _offline_replies_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("a") as f:
+                f.write(json.dumps(message) + "\n")
+        except OSError:
+            pass
+    _write_json_response(
+        handler,
+        {"message": message, "id": message["id"], "delivered_to": delivered},
+        status=HTTPStatus.CREATED,
+    )
+
+
+def _offline_sse_stream(handler: BaseHTTPRequestHandler, token: str) -> None:
+    """GET /api/v1/sse/messages — stream messages to one specific agent."""
+    import queue as _queue
+
+    from ..offline_sse import OfflineAgentQueues, agent_name_from_token, sse_frame
+    agent_name = agent_name_from_token(token)
+    if not agent_name:
+        _write_json_response(handler, {"error": "invalid token"}, status=HTTPStatus.UNAUTHORIZED)
+        return
+    bus = OfflineAgentQueues.get()
+    q = bus.subscribe(agent_name)
+    try:
+        handler.send_response(HTTPStatus.OK.value)
+        handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Connection", "keep-alive")
+        handler.send_header("X-Accel-Buffering", "no")
+        handler.end_headers()
+        handler.wfile.write(sse_frame("connected", {"agent": agent_name}))
+        handler.wfile.flush()
+        while True:
+            try:
+                message = q.get(timeout=15.0)
+                if message is None:
+                    break
+                handler.wfile.write(sse_frame("message", message))
+                handler.wfile.flush()
+            except _queue.Empty:
+                handler.wfile.write(sse_frame("heartbeat", {}))
+                handler.wfile.flush()
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+    finally:
+        bus.unsubscribe(agent_name)
+
+
 def _write_json_response(handler: BaseHTTPRequestHandler, payload: dict, *, status: HTTPStatus = HTTPStatus.OK) -> None:
     body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
     handler.send_response(status.value)
@@ -6541,6 +6653,15 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
             if self._reject_unauthorized_host():
                 return
             parsed = urlparse(self.path)
+            if os.environ.get("AX_OFFLINE"):
+                if parsed.path == "/api/v1/sse/messages":
+                    from urllib.parse import parse_qs as _parse_qs
+                    token = str((_parse_qs(parsed.query).get("token") or [""])[0]).strip()
+                    _offline_sse_stream(self, token)
+                    return
+                if parsed.path in ("/auth/me", "/api/v1/agents"):
+                    _write_json_response(self, {"agents": [], "id": "offline-user", "email": "offline@localhost"})
+                    return
             if parsed.path == "/":
                 _write_html_response(self, _render_gateway_demo_page(refresh_ms=refresh_ms))
                 return
@@ -6679,6 +6800,16 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
             parsed = urlparse(self.path)
             try:
                 body = _read_json_request(self)
+                if os.environ.get("AX_OFFLINE"):
+                    if parsed.path == "/auth/exchange":
+                        _offline_auth_exchange(self, body)
+                        return
+                    if parsed.path == "/api/v1/messages":
+                        _offline_message_post(self, body)
+                        return
+                    if parsed.path in ("/api/v1/agents/heartbeat", "/api/v1/agents/processing-status", "/api/v1/tool-calls"):
+                        _write_json_response(self, {"status": "ok"})
+                        return
                 if parsed.path.startswith("/api/templates/") and parsed.path.endswith("/install"):
                     template_id = (
                         unquote(parsed.path.removeprefix("/api/templates/").removesuffix("/install")).strip().lower()
@@ -7934,7 +8065,7 @@ def start(
     daemon_note: str | None = None
 
     if daemon_pid is None:
-        if session:
+        if session or os.environ.get("AX_OFFLINE"):
             daemon_process = _spawn_gateway_background_process(
                 _gateway_cli_argv("gateway", "run", "--poll-interval", str(poll_interval)),
                 log_path=daemon_log_path(),
@@ -8077,6 +8208,28 @@ def run(
     once: bool = typer.Option(False, "--once", help="Run one reconcile pass and exit"),
 ):
     """Run the foreground Gateway supervisor."""
+    if os.environ.get("AX_OFFLINE"):
+        from ax_cli.offline_client import OfflineAxClient
+
+        err_console.print("[bold]ax gateway[/bold] — local control plane [yellow](offline mode)[/yellow]")
+        err_console.print(f"  state_dir = {gateway_dir()}")
+        err_console.print(f"  interval  = {poll_interval}s")
+        err_console.print(f"  mode      = {'single-pass' if once else 'foreground'}")
+        daemon = GatewayDaemon(
+            client_factory=lambda **kw: OfflineAxClient(**kw),
+            logger=_emit_daemon_log,
+            poll_interval=poll_interval,
+        )
+        try:
+            daemon.run(once=once)
+        except RuntimeError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+        except KeyboardInterrupt:
+            daemon.stop()
+            err_console.print("[yellow]Gateway stopped.[/yellow]")
+        return
+
     _load_gateway_session_or_exit()
     err_console.print("[bold]ax gateway[/bold] — local control plane")
     err_console.print(f"  state_dir = {gateway_dir()}")
@@ -9321,6 +9474,107 @@ def test_agent(
     message_payload = result.get("message") or {}
     if isinstance(message_payload, dict) and message_payload.get("id"):
         err_console.print(f"  message_id = {message_payload['id']}")
+
+
+@agents_app.command("smoke")
+def smoke_agent(
+    name: str = typer.Argument(..., help="Managed agent name"),
+    message: str = typer.Option("ping", "--message", "-m", help="Prompt to send directly to the handler"),
+    as_json: bool = JSON_OPTION,
+):
+    """Invoke a managed agent's handler in-process and show the response.
+
+    Bypasses the platform SSE loop entirely — useful for offline development
+    (AX_OFFLINE=1) to confirm an agent's handler logic works end-to-end.
+    Supports echo and exec runtime types.
+    """
+    entry = _load_managed_agent_or_exit(name)
+    runtime_type = str(entry.get("runtime_type") or "echo").lower()
+
+    _channel_runtimes = {"claude_code_channel", "hermes_plugin", "hermes_sentinel", "hermes"}
+
+    try:
+        if runtime_type == "echo":
+            response = gateway_core._echo_handler(message, entry)
+            result = {"agent": name, "runtime_type": runtime_type, "prompt": message, "response": response}
+        elif runtime_type in {"exec", "command"}:
+            command = str(entry.get("exec_command") or "").strip()
+            if not command:
+                err_console.print("[red]exec runtime requires exec_command in the registry entry.[/red]")
+                raise typer.Exit(1)
+            timeout = gateway_core.runtime_timeout_seconds(entry) if hasattr(gateway_core, "runtime_timeout_seconds") else None
+            response = gateway_core._run_exec_handler(command, message, entry, timeout_seconds=timeout)
+            result = {"agent": name, "runtime_type": runtime_type, "prompt": message, "response": response}
+        elif runtime_type in _channel_runtimes:
+            import time as _time
+
+            import httpx as _httpx
+            gateway_url = os.environ.get("AX_LOCAL_GATEWAY_URL") or "http://localhost:8765"
+            payload = {
+                "content": f"@{name} {message}".strip(),
+                "space_id": "00000000-0000-0000-0000-000000000001",
+            }
+            try:
+                r = _httpx.post(f"{gateway_url}/api/v1/messages", json=payload, timeout=5.0)
+                r.raise_for_status()
+                data = r.json()
+            except Exception as exc:
+                err_console.print(f"[red]Delivery failed:[/red] {exc}")
+                err_console.print("  Is `AX_OFFLINE=1 ax gateway start` running?")
+                raise typer.Exit(1)
+            delivered = data.get("delivered_to") or []
+            if not delivered:
+                err_console.print(f"[yellow]Message posted but @{name} is not connected.[/yellow]")
+                if runtime_type == "claude_code_channel":
+                    err_console.print(f"  Start Claude Code with: AX_BASE_URL={gateway_url} [claude command]")
+                else:
+                    err_console.print(f"  Agent must be running and subscribed to {gateway_url}")
+                raise typer.Exit(1)
+            sent_id = data.get("id")
+            # Poll offline-replies.jsonl for a reply from the agent (up to 60s).
+            # Record the file position now so we only read lines written after the send.
+            replies_path = _offline_replies_path()
+            start_pos = replies_path.stat().st_size if replies_path.exists() else 0
+            reply_content: str | None = None
+            deadline = _time.monotonic() + 60
+            while _time.monotonic() < deadline:
+                if replies_path.exists():
+                    with replies_path.open() as _f:
+                        _f.seek(start_pos)
+                        for line in _f.read().splitlines():
+                            try:
+                                msg = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            if str(msg.get("author") or "").lower() == name.lower():
+                                reply_content = str(msg.get("content") or "")
+                                break
+                if reply_content is not None:
+                    break
+                _time.sleep(1.0)
+            result = {
+                "agent": name, "runtime_type": runtime_type, "prompt": message,
+                "delivered": True, "message_id": sent_id,
+                "response": reply_content or "[no reply within 60s — check agent session]",
+            }
+        else:
+            err_console.print(f"[yellow]smoke not supported for runtime_type={runtime_type!r}[/yellow]")
+            err_console.print("  Supported: echo, exec, claude_code_channel, hermes_plugin, hermes_sentinel")
+            raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        err_console.print(f"[red]Handler error:[/red] {exc}")
+        raise typer.Exit(1)
+
+    if as_json:
+        print_json(result)
+        return
+    err_console.print(f"[green]Smoke:[/green] @{name}")
+    err_console.print(f"  prompt    = {message}")
+    if runtime_type in _channel_runtimes:
+        err_console.print(f"  delivered = {result.get('delivered')} (message_id={result.get('message_id')})")
+    err_console.print(f"  response  = {result.get('response')}")
 
 
 @agents_app.command("move")

@@ -421,6 +421,8 @@ def write_channel_setup(
         "AX_AGENT_ID": resolved_agent_id,
         "AX_SPACE_ID": resolved_space_id,
     }
+    if os.environ.get("AX_OFFLINE"):
+        env_values["AX_OFFLINE"] = "1"
     server_config = _channel_mcp_server_config(
         agent_name=agent_name,
         space_id=resolved_space_id,

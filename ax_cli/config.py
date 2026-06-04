@@ -1386,6 +1386,11 @@ def resolve_agent_id() -> str | None:
 
 
 def get_client() -> AxClient:
+    if os.environ.get("AX_OFFLINE"):
+        from .offline_client import OfflineAxClient
+
+        return OfflineAxClient(agent_name=resolve_agent_name(), agent_id=resolve_agent_id())
+
     token = resolve_token()
     if not token:
         typer.echo(
@@ -1418,6 +1423,11 @@ def get_client() -> AxClient:
 
 def get_user_client() -> AxClient:
     """Return a user-authored client for setup/management operations."""
+    if os.environ.get("AX_OFFLINE"):
+        from .offline_client import OfflineAxClient
+
+        return OfflineAxClient()
+
     token = resolve_user_token()
     if not token:
         typer.echo(
