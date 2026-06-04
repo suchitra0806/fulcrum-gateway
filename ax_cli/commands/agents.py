@@ -735,6 +735,7 @@ def create_agent(
                     system_prompt=system_prompt,
                     model=model,
                     space_id=space_id,
+                    agent_type="direct",
                 )
             except httpx.HTTPStatusError:
                 data = client.create_agent(
@@ -745,6 +746,7 @@ def create_agent(
                     space_id=space_id,
                     enable_cloud_agent=cloud,
                     can_manage_agents=can_manage_agents,
+                    agent_type="direct",
                 )
         else:
             data = client.create_agent(

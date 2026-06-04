@@ -185,7 +185,9 @@ def _create_agent_in_space(client, *, name: str, space_id: str, description: str
     """
     if hasattr(client, "_exchanger") and client._exchanger:
         try:
-            result = client.mgmt_create_agent(name, space_id=space_id, description=description, model=model)
+            result = client.mgmt_create_agent(
+                name, space_id=space_id, description=description, model=model, agent_type="gateway"
+            )
             # Management API may wrap the agent in {"agent": {...}} — unwrap so
             # callers always get the agent dict and .get("id") resolves correctly.
             return result.get("agent", result) if isinstance(result, dict) else result
@@ -221,7 +223,7 @@ def _create_agent_in_space(client, *, name: str, space_id: str, description: str
             # to the legacy POST path, same as _mint_agent_pat.
             pass
 
-    body: dict = {"name": name}
+    body: dict = {"name": name, "agent_type": "gateway"}
     if description is not None:
         body["description"] = description
     if model is not None:

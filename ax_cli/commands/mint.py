@@ -76,11 +76,11 @@ def _is_management_route_miss_error(exc: httpx.HTTPStatusError) -> bool:
 def _create_agent_for_mint(client, agent: str) -> dict:
     """Create an agent for token minting using the best available API route."""
     try:
-        data = client.mgmt_create_agent(agent)
+        data = client.mgmt_create_agent(agent, agent_type="direct")
     except httpx.HTTPStatusError as exc:
         if not _is_management_route_miss_error(exc):
             raise
-        data = client.create_agent(agent)
+        data = client.create_agent(agent, agent_type="direct")
     return data.get("agent", data) if isinstance(data, dict) else data
 
 
