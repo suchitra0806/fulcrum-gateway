@@ -287,20 +287,23 @@ def test_smoke_echo_returns_echo_response(monkeypatch, tmp_path):
     assert "Echo: hello" in result.output
 
 
-def test_smoke_echo_uses_default_message(monkeypatch, tmp_path):
+def test_smoke_echo_uses_recommended_test_message(monkeypatch, tmp_path):
+    """Without --message, smoke uses the template's recommended_test_message."""
     monkeypatch.setenv("AX_OFFLINE", "1")
     monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "ax_config"))
     entry = _make_registry(tmp_path, name="echo-bot", runtime_type="echo")
+    entry["template_id"] = "echo_test"  # recommended_test_message = "gateway test ping"
     gateway_core.save_gateway_registry({"agents": [entry]})
     gateway_core.save_gateway_session({"token": "offline", "base_url": "http://localhost:8765", "space_id": "s1"})
 
     from typer.testing import CliRunner
 
     from ax_cli.main import app
+
     runner = CliRunner()
     result = runner.invoke(app, ["gateway", "agents", "smoke", "echo-bot"])
     assert result.exit_code == 0
-    assert "Echo: ping" in result.output
+    assert "Echo: gateway test ping" in result.output
 
 
 # ---------------------------------------------------------------------------
