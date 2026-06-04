@@ -52,6 +52,30 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 # ---------------------------------------------------------------------------
 
 
+def _parse_retry_after(resp: "httpx.Response", default: float = 60.0) -> float:
+    """Return the Retry-After delay in seconds from a 429 response.
+
+    Handles both integer-seconds and HTTP-date forms. Falls back to `default`
+    when the header is absent or unparseable.
+    """
+    raw = resp.headers.get("retry-after") or resp.headers.get("Retry-After", "")
+    if raw:
+        try:
+            return max(1.0, float(raw))
+        except ValueError:
+            pass
+        try:
+            from email.utils import parsedate_to_datetime
+            import datetime
+
+            retry_dt = parsedate_to_datetime(raw)
+            delta = (retry_dt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+            return max(1.0, delta)
+        except Exception:
+            pass
+    return default
+
+
 def _load_config() -> dict:
     for p in [Path(".ax/config.toml"), Path.home() / ".ax" / "config.toml"]:
         if p.exists():
@@ -280,6 +304,10 @@ class AxAPI:
                         return payload["message"]
                     if payload.get("id"):
                         return payload
+            elif resp.status_code == 429:
+                delay = _parse_retry_after(resp)
+                log.warning("send_message: rate-limited by paxai.app — backing off %.0fs (Retry-After)", delay)
+                time.sleep(delay)
             else:
                 log.warning(f"send_message: {resp.status_code} {resp.text[:200]}")
         except Exception as e:
@@ -296,6 +324,11 @@ class AxAPI:
                 json=body,
                 headers=self._headers(),
             )
+            if resp.status_code == 429:
+                delay = _parse_retry_after(resp)
+                log.warning("edit_message: rate-limited by paxai.app — backing off %.0fs (Retry-After)", delay)
+                time.sleep(delay)
+                return False
             return resp.status_code == 200
         except Exception as e:
             log.error(f"edit_message error: {e}")
@@ -1198,6 +1231,11 @@ def run(args):
         try:
             log.info("Connecting to SSE...")
             with api.connect_sse() as resp:
+                if resp.status_code == 429:
+                    delay = _parse_retry_after(resp)
+                    log.warning("SSE connect: rate-limited by paxai.app — backing off %.0fs (Retry-After)", delay)
+                    time.sleep(delay)
+                    raise ConnectionError("SSE 429")
                 if resp.status_code != 200:
                     log.error(f"SSE connection failed: {resp.status_code}")
                     raise ConnectionError(f"SSE {resp.status_code}")
