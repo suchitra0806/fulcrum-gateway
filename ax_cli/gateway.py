@@ -4755,10 +4755,12 @@ def _build_hermes_plugin_env(entry: dict[str, Any]) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k not in ENV_DENYLIST}
     token = load_gateway_managed_agent_token(entry)
     home = _hermes_plugin_home(entry)
+    offline_base = os.environ.get("AX_LOCAL_GATEWAY_URL") or "http://localhost:8765"
+    base_url = offline_base if os.environ.get("AX_OFFLINE") else str(entry.get("base_url") or "https://paxai.app")
     env.update(
         {
             "AX_TOKEN": token,
-            "AX_BASE_URL": str(entry.get("base_url") or "https://paxai.app"),
+            "AX_BASE_URL": base_url,
             "AX_AGENT_NAME": str(entry.get("name") or ""),
             "AX_AGENT_ID": str(entry.get("agent_id") or ""),
             "AX_SPACE_ID": str(entry.get("space_id") or ""),
