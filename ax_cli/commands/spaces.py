@@ -1,5 +1,6 @@
 """ax spaces — list, create, and manage spaces."""
 
+import logging
 from typing import Optional
 
 import httpx
@@ -7,6 +8,8 @@ import typer
 
 from ..config import get_client, resolve_gateway_config, resolve_space_id, resolve_token, save_space_id
 from ..output import JSON_OPTION, console, handle_error, print_json, print_kv, print_table
+
+log = logging.getLogger("ax.spaces")
 
 app = typer.Typer(name="spaces", help="Space management", no_args_is_help=True)
 
@@ -283,6 +286,10 @@ def leave_space(
         members_list = data if isinstance(data, list) else data.get("members", [])
         member_count = len(members_list)
     except httpx.HTTPStatusError:
+        # Fail-soft: a permission or transport error must not block the leave.
+        # Log at debug (visible under -v) so a swallowed programming error from
+        # a future refactor is still traceable by maintainers (issue #203).
+        log.debug("member-count lookup failed during `ax spaces leave`", exc_info=True)
         member_count = None
     if not yes:
         blast = f" (you are 1 of {member_count} members)" if member_count else ""

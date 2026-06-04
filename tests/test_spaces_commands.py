@@ -1,6 +1,8 @@
 import json
+import logging
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 from typer.testing import CliRunner
 
@@ -712,6 +714,30 @@ def test_spaces_leave_refuses_agent_pat(monkeypatch):
     assert result.exit_code == 1
     assert "requires user identity" in result.output
     client.leave_space.assert_not_called()
+
+
+def test_spaces_leave_member_count_lookup_failure_logs_debug_and_is_silent(monkeypatch, caplog):
+    # issue #203: a member-count lookup failure must stay fail-soft for operators
+    # (leave still completes, blast-radius hint omitted) but leave a debug-level
+    # trace so a swallowed programming error stays visible.
+    client = _archive_leave_client()
+    request = httpx.Request("GET", "https://example.test/spaces/s1/members")
+    response = httpx.Response(403, request=request)
+    client.list_space_members.side_effect = httpx.HTTPStatusError(
+        "403 Forbidden", request=request, response=response
+    )
+    monkeypatch.setattr("ax_cli.commands.spaces.get_client", lambda: client)
+    monkeypatch.setattr("ax_cli.commands.spaces.resolve_space_id", lambda c, explicit=None: "s1")
+    monkeypatch.setattr("ax_cli.commands.spaces.resolve_token", lambda: None)
+
+    with caplog.at_level(logging.DEBUG, logger="ax.spaces"):
+        result = runner.invoke(app, ["spaces", "leave", "demo"], input="y\n")
+
+    assert result.exit_code == 0, result.output
+    client.leave_space.assert_called_once_with("s1")
+    assert "1 of" not in result.output
+    assert "Left" in result.output
+    assert any("member-count lookup failed" in r.message for r in caplog.records)
 
 
 def test_spaces_delete_points_to_archive(monkeypatch):
