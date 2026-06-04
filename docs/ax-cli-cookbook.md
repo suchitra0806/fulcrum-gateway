@@ -323,6 +323,29 @@ Note: passing a slug or name to `--space` on the user-PAT path can return HTML r
 
 ---
 
+## `ax gateway spaces use --json` Output Shape
+
+For scripts that parse the JSON output of `ax gateway spaces use --json`:
+
+```json
+{
+  "session_path": "/path/to/gateway/session.json",
+  "space_id": "<uuid>",
+  "space_name": "<label>",
+  "cli_scope": "local",
+  "gateway_session": { "updated": true, "space_id": "...", "session_path": "...", "daemon_running": false }
+}
+```
+
+- `session_path` — Path to the Gateway session file, or `null` when no Gateway session exists.
+- `space_id` / `space_name` — Resolved space identity.
+- `cli_scope` — `"local"` when the CLI config was written to `./.ax/config.toml`; `"global"` when written to `~/.ax/config.toml` (mirrors the `--global` flag).
+- `gateway_session` — Resolved Gateway session block from `apply_space_to_gateway_session(...)` (`updated`, `space_id`, `daemon_running`, etc.), or `null` when no session is active.
+
+**Migration note (PR #123, closes #82):** `cli_scope` and `gateway_session` are new fields; `session_path` is now nullable (was always-present before). Scripts that read `session_path` should null-check before treating it as a path.
+
+---
+
 ## Pass-Through Coordinator Pattern
 
 The pattern for setting up a workdir-bound coordinator agent:
