@@ -151,7 +151,13 @@ def _read_credential_pool_entry(path: Path, provider: str) -> dict | None:
     entries = pool.get(provider)
     if not entries:
         return None
-    best = min(entries, key=lambda e: e.get("priority", 999))
+    def _priority(e):
+        try:
+            return int(e.get("priority", 999))
+        except (TypeError, ValueError):
+            return 999
+
+    best = min(entries, key=_priority)
     return {
         "api_key": best.get("access_token", ""),
         "base_url": best.get("base_url", ""),

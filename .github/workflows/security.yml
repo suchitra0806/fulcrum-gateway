@@ -3,8 +3,6 @@ name: Scheduled Security Scan
 on:
   schedule:
     - cron: '0 6 * * 1,4'
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:

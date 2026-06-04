@@ -77,14 +77,31 @@ class TestSecurityHeaders:
         for name, value in EXPECTED_HEADERS.items():
             assert headers.get(name) == value, f"Missing or wrong: {name}"
 
-    def test_csp_allows_inline_scripts_and_styles(self):
+    def test_csp_uses_nonce_for_html(self):
         h = _make_handler(path="/")
         h.do_GET()
         headers = _header_dict(h)
         csp = headers["Content-Security-Policy"]
-        assert "'unsafe-inline'" in csp
-        assert "script-src 'unsafe-inline'" in csp
-        assert "style-src 'unsafe-inline'" in csp
+        assert "script-src 'nonce-" in csp
+        assert "style-src 'nonce-" in csp
+        assert "'unsafe-inline'" not in csp
+
+    def test_csp_no_nonce_for_json(self):
+        h = _make_handler(path="/healthz")
+        h.do_GET()
+        headers = _header_dict(h)
+        csp = headers["Content-Security-Policy"]
+        assert "nonce-" not in csp
+        assert "script-src" not in csp
+
+    def test_html_injects_nonce_into_tags(self):
+        h = _make_handler(path="/")
+        h.do_GET()
+        html = h.body.decode("utf-8")
+        assert '<script nonce="' in html
+        assert '<style nonce="' in html
+        assert "<script>" not in html
+        assert "<style>" not in html
 
     def test_no_hsts_header(self):
         h = _make_handler(path="/healthz")

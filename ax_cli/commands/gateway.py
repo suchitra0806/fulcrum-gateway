@@ -6498,14 +6498,23 @@ def _offline_sse_stream(handler: BaseHTTPRequestHandler, token: str) -> None:
         bus.unsubscribe(agent_name)
 
 
-def _send_security_headers(handler: BaseHTTPRequestHandler) -> None:
+def _generate_nonce() -> str:
+    import secrets
+
+    return secrets.token_urlsafe(16)
+
+
+_CSP_STATIC = "default-src 'none'; img-src 'self'; connect-src 'self'; font-src 'none'; frame-ancestors 'none'"
+
+
+def _send_security_headers(handler: BaseHTTPRequestHandler, *, nonce: str | None = None) -> None:
     handler.send_header("X-Content-Type-Options", "nosniff")
     handler.send_header("X-Frame-Options", "DENY")
-    handler.send_header(
-        "Content-Security-Policy",
-        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-        "img-src 'self'; connect-src 'self'; font-src 'none'; frame-ancestors 'none'",
-    )
+    if nonce:
+        csp = f"{_CSP_STATIC}; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'"
+    else:
+        csp = _CSP_STATIC
+    handler.send_header("Content-Security-Policy", csp)
     handler.send_header("Referrer-Policy", "no-referrer")
     handler.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
     handler.send_header("Cross-Origin-Opener-Policy", "same-origin")
@@ -6528,13 +6537,17 @@ def _write_json_response(handler: BaseHTTPRequestHandler, payload: dict, *, stat
 
 
 def _write_html_response(handler: BaseHTTPRequestHandler, payload: str) -> None:
+    nonce = _generate_nonce()
+    payload = payload.replace("<script>", f'<script nonce="{nonce}">')
+    payload = payload.replace("<script ", f'<script nonce="{nonce}" ')
+    payload = payload.replace("<style>", f'<style nonce="{nonce}">')
     body = payload.encode("utf-8")
     try:
         handler.send_response(HTTPStatus.OK.value)
         handler.send_header("Content-Type", "text/html; charset=utf-8")
         handler.send_header("Content-Length", str(len(body)))
         handler.send_header("Cache-Control", "no-store")
-        _send_security_headers(handler)
+        _send_security_headers(handler, nonce=nonce)
         handler.end_headers()
         handler.wfile.write(body)
     except (BrokenPipeError, ConnectionResetError):
@@ -6665,12 +6678,6 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
     class GatewayUiHandler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args) -> None:  # noqa: A003
             return
-
-        def handle_one_request(self):
-            try:
-                super().handle_one_request()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
 
         def _reject_unauthorized_host(self) -> bool:
             if _is_request_host_allowed(self.headers.get("Host")):
