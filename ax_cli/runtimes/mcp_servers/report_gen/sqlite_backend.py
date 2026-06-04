@@ -21,6 +21,11 @@ from typing import Any
 
 from .synthetic_db import ensure_database, open_readonly
 
+
+def _quote_ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
 _shared_conn: sqlite3.Connection | None = None
 _shared_db_path: str = ""
 
@@ -57,7 +62,9 @@ class SqliteBackend:
         table_names = [r[0] for r in cursor.fetchall()]
         tables = []
         for table_name in table_names:
-            cursor.execute(f"PRAGMA table_info({table_name})")
+            cursor.execute(  # nosemgrep: formatted-sql-query,sqlalchemy-execute-raw-query
+                f"PRAGMA table_info({_quote_ident(table_name)})"
+            )
             cols = [
                 {
                     "name": row[1],
@@ -68,7 +75,9 @@ class SqliteBackend:
                 }
                 for row in cursor.fetchall()
             ]
-            cursor.execute(f"PRAGMA foreign_key_list({table_name})")
+            cursor.execute(  # nosemgrep: formatted-sql-query,sqlalchemy-execute-raw-query
+                f"PRAGMA foreign_key_list({_quote_ident(table_name)})"
+            )
             foreign_keys = [
                 {
                     "column": row[3],
@@ -77,7 +86,9 @@ class SqliteBackend:
                 }
                 for row in cursor.fetchall()
             ]
-            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            cursor.execute(  # nosemgrep: formatted-sql-query,sqlalchemy-execute-raw-query
+                f"SELECT COUNT(*) FROM {_quote_ident(table_name)}"
+            )
             row_count = cursor.fetchone()[0]
             tables.append(
                 {

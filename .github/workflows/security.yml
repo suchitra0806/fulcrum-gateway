@@ -1,0 +1,78 @@
+name: Scheduled Security Scan
+
+on:
+  schedule:
+    - cron: '0 6 * * 1,4'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run Semgrep
+        run: >
+          semgrep scan
+          --config auto
+          --error
+          --exclude-rule python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+          --exclude-rule python.lang.security.audit.non-literal-import.non-literal-import
+          --verbose
+          ax_cli/
+
+  dast:
+    name: DAST (Nuclei)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+
+      - name: Install axctl
+        run: pip install -e .
+
+      - name: Start gateway UI
+        run: |
+          ax gateway ui --no-open --host 127.0.0.1 --port 8765 &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8765/healthz > /dev/null 2>&1; then
+              echo "Gateway ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run Nuclei
+        uses: projectdiscovery/nuclei-action@v2
+        with:
+          target: http://127.0.0.1:8765
+          output: nuclei-report.txt
+
+      - name: Upload DAST report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dast-report
+          path: nuclei-report.txt
+          if-no-files-found: ignore

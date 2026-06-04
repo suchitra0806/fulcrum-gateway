@@ -289,7 +289,7 @@ def _bash(args: dict, workdir: str) -> ToolResult:
     try:
         result = subprocess.run(
             command,
-            shell=True,
+            shell=True,  # nosemgrep: subprocess-shell-true
             cwd=workdir,
             capture_output=True,
             text=True,

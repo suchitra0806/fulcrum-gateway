@@ -108,8 +108,12 @@ def seed_postgres(dsn: str | None = None) -> dict[str, int]:
                 "INSERT INTO supply_route VALUES (%s, %s, %s, %s, %s, %s)",
                 SUPPLY_ROUTES,
             )
+            from psycopg import sql
+
             for table in ("theater", "unit", "ammo_stockpile", "personnel_readiness", "supply_route"):
-                cur.execute(f"SELECT COUNT(*) FROM {table}")
+                cur.execute(  # nosemgrep: sqlalchemy-execute-raw-query
+                    sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table))
+                )
                 counts[table] = cur.fetchone()[0]
         conn.commit()
     return counts
