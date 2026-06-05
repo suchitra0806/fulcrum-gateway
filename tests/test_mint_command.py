@@ -48,7 +48,7 @@ class FakeCreateFallbackClient(FakeMintClient):
             ),
         )
 
-    def mgmt_create_agent(self, agent):
+    def mgmt_create_agent(self, agent, **kwargs):
         raise httpx.HTTPStatusError(
             "Expected JSON but got HTML",
             request=httpx.Request("POST", "https://paxai.app/api/v1/agents/manage/create"),
@@ -60,7 +60,7 @@ class FakeCreateFallbackClient(FakeMintClient):
             ),
         )
 
-    def create_agent(self, agent):
+    def create_agent(self, agent, **kwargs):
         return {"id": "agent-created", "name": agent}
 
 
@@ -324,19 +324,25 @@ def test_is_management_route_miss_false_for_500():
 def test_create_agent_for_mint_uses_mgmt(monkeypatch):
     from ax_cli.commands.mint import _create_agent_for_mint
 
+    captured = {}
+
     class Client:
-        def mgmt_create_agent(self, name):
+        def mgmt_create_agent(self, name, **kwargs):
+            captured.update(kwargs)
             return {"agent": {"id": "mgmt-id", "name": name}}
 
     result = _create_agent_for_mint(Client(), "test-agent")
     assert result["id"] == "mgmt-id"
+    assert captured.get("agent_type") == "direct"
 
 
 def test_create_agent_for_mint_falls_back(monkeypatch):
     from ax_cli.commands.mint import _create_agent_for_mint
 
+    captured = {}
+
     class Client:
-        def mgmt_create_agent(self, name):
+        def mgmt_create_agent(self, name, **kwargs):
             raise httpx.HTTPStatusError(
                 "html",
                 request=httpx.Request("POST", "http://x"),
@@ -348,11 +354,13 @@ def test_create_agent_for_mint_falls_back(monkeypatch):
                 ),
             )
 
-        def create_agent(self, name):
+        def create_agent(self, name, **kwargs):
+            captured.update(kwargs)
             return {"agent": {"id": "fallback-id", "name": name}}
 
     result = _create_agent_for_mint(Client(), "test-agent")
     assert result["id"] == "fallback-id"
+    assert captured.get("agent_type") == "direct"
 
 
 def test_create_agent_for_mint_raises_on_real_error():
@@ -361,7 +369,7 @@ def test_create_agent_for_mint_raises_on_real_error():
     from ax_cli.commands.mint import _create_agent_for_mint
 
     class Client:
-        def mgmt_create_agent(self, name):
+        def mgmt_create_agent(self, name, **kwargs):
             raise httpx.HTTPStatusError(
                 "real error",
                 request=httpx.Request("POST", "http://x"),

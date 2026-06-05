@@ -1062,7 +1062,15 @@ class AxClient:
     def create_agent(self, name: str, **kwargs) -> dict:
         """POST /api/v1/agents — create a new agent."""
         body: dict = {"name": name}
-        for key in ("description", "system_prompt", "model", "space_id", "enable_cloud_agent", "can_manage_agents"):
+        for key in (
+            "description",
+            "system_prompt",
+            "model",
+            "space_id",
+            "enable_cloud_agent",
+            "can_manage_agents",
+            "agent_type",
+        ):
             if key in kwargs and kwargs[key] is not None:
                 body[key] = kwargs[key]
         r = self._http.post("/api/v1/agents", json=body)
@@ -1228,7 +1236,7 @@ class AxClient:
     def mgmt_create_agent(self, name: str, **kwargs) -> dict:
         """Create an agent — requires user_admin + agents.create."""
         body: dict = {"name": name}
-        for k in ("description", "system_prompt", "model", "space_id"):
+        for k in ("description", "system_prompt", "model", "space_id", "agent_type"):
             if k in kwargs and kwargs[k] is not None:
                 body[k] = kwargs[k]
         return self._management_json_with_fallback(

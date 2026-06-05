@@ -515,6 +515,20 @@ def test_create_agent_in_space_other_errors_still_raise(monkeypatch):
     assert exc.value.response.status_code == 500
 
 
+def test_create_agent_in_space_legacy_body_includes_agent_type():
+    """Non-exchanger (Cognito) path sets agent_type=gateway in the POST body."""
+    http = _FakeHttp(
+        {
+            ("POST", "/api/v1/agents"): (201, {"id": AGENT_ID, "name": "gw-bot"}, None),
+        }
+    )
+    client = _FakeClient(http)
+    bootstrap_cmd._create_agent_in_space(client, name="gw-bot", space_id=SPACE_ID, description=None, model=None)
+    posts = [c for c in http.calls if c["method"] == "POST"]
+    assert len(posts) == 1
+    assert posts[0]["json"]["agent_type"] == "gateway"
+
+
 # ── _create_agent_in_space management API path (exchanger clients) ───────
 
 
@@ -525,8 +539,10 @@ class _MgmtFakeClient(_FakeClient):
         super().__init__(http)
         self._exchanger = True
         self._mgmt_side_effect = mgmt_side_effect
+        self.mgmt_captured_kwargs = {}
 
     def mgmt_create_agent(self, name, **kwargs):
+        self.mgmt_captured_kwargs = kwargs
         if self._mgmt_side_effect is not None:
             effect = self._mgmt_side_effect
             if isinstance(effect, BaseException):
@@ -546,6 +562,7 @@ def test_mgmt_create_agent_happy_path():
     assert result["id"] == AGENT_ID
     assert result["name"] == "test-agent"
     assert len(http.calls) == 0
+    assert client.mgmt_captured_kwargs.get("agent_type") == "gateway"
 
 
 def test_mgmt_create_agent_unwraps_envelope():
