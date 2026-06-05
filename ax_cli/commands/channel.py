@@ -36,6 +36,34 @@ SEEN_MAX = 500
 CHANNEL_ENV_PATH = Path.home() / ".claude" / "channels" / "ax-channel" / ".env"
 
 
+@dataclass(frozen=True)
+class _ClientProfile:
+    """Per-MCP-client defaults for channel setup."""
+
+    env_dir: Path
+    launch_template: str  # format vars: {mcp_path}, {server_name}
+
+
+_CLIENTS: dict[str, _ClientProfile] = {
+    "claude": _ClientProfile(
+        env_dir=Path.home() / ".claude" / "channels" / "ax-channel",
+        launch_template=(
+            "claude --strict-mcp-config --mcp-config {mcp_path}"
+            " --dangerously-load-development-channels server:{server_name}"
+        ),
+    ),
+}
+
+_SUPPORTED_CLIENTS = sorted(_CLIENTS)
+
+
+def _resolve_client_profile(client: str) -> _ClientProfile:
+    profile = _CLIENTS.get(client.strip().lower())
+    if profile is None:
+        raise typer.BadParameter(f"Unknown --client '{client}'. Supported: {', '.join(_SUPPORTED_CLIENTS)}")
+    return profile
+
+
 def _default_channel_env_path() -> Path:
     override = os.environ.get("AX_CHANNEL_ENV_FILE")
     if override and override.strip():
@@ -379,6 +407,7 @@ def write_channel_setup(
     *,
     agent_name: str,
     workdir: Path,
+    client: str = "claude",
     space_id: str | None = None,
     base_url: str | None = None,
     token_file: Optional[Path] = None,
@@ -389,13 +418,14 @@ def write_channel_setup(
     container_image: str | None = None,
     debug: bool = False,
 ) -> dict[str, Any]:
-    """Write Claude Code MCP + Gateway CLI config and return launch details."""
+    """Write MCP channel config for the given client and return launch details."""
     agent_name = agent_name.strip()
     if not agent_name:
         raise typer.BadParameter("Agent name is required.")
     normalized_mode = mode.strip().lower()
     if normalized_mode not in {"local", "docker"}:
         raise typer.BadParameter("--mode must be local or docker.")
+    client_profile = _resolve_client_profile(client)
 
     defaults = _gateway_agent_channel_defaults(agent_name)
     resolved_space_id = str(space_id or defaults.get("AX_SPACE_ID") or "").strip()
@@ -411,9 +441,7 @@ def write_channel_setup(
 
     target_workdir = workdir.expanduser().resolve()
     mcp_path = target_workdir / ".mcp.json"
-    resolved_env_path = (
-        env_path.expanduser() if env_path else Path.home() / ".claude" / "channels" / "ax-channel" / f"{agent_name}.env"
-    )
+    resolved_env_path = env_path.expanduser() if env_path else client_profile.env_dir / f"{agent_name}.env"
     env_values = {
         "AX_TOKEN_FILE": str(resolved_token_file.expanduser()),
         "AX_BASE_URL": resolved_base_url,
@@ -444,12 +472,13 @@ def write_channel_setup(
     _write_channel_workspace_readme(cli_readme_path, agent_name=agent_name, workdir=target_workdir)
     context_path = _write_channel_workspace_context(target_workdir, agent_name=agent_name)
 
-    launch_command = (
-        f"claude --strict-mcp-config --mcp-config {mcp_path} "
-        f"--dangerously-load-development-channels server:{server_name}"
+    launch_command = client_profile.launch_template.format(
+        mcp_path=mcp_path,
+        server_name=server_name,
     )
     return {
         "agent": agent_name,
+        "client": client.strip().lower(),
         "space_id": resolved_space_id,
         "base_url": resolved_base_url,
         "mode": normalized_mode,
@@ -1379,8 +1408,13 @@ def _sse_loop(bridge: ChannelBridge) -> None:
 
 @app.command("setup")
 def setup_channel(
-    agent: str = typer.Argument(..., help="Agent name to bridge into Claude Code"),
+    agent: str = typer.Argument(..., help="Agent name to configure"),
     workdir: Path = typer.Option(Path.cwd(), "--workdir", help="Directory where .mcp.json should be written"),
+    client: str = typer.Option(
+        "claude",
+        "--client",
+        help=f"MCP client to configure for. Supported: {', '.join(_SUPPORTED_CLIENTS)}",
+    ),
     space_id: str = typer.Option(
         None, "--space-id", "-s", help="Space to bridge; defaults from Gateway row if present"
     ),
@@ -1390,16 +1424,17 @@ def setup_channel(
     ),
     agent_id: str = typer.Option(None, "--agent-id", help="Agent UUID; defaults from Gateway row"),
     server_name: str = typer.Option("ax-channel", "--server-name", help="MCP server name in .mcp.json"),
-    env_path: Optional[Path] = typer.Option(None, "--env-path", help="Per-agent channel env path"),
+    env_path: Optional[Path] = typer.Option(None, "--env-path", help="Per-agent channel env path override"),
     mode: str = typer.Option("local", "--mode", help="MCP command mode: local | docker"),
     container_image: str = typer.Option(None, "--container-image", help="Docker image for --mode docker"),
     debug: bool = typer.Option(False, "--debug", help="Include --debug in the generated MCP command"),
     as_json: bool = JSON_OPTION,
 ):
-    """Write Claude Code MCP config and per-agent env paths for ax-channel."""
+    """Write MCP channel config and per-agent env for ax-channel."""
     payload = write_channel_setup(
         agent_name=agent,
         workdir=workdir,
+        client=client,
         space_id=space_id,
         base_url=base_url,
         token_file=token_file,
@@ -1413,7 +1448,7 @@ def setup_channel(
     if as_json:
         print_json(payload)
         return
-    console.print(f"[green]Claude Code channel config written[/green] for @{payload['agent']}")
+    console.print(f"[green]Channel config written[/green] for @{payload['agent']} (client: {payload['client']})")
     console.print(f"  cli   = {payload['cli_config_path']}")
     console.print(f"  mcp   = {payload['mcp_path']}")
     console.print(f"  env   = {payload['env_path']}")
