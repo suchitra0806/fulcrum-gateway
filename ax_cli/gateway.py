@@ -4709,6 +4709,34 @@ def _render_hermes_plugin_config_yaml(entry: dict[str, Any], *, home: Path, oper
             loaded = None
         if isinstance(loaded, dict):
             cfg = loaded
+    entry_provider = str(entry.get("provider") or "").strip() or None
+    if entry_provider:
+        from ax_cli.commands.gateway import HERMES_KNOWN_PROVIDERS
+
+        provider_info = HERMES_KNOWN_PROVIDERS.get(entry_provider, {})
+        cfg["provider"] = entry_provider
+        if provider_info.get("default_model") and not cfg.get("model"):
+            cfg["model"] = provider_info["default_model"]
+        providers_cfg = cfg.get("providers")
+        if not isinstance(providers_cfg, dict):
+            providers_cfg = {}
+        if entry_provider not in providers_cfg:
+            providers_cfg[entry_provider] = {}
+        prov_block = providers_cfg[entry_provider]
+        if provider_info.get("default_model") and not prov_block.get("default_model"):
+            prov_block["default_model"] = provider_info["default_model"]
+        if provider_info.get("base_url") and not prov_block.get("base_url"):
+            prov_block["base_url"] = provider_info["base_url"]
+        providers_cfg[entry_provider] = prov_block
+        cfg["providers"] = providers_cfg
+        aux = cfg.get("auxiliary")
+        if isinstance(aux, dict):
+            title_gen = aux.get("title_generation")
+            if isinstance(title_gen, dict) and not title_gen.get("provider"):
+                title_gen["provider"] = entry_provider
+                if provider_info.get("default_model") and not title_gen.get("model"):
+                    title_gen["model"] = provider_info["default_model"]
+
     terminal_cfg = cfg.get("terminal")
     if not isinstance(terminal_cfg, dict):
         terminal_cfg = {}
