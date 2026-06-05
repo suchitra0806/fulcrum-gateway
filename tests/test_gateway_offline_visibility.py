@@ -1,15 +1,20 @@
-"""Issue #224: AX_OFFLINE=1 silent-downgrade visibility.
+"""AX_OFFLINE=1 silent-downgrade visibility.
 
-Verifies the two operator-facing surfaces that signal offline mode:
+Verifies the operator-facing surfaces that signal offline mode:
 
 1. `ax gateway start` foreground warning when AX_OFFLINE=1 AND a real
    session file is present (the silent-downgrade danger zone).
 2. `ax gateway status` OFFLINE indicator driven by the marker file the
    daemon writes at run-time (so the status check works even when the
    operator's current shell does not have AX_OFFLINE set).
+3. `ax gateway run` (online path) clears any stale offline-mode marker
+   from a SIGKILL'd previous offline daemon so the status indicator
+   does not lie after a crash.
 """
 
 from __future__ import annotations
+
+from unittest.mock import MagicMock
 
 from typer.testing import CliRunner
 
@@ -32,7 +37,7 @@ def _seed_real_session(tmp_path, monkeypatch) -> None:
     )
 
 
-# ── start warning surface (#224) ─────────────────────────────────────────
+# ── start warning surface ────────────────────────────────────────────────
 
 
 def test_start_warns_when_offline_and_session_both_present(monkeypatch, tmp_path):
@@ -91,7 +96,7 @@ def test_start_no_warning_when_session_only(monkeypatch, tmp_path):
     assert "Warning: AX_OFFLINE=1" not in result.output
 
 
-# ── offline-mode lock helpers (#224) ─────────────────────────────────────
+# ── offline-mode lock helpers ────────────────────────────────────────────
 
 
 def test_write_and_clear_offline_lock_round_trip(monkeypatch, tmp_path):
@@ -120,7 +125,7 @@ def test_clear_offline_lock_is_idempotent_when_missing(monkeypatch, tmp_path):
     assert not gateway_cmd._is_offline_mode_active()
 
 
-# ── status indicator surface (#224) ──────────────────────────────────────
+# ── status indicator surface ─────────────────────────────────────────────
 
 
 def _seed_running_daemon_status(monkeypatch, *, offline: bool):
@@ -188,3 +193,35 @@ def test_status_json_includes_offline_mode_field(monkeypatch, tmp_path):
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["offline_mode"] is True
+
+
+# ── stale-lock cleanup on online start ───────────────────────────────────
+
+
+def test_online_run_clears_stale_offline_lock(monkeypatch, tmp_path):
+    """Starting the daemon in online mode (no AX_OFFLINE) clears any stale
+    lock from a previous offline run that was SIGKILL'd before its finally
+    clause ran. Without this, `ax gateway status` would lie about the
+    daemon's mode for the rest of the session.
+    """
+    monkeypatch.delenv("AX_OFFLINE", raising=False)
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "ax_config"))
+
+    # Simulate a SIGKILL'd previous offline daemon: the lock exists on disk
+    # but no daemon is actually running in offline mode.
+    gateway_cmd._write_offline_mode_lock()
+    assert gateway_cmd._is_offline_mode_active(), "precondition: stale lock present"
+
+    # Stub the heavy daemon-bring-up so the run command can exit cleanly
+    # without spawning anything or requiring a real session.
+    fake_session = {"token": "real", "base_url": "https://paxai.app", "space_id": "s1"}
+    monkeypatch.setattr(gateway_cmd, "_load_gateway_session_or_exit", lambda: fake_session)
+    fake_daemon = MagicMock()
+    fake_daemon.run = MagicMock(return_value=None)
+    monkeypatch.setattr(gateway_cmd, "GatewayDaemon", lambda **kw: fake_daemon)
+
+    result = runner.invoke(app, ["gateway", "run", "--once"])
+
+    assert result.exit_code == 0, result.output
+    assert not gateway_cmd._is_offline_mode_active(), "stale lock should be cleared at the top of the online run path"
+    assert not gateway_cmd._offline_mode_lock_path().exists()

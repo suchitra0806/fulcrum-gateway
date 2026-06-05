@@ -3051,9 +3051,6 @@ def _status_payload(*, activity_limit: int = 10, include_hidden: bool = False) -
         "space_id": (session.get("space_id") if session else None) or fallback_space_id,
         "space_name": session.get("space_name") if session else None,
         "user": session.get("username") if session else None,
-        # Issue #224: surfaces the offline-mode state in the status output so
-        # operators who started the gateway with AX_OFFLINE=1 and later forgot
-        # still see the indicator on every status check.
         "offline_mode": _is_offline_mode_active(),
         "daemon": {
             "running": daemon["running"],
@@ -6440,8 +6437,6 @@ def _offline_mode_lock_path() -> Path:
     decide whether to render the OFFLINE indicator. The status command runs in
     a separate process from the daemon, so it cannot rely on the daemon's
     environment; the file bridges that gap.
-
-    See issue #224.
     """
     return gateway_dir() / "offline-mode.lock"
 
@@ -7754,8 +7749,6 @@ def status(
 
     err_console.print("[bold]ax gateway status[/bold]")
     if payload.get("offline_mode"):
-        # Issue #224: prominent indicator that the running daemon was started
-        # with AX_OFFLINE=1 and is not making any platform calls.
         err_console.print("[bold yellow]  MODE        = OFFLINE (no platform calls; AX_OFFLINE=1)[/bold yellow]")
     err_console.print(f"  gateway_dir = {payload['gateway_dir']}")
     err_console.print(f"  connected   = {payload['connected']}")
@@ -8116,18 +8109,18 @@ def start(
     ui_started = False
     daemon_note: str | None = None
 
-    # Issue #224: warn the operator if AX_OFFLINE=1 is set while a real
-    # session file exists. The daemon's stderr fires inside the spawned
-    # subprocess (buried in daemon.log) so this is the only foreground
-    # signal that the gateway is about to silently downgrade to offline mode.
+    # The daemon's stderr from OfflineAxClient fires inside the spawned
+    # subprocess and lands in daemon.log; without a foreground warning here
+    # the operator gets no signal that the gateway has silently downgraded.
     if session and os.environ.get("AX_OFFLINE"):
+        offline_url = os.environ.get("AX_LOCAL_GATEWAY_URL") or "http://localhost:8765"
         err_console.print(
             f"[bold yellow]Warning: AX_OFFLINE=1 is set AND a real gateway session "
             f"exists at {gateway_core.session_path()}.[/bold yellow]"
         )
         err_console.print(
-            "[yellow]  The gateway will run in offline mode against "
-            "http://localhost:8765 and will NOT make any platform calls.[/yellow]"
+            f"[yellow]  The gateway will run in offline mode against "
+            f"{offline_url} and will NOT make any platform calls.[/yellow]"
         )
         err_console.print(
             "[yellow]  Run [bold]unset AX_OFFLINE[/bold] before starting to use the real platform.[/yellow]"
@@ -8289,8 +8282,6 @@ def run(
             logger=_emit_daemon_log,
             poll_interval=poll_interval,
         )
-        # Issue #224: write the offline-mode marker so `ax gateway status`
-        # can render the OFFLINE indicator. Cleared on shutdown via finally.
         _write_offline_mode_lock()
         try:
             try:
@@ -8305,6 +8296,11 @@ def run(
             _clear_offline_mode_lock()
         return
 
+    # Clear any stale marker from a previous offline run that may have been
+    # SIGKILL'd before its finally clause fired. Without this, an online start
+    # would inherit the stale lock and `ax gateway status` would show OFFLINE
+    # even though the daemon is making real platform calls.
+    _clear_offline_mode_lock()
     _load_gateway_session_or_exit()
     err_console.print("[bold]ax gateway[/bold] — local control plane")
     err_console.print(f"  state_dir = {gateway_dir()}")
