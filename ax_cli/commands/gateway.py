@@ -6469,7 +6469,7 @@ def _offline_message_post(handler: BaseHTTPRequestHandler, body: dict) -> None:
     from ..offline_sse import OfflineAgentQueues, extract_mentions
 
     message = {
-        "id": str(__import__("uuid").uuid4()),
+        "id": str(uuid.uuid4()),
         "content": str(body.get("content") or ""),
         "space_id": str(body.get("space_id") or "00000000-0000-0000-0000-000000000001"),
         "channel": str(body.get("channel") or "main"),
@@ -9591,7 +9591,13 @@ def test_agent(
 @agents_app.command("smoke")
 def smoke_agent(
     name: str = typer.Argument(..., help="Managed agent name"),
-    message: str = typer.Option("ping", "--message", "-m", help="Prompt to send directly to the handler"),
+    message: str = typer.Option(
+        None,
+        "--message",
+        "-m",
+        help="Prompt to send directly to the handler (default: agent's recommended_test_message or 'ping')",
+    ),
+    timeout: int = typer.Option(60, "--timeout", "-t", help="Seconds to wait for a reply from channel/hermes agents"),
     as_json: bool = JSON_OPTION,
 ):
     """Invoke a managed agent's handler in-process and show the response.
@@ -9602,25 +9608,26 @@ def smoke_agent(
     """
     entry = _load_managed_agent_or_exit(name)
     runtime_type = str(entry.get("runtime_type") or "echo").lower()
+    prompt = (message or "").strip() or _recommended_test_message(entry) or "ping"
 
     _channel_runtimes = {"claude_code_channel", "hermes_plugin", "hermes_sentinel", "hermes"}
 
     try:
         if runtime_type == "echo":
-            response = gateway_core._echo_handler(message, entry)
-            result = {"agent": name, "runtime_type": runtime_type, "prompt": message, "response": response}
+            response = gateway_core._echo_handler(prompt, entry)
+            result = {"agent": name, "runtime_type": runtime_type, "prompt": prompt, "response": response}
         elif runtime_type in {"exec", "command"}:
             command = str(entry.get("exec_command") or "").strip()
             if not command:
                 err_console.print("[red]exec runtime requires exec_command in the registry entry.[/red]")
                 raise typer.Exit(1)
-            timeout = (
+            exec_timeout = (
                 gateway_core.runtime_timeout_seconds(entry)
                 if hasattr(gateway_core, "runtime_timeout_seconds")
                 else None
             )
-            response = gateway_core._run_exec_handler(command, message, entry, timeout_seconds=timeout)
-            result = {"agent": name, "runtime_type": runtime_type, "prompt": message, "response": response}
+            response = gateway_core._run_exec_handler(command, prompt, entry, timeout_seconds=exec_timeout)
+            result = {"agent": name, "runtime_type": runtime_type, "prompt": prompt, "response": response}
         elif runtime_type in _channel_runtimes:
             import time as _time
 
@@ -9628,7 +9635,7 @@ def smoke_agent(
 
             gateway_url = os.environ.get("AX_LOCAL_GATEWAY_URL") or "http://localhost:8765"
             payload = {
-                "content": f"@{name} {message}".strip(),
+                "content": f"@{name} {prompt}".strip(),
                 "space_id": "00000000-0000-0000-0000-000000000001",
             }
             try:
@@ -9648,12 +9655,12 @@ def smoke_agent(
                     err_console.print(f"  Agent must be running and subscribed to {gateway_url}")
                 raise typer.Exit(1)
             sent_id = data.get("id")
-            # Poll offline-replies.jsonl for a reply from the agent (up to 60s).
+            # Poll offline-replies.jsonl for a reply from the agent.
             # Record the file position now so we only read lines written after the send.
             replies_path = _offline_replies_path()
             start_pos = replies_path.stat().st_size if replies_path.exists() else 0
             reply_content: str | None = None
-            deadline = _time.monotonic() + 60
+            deadline = _time.monotonic() + timeout
             while _time.monotonic() < deadline:
                 if replies_path.exists():
                     with replies_path.open() as _f:
@@ -9672,10 +9679,10 @@ def smoke_agent(
             result = {
                 "agent": name,
                 "runtime_type": runtime_type,
-                "prompt": message,
+                "prompt": prompt,
                 "delivered": True,
                 "message_id": sent_id,
-                "response": reply_content or "[no reply within 60s — check agent session]",
+                "response": reply_content or f"[no reply within {timeout}s — check agent session]",
             }
         else:
             err_console.print(f"[yellow]smoke not supported for runtime_type={runtime_type!r}[/yellow]")
@@ -9691,7 +9698,7 @@ def smoke_agent(
         print_json(result)
         return
     err_console.print(f"[green]Smoke:[/green] @{name}")
-    err_console.print(f"  prompt    = {message}")
+    err_console.print(f"  prompt    = {prompt}")
     if runtime_type in _channel_runtimes:
         err_console.print(f"  delivered = {result.get('delivered')} (message_id={result.get('message_id')})")
     err_console.print(f"  response  = {result.get('response')}")

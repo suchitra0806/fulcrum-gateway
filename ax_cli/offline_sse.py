@@ -14,7 +14,6 @@ import queue
 import re
 import threading
 
-_OFFLINE_SPACE_ID = "00000000-0000-0000-0000-000000000001"
 _TOKEN_PREFIX = "offline-"
 
 

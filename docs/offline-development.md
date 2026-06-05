@@ -79,7 +79,7 @@ agent received and responded to a message. It is the primary tool for verifying
 a new agent type works end-to-end without a running platform.
 
 ```
-ax gateway agents smoke <name> [--message <text>] [--json]
+ax gateway agents smoke <name> [--message <text>] [--timeout <seconds>] [--json]
 ```
 
 ### Echo and exec agents
@@ -119,9 +119,9 @@ Message posted but @my-agent is not connected.
   Start Claude Code with: AX_BASE_URL=http://localhost:8765 [claude command]
 ```
 
-The `recommended_test_message` for `claude_code_channel` is:
-`Reply with exactly: Gateway test OK.` — running smoke without `--message` uses
-this automatically.
+Running smoke without `--message` uses the agent's `recommended_test_message`
+from the template definition (e.g. `Reply with exactly: Gateway test OK.` for
+`claude_code_channel`), falling back to `ping` if none is set.
 
 Replies are logged to `~/.ax/gateway/offline-replies.jsonl`. Each line is a JSON
 object with `id`, `content`, `author`, `space_id`, and `channel`.

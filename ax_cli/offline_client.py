@@ -176,6 +176,9 @@ class OfflineAxClient:
         metadata: dict | None = None,
         message_type: str = "text",
     ) -> dict:
+        # Unlike other stub methods, this posts to the local gateway HTTP server so
+        # replies from channel/hermes agents reach offline-replies.jsonl. Falls back
+        # to a stub dict if the gateway is unreachable.
         import httpx
 
         body: dict = {"content": content, "space_id": space_id, "channel": channel}
