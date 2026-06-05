@@ -342,7 +342,28 @@ For scripts that parse the JSON output of `ax gateway spaces use --json`:
 - `cli_scope` — `"local"` when the CLI config was written to `./.ax/config.toml`; `"global"` when written to `~/.ax/config.toml` (mirrors the `--global` flag).
 - `gateway_session` — Resolved Gateway session block from `apply_space_to_gateway_session(...)` (`updated`, `space_id`, `daemon_running`, etc.), or `null` when no session is active.
 
-**Migration note (PR #123, closes #82):** `cli_scope` and `gateway_session` are new fields; `session_path` is now nullable (was always-present before). Scripts that read `session_path` should null-check before treating it as a path.
+**Migration note (PR #123, closes #82):** `cli_scope` and `gateway_session` are new fields; `session_path` is now nullable (was always-present before). Scripts that read `session_path` should null-check before treating it as a path:
+
+```bash
+session_path=$(ax gateway spaces use "$SPACE_ID" --json | jq -r '.session_path // empty')
+```
+
+`// empty` produces an empty string (not the literal `"null"`) when the field is absent or null, so a downstream `if [ -n "$session_path" ]` check works correctly.
+
+**`ax spaces use --json` has a different shape.** Both commands write the same stores post-#123, but their JSON contracts differ:
+
+```json
+{
+  "space_id": "<uuid>",
+  "space_label": "<label>",
+  "scope": "local",
+  "bound_agent": "<agent-name or null>",
+  "bound_agent_allowed": true,
+  "gateway_session": { "updated": true, "space_id": "...", ... }
+}
+```
+
+Note `scope` (not `cli_scope`), `space_label` (not `space_name`), and the addition of `bound_agent` / `bound_agent_allowed`. Scripts targeting one command's output should not assume it matches the other.
 
 ---
 
