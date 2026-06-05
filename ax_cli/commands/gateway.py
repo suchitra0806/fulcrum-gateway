@@ -6513,6 +6513,7 @@ def _offline_sse_stream(handler: BaseHTTPRequestHandler, token: str) -> None:
         handler.send_header("Cache-Control", "no-cache")
         handler.send_header("Connection", "keep-alive")
         handler.send_header("X-Accel-Buffering", "no")
+        _send_security_headers(handler)
         handler.end_headers()
         handler.wfile.write(sse_frame("connected", {"agent": agent_name}))
         handler.wfile.flush()
@@ -6532,24 +6533,60 @@ def _offline_sse_stream(handler: BaseHTTPRequestHandler, token: str) -> None:
         bus.unsubscribe(agent_name)
 
 
+def _generate_nonce() -> str:
+    import secrets
+
+    return secrets.token_urlsafe(16)
+
+
+_CSP_STATIC = "default-src 'none'; img-src 'self'; connect-src 'self'; font-src 'none'; frame-ancestors 'none'"
+
+
+def _send_security_headers(handler: BaseHTTPRequestHandler, *, nonce: str | None = None) -> None:
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    handler.send_header("X-Frame-Options", "DENY")
+    if nonce:
+        csp = f"{_CSP_STATIC}; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'"
+    else:
+        csp = _CSP_STATIC
+    handler.send_header("Content-Security-Policy", csp)
+    handler.send_header("Referrer-Policy", "no-referrer")
+    handler.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+    handler.send_header("Cross-Origin-Opener-Policy", "same-origin")
+    handler.send_header("Cross-Origin-Resource-Policy", "same-origin")
+    handler.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+
+
 def _write_json_response(handler: BaseHTTPRequestHandler, payload: dict, *, status: HTTPStatus = HTTPStatus.OK) -> None:
     body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
-    handler.send_response(status.value)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Content-Length", str(len(body)))
-    handler.send_header("Cache-Control", "no-store")
-    handler.end_headers()
-    handler.wfile.write(body)
+    try:
+        handler.send_response(status.value)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.send_header("Cache-Control", "no-store")
+        _send_security_headers(handler)
+        handler.end_headers()
+        handler.wfile.write(body)
+    except (BrokenPipeError, ConnectionResetError):
+        pass
 
 
 def _write_html_response(handler: BaseHTTPRequestHandler, payload: str) -> None:
+    nonce = _generate_nonce()
+    payload = payload.replace("<script>", f'<script nonce="{nonce}">')
+    payload = payload.replace("<script ", f'<script nonce="{nonce}" ')
+    payload = payload.replace("<style>", f'<style nonce="{nonce}">')
     body = payload.encode("utf-8")
-    handler.send_response(HTTPStatus.OK.value)
-    handler.send_header("Content-Type", "text/html; charset=utf-8")
-    handler.send_header("Content-Length", str(len(body)))
-    handler.send_header("Cache-Control", "no-store")
-    handler.end_headers()
-    handler.wfile.write(body)
+    try:
+        handler.send_response(HTTPStatus.OK.value)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.send_header("Cache-Control", "no-store")
+        _send_security_headers(handler, nonce=nonce)
+        handler.end_headers()
+        handler.wfile.write(body)
+    except (BrokenPipeError, ConnectionResetError):
+        pass
 
 
 def _read_json_request(handler: BaseHTTPRequestHandler) -> dict:
@@ -6715,12 +6752,16 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
                 return
             if parsed.path == "/favicon.svg" or parsed.path == "/favicon.ico":
                 body = _GATEWAY_FAVICON_SVG.encode("utf-8")
-                self.send_response(HTTPStatus.OK.value)
-                self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "public, max-age=86400")
-                self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.send_response(HTTPStatus.OK.value)
+                    self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "public, max-age=86400")
+                    _send_security_headers(self)
+                    self.end_headers()
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
                 return
             if parsed.path == "/api/status":
                 query = parse_qs(parsed.query)

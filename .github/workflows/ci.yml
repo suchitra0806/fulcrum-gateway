@@ -2,16 +2,20 @@ name: CI — Tests & Lint
 
 on:
   pull_request:
-    branches: [main, dev/staging]
+    branches: [main]
   push:
-    branches: [main, dev/staging]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v6
@@ -19,6 +23,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: 'pip'
 
       - name: Install dependencies
         run: pip install -e ".[dev]"
@@ -37,12 +42,14 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: 'pip'
 
       - name: Install ruff
         run: pip install ruff
@@ -53,14 +60,30 @@ jobs:
       - name: Ruff format check
         run: ruff format --check ax_cli/
 
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for exposed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: 'pip'
 
       - name: Install package and pip-audit
         run: |
@@ -73,12 +96,14 @@ jobs:
 
   package:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: 'pip'
 
       - name: Install build tools
         run: pip install build twine

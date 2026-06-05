@@ -142,6 +142,41 @@ def _resolve_codex_token() -> str:
     return ""
 
 
+def _read_credential_pool_entry(path: Path, provider: str) -> dict | None:
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    pool = data.get("credential_pool") or {}
+    entries = pool.get(provider)
+    if not entries:
+        return None
+    def _priority(e):
+        try:
+            return int(e.get("priority", 999))
+        except (TypeError, ValueError):
+            return 999
+
+    best = min(entries, key=_priority)
+    return {
+        "api_key": best.get("access_token", ""),
+        "base_url": best.get("base_url", ""),
+    }
+
+
+def _resolve_credential_from_auth_json(provider: str) -> dict:
+    empty = {"api_key": "", "base_url": ""}
+    hermes_home = os.environ.get("HERMES_HOME", "").strip()
+    if hermes_home:
+        result = _read_credential_pool_entry(Path(hermes_home) / "auth.json", provider)
+        if result:
+            return result
+    result = _read_credential_pool_entry(HERMES_AUTH_PATH, provider)
+    if result:
+        return result
+    return empty
+
+
 def _resolve_provider_config(model: str | None) -> dict:
     """Resolve provider, base_url, api_key, and api_mode from model string.
 
@@ -169,11 +204,14 @@ def _resolve_provider_config(model: str | None) -> dict:
             "model": model_name,
         }
     elif provider_hint == "anthropic":
+        env_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        env_base = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+        cred = _resolve_credential_from_auth_json("anthropic") if not env_key else {"api_key": "", "base_url": ""}
         return {
             "provider": "anthropic",
             "api_mode": "anthropic_messages",
-            "base_url": os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
-            "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+            "base_url": env_base or cred.get("base_url") or "https://api.anthropic.com",
+            "api_key": env_key or cred.get("api_key", ""),
             "model": model_name,
         }
     elif provider_hint == "bedrock":
@@ -192,21 +230,27 @@ def _resolve_provider_config(model: str | None) -> dict:
             "_bedrock_region": region,
         }
     elif provider_hint == "openrouter":
+        env_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        env_base = os.environ.get("OPENROUTER_BASE_URL", "").strip()
+        cred = _resolve_credential_from_auth_json("openrouter") if not env_key else {"api_key": "", "base_url": ""}
         return {
             "provider": "openrouter",
             "api_mode": "chat_completions",
-            "base_url": os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-            "api_key": os.environ.get("OPENROUTER_API_KEY", ""),
+            "base_url": env_base or cred.get("base_url") or "https://openrouter.ai/api/v1",
+            "api_key": env_key or cred.get("api_key", ""),
             "model": model_name,
         }
     else:
         # Default: auto-detect based on model name
         if "claude" in model_name.lower():
+            env_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+            env_base = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+            cred = _resolve_credential_from_auth_json("anthropic") if not env_key else {"api_key": "", "base_url": ""}
             return {
                 "provider": "anthropic",
                 "api_mode": "anthropic_messages",
-                "base_url": os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
-                "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+                "base_url": env_base or cred.get("base_url") or "https://api.anthropic.com",
+                "api_key": env_key or cred.get("api_key", ""),
                 "model": model_name,
             }
         return {

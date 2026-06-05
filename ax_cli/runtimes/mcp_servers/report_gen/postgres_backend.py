@@ -25,6 +25,17 @@ from __future__ import annotations
 import os
 from typing import Any
 
+_sql = None
+
+
+def _get_sql():
+    global _sql
+    if _sql is None:
+        from psycopg import sql
+
+        _sql = sql
+    return _sql
+
 
 class PostgresMissing(Exception):
     """Raised when psycopg isn't installed."""
@@ -145,7 +156,12 @@ class PostgresBackend:
                         for col, ref_table, ref_col in cur.fetchall()
                     ]
 
-                    cur.execute(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"')
+                    sql = _get_sql()
+                    cur.execute(  # nosemgrep: sqlalchemy-execute-raw-query
+                        sql.SQL("SELECT COUNT(*) FROM {}.{}").format(
+                            sql.Identifier(schema_name), sql.Identifier(table_name)
+                        )
+                    )
                     row_count = cur.fetchone()[0]
 
                     tables.append(
@@ -173,7 +189,7 @@ class PostgresBackend:
             with psycopg.connect(dsn, autocommit=False) as conn:
                 with conn.cursor() as cur:
                     cur.execute("SET TRANSACTION READ ONLY")
-                    cur.execute(f"SET LOCAL statement_timeout = '{timeout_ms}ms'")
+                    cur.execute("SET LOCAL statement_timeout = %s", (f"{timeout_ms}ms",))
                     cur.execute(sql)
                     columns = [d.name for d in (cur.description or [])]
                     rows = []
