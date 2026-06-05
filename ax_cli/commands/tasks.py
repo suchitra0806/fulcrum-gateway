@@ -303,7 +303,7 @@ def create(
         )
         task = data.get("task", data)
         if as_json:
-            print_json(data)
+            print_json(task)
         else:
             tid = str(task.get("id", ""))[:8] if isinstance(task, dict) else ""
             label = str(task.get("title") or title) if isinstance(task, dict) else title
@@ -482,10 +482,11 @@ def update(
             data = client.update_task(task_id, **fields)
         except httpx.HTTPStatusError as e:
             handle_error(e)
+    task = data.get("task", data) if isinstance(data, dict) else data
     if as_json:
-        print_json(data)
+        print_json(task)
     else:
-        print_kv(data)
+        print_kv(task)
 
 
 def _resolve_update_assignee_id(client, task_id: str, assignee: str) -> str:

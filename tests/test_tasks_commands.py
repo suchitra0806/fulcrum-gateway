@@ -145,7 +145,9 @@ def test_tasks_create_uses_gateway_local_identity(monkeypatch):
         "space_id": "space-from-config",
     }
     payload = json.loads(result.output)
-    assert payload["task"]["id"] == "task-1"
+    # Gateway create --json emits the flat task, not the {"task": {...}} envelope (#81).
+    assert payload["id"] == "task-1"
+    assert "task" not in payload
 
 
 def test_tasks_create_human_output_includes_resolved_space(monkeypatch):
@@ -649,3 +651,101 @@ def test_tasks_get_handles_flat_response(monkeypatch):
     payload = json.loads(result.stdout)
     assert payload["id"] == "task-42"
     assert payload["title"] == "Flat"
+
+
+# ── #81: unwrap {"task": ...} envelope in update + gateway create ────────────
+
+
+def test_tasks_update_json_unwraps_task_wrapper(monkeypatch):
+    """`tasks update --json` returns the flat task dict (not {"task": {...}})."""
+
+    class FakeClient:
+        def update_task(self, task_id, **fields):
+            return {"task": {"id": task_id, "title": "Demo", "status": fields.get("status", "open")}}
+
+    monkeypatch.setattr("ax_cli.commands.tasks.get_client", lambda: FakeClient())
+    monkeypatch.setattr("ax_cli.commands.tasks.resolve_gateway_config", lambda: None)
+
+    result = runner.invoke(app, ["tasks", "update", "task-42", "--status", "done", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    # Assert the wrapper is gone (no "task" key) and the unwrapped fields are
+    # present, without pinning the exact keyset — the API may add fields like
+    # updated_at without breaking the unwrap behavior under test.
+    assert "task" not in payload
+    assert {"id", "title", "status"}.issubset(payload.keys())
+    assert payload["id"] == "task-42"
+    assert payload["status"] == "done"
+
+
+def test_tasks_update_default_renders_fields_not_dict_repr(monkeypatch):
+    """`tasks update` default output prints individual fields, not a Python
+    dict.__str__ of the wrapped payload."""
+
+    class FakeClient:
+        def update_task(self, task_id, **fields):
+            return {"task": {"id": task_id, "title": "Demo title", "status": "done"}}
+
+    monkeypatch.setattr("ax_cli.commands.tasks.get_client", lambda: FakeClient())
+    monkeypatch.setattr("ax_cli.commands.tasks.resolve_gateway_config", lambda: None)
+
+    result = runner.invoke(app, ["tasks", "update", "task-42", "--status", "done"])
+    assert result.exit_code == 0, result.output
+    assert "{'id'" not in result.output
+    assert '{"id"' not in result.output
+    assert "Demo title" in result.output
+    assert "status" in result.output
+
+
+def test_tasks_update_handles_flat_response(monkeypatch):
+    """When update returns a flat task (no wrapper), the unwrap is a no-op."""
+
+    class FakeClient:
+        def update_task(self, task_id, **fields):
+            return {"id": task_id, "title": "Flat", "status": "done"}
+
+    monkeypatch.setattr("ax_cli.commands.tasks.get_client", lambda: FakeClient())
+    monkeypatch.setattr("ax_cli.commands.tasks.resolve_gateway_config", lambda: None)
+
+    result = runner.invoke(app, ["tasks", "update", "task-42", "--status", "done", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["id"] == "task-42"
+    assert payload["title"] == "Flat"
+
+
+def test_tasks_update_through_gateway_unwraps_task_wrapper(monkeypatch):
+    """The gateway update path unwraps the {"task": {...}} envelope too."""
+    monkeypatch.setattr(
+        "ax_cli.commands.tasks.resolve_gateway_config",
+        lambda: {"url": "http://127.0.0.1:8765", "agent_name": "codex-pass-through", "space_id": "space-1"},
+    )
+    monkeypatch.setattr(
+        "ax_cli.commands.tasks._gateway_local_call",
+        lambda **kwargs: {"task": {"id": kwargs["args"]["task_id"], "title": "GW", "status": "done"}},
+    )
+
+    result = runner.invoke(app, ["tasks", "update", "task-7", "--status", "done", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["id"] == "task-7"
+    assert "task" not in payload
+
+
+def test_tasks_create_through_gateway_unwraps_task_wrapper(monkeypatch):
+    """The gateway create path emits the flat task, not the envelope (#81)."""
+    monkeypatch.setattr(
+        "ax_cli.commands.tasks.resolve_gateway_config",
+        lambda: {"url": "http://127.0.0.1:8765", "agent_name": "codex-pass-through", "space_id": "space-1"},
+    )
+    monkeypatch.setattr(
+        "ax_cli.commands.tasks._gateway_local_task_create",
+        lambda **kwargs: {"task": {"id": "task-9", "title": kwargs["title"], "priority": "high"}},
+    )
+
+    result = runner.invoke(app, ["tasks", "create", "Ship it", "--priority", "high", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["id"] == "task-9"
+    assert payload["title"] == "Ship it"
+    assert "task" not in payload
