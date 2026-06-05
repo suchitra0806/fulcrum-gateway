@@ -757,6 +757,7 @@ def create_agent(
                 space_id=space_id,
                 enable_cloud_agent=cloud,
                 can_manage_agents=can_manage_agents,
+                agent_type="direct",
             )
     except httpx.HTTPStatusError as e:
         handle_error(e)
