@@ -602,6 +602,72 @@ class TestResolveSpaceId:
 
         assert resolve_space_id(FakeClient()) == "agent-home-space"
 
+    def test_config_uuid_returned_when_still_valid(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("AX_SPACE", raising=False)
+        monkeypatch.delenv("AX_SPACE_ID", raising=False)
+        local_ax = tmp_path / ".ax"
+        local_ax.mkdir()
+        (local_ax / "config.toml").write_text('space_id = "11111111-1111-4111-8111-111111111111"\n')
+        monkeypatch.chdir(tmp_path)
+
+        class FakeClient:
+            def list_spaces(self):
+                return {"spaces": [{"id": "11111111-1111-4111-8111-111111111111", "name": "Default"}]}
+
+        assert resolve_space_id(FakeClient()) == "11111111-1111-4111-8111-111111111111"
+
+    def test_stale_config_uuid_falls_back_to_single_space(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("AX_SPACE", raising=False)
+        monkeypatch.delenv("AX_SPACE_ID", raising=False)
+        local_ax = tmp_path / ".ax"
+        local_ax.mkdir()
+        (local_ax / "config.toml").write_text('space_id = "00000000-0000-4000-8000-000000000000"\n')
+        monkeypatch.chdir(tmp_path)
+
+        class FakeClient:
+            def list_spaces(self):
+                return {"spaces": [{"id": "22222222-2222-4222-8222-222222222222", "name": "Default"}]}
+
+        assert resolve_space_id(FakeClient()) == "22222222-2222-4222-8222-222222222222"
+        assert "no longer exists" in capsys.readouterr().err
+
+    def test_stale_config_uuid_ambiguous_fails_closed(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("AX_SPACE", raising=False)
+        monkeypatch.delenv("AX_SPACE_ID", raising=False)
+        local_ax = tmp_path / ".ax"
+        local_ax.mkdir()
+        (local_ax / "config.toml").write_text('space_id = "00000000-0000-4000-8000-000000000000"\n')
+        monkeypatch.chdir(tmp_path)
+
+        class FakeClient:
+            def list_spaces(self):
+                return {
+                    "spaces": [
+                        {"id": "22222222-2222-4222-8222-222222222222", "name": "A"},
+                        {"id": "33333333-3333-4333-8333-333333333333", "name": "B"},
+                    ]
+                }
+
+        with pytest.raises(Exit):
+            resolve_space_id(FakeClient())
+        err = capsys.readouterr().err
+        assert "no longer exists" in err
+
+    def test_stale_config_uuid_trusted_when_listing_fails(self, tmp_path, monkeypatch):
+        # If the space list can't be fetched (offline), trust the pin rather than block.
+        monkeypatch.delenv("AX_SPACE", raising=False)
+        monkeypatch.delenv("AX_SPACE_ID", raising=False)
+        local_ax = tmp_path / ".ax"
+        local_ax.mkdir()
+        (local_ax / "config.toml").write_text('space_id = "44444444-4444-4444-8444-444444444444"\n')
+        monkeypatch.chdir(tmp_path)
+
+        class FakeClient:
+            def list_spaces(self):
+                raise RuntimeError("network down")
+
+        assert resolve_space_id(FakeClient()) == "44444444-4444-4444-8444-444444444444"
+
     def test_env_space_slug_resolves_to_space_id(self, monkeypatch):
         monkeypatch.setenv("AX_SPACE", "ax-cli-dev")
         monkeypatch.delenv("AX_SPACE_ID", raising=False)
