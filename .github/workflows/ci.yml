@@ -61,6 +61,7 @@ jobs:
         run: ruff format --check ax_cli/
 
   secrets:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
