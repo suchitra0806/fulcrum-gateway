@@ -430,7 +430,16 @@ def runtime_type_successor(runtime_type: str | None) -> str | None:
 
 def runtime_type_list() -> list[dict[str, Any]]:
     catalog = runtime_type_catalog()
-    ordered_ids = ["echo", "exec", "hermes_plugin", "sentinel_hermes_sdk", "sentinel_vendor_sdk", "sentinel_cli", "claude_code_channel", "inbox"]
+    ordered_ids = [
+        "echo",
+        "exec",
+        "hermes_plugin",
+        "sentinel_hermes_sdk",
+        "sentinel_vendor_sdk",
+        "sentinel_cli",
+        "claude_code_channel",
+        "inbox",
+    ]
     return [catalog[runtime_id] for runtime_id in ordered_ids if runtime_id in catalog]
 
 
@@ -440,7 +449,16 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
     composio_skill_path = _gateway_composio_connectors_skill_path()
     runtime_signals = {
         key: runtime_type_definition(key)["signals"]
-        for key in ("echo", "exec", "hermes_plugin", "sentinel_hermes_sdk", "sentinel_vendor_sdk", "sentinel_cli", "claude_code_channel", "inbox")
+        for key in (
+            "echo",
+            "exec",
+            "hermes_plugin",
+            "sentinel_hermes_sdk",
+            "sentinel_vendor_sdk",
+            "sentinel_cli",
+            "claude_code_channel",
+            "inbox",
+        )
     }
     return {
         "echo_test": {
