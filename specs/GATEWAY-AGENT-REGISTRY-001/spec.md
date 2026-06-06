@@ -65,7 +65,7 @@ Canonical row for one agent identity.
   "space_id": "uuid",
   "base_url": "https://paxai.app",
   "template_id": "hermes",
-  "runtime_type": "hermes_sentinel",
+  "runtime_type": "sentinel_hermes_sdk",
   "capabilities": ["reply", "tool_events", "shell"],
   "profile": {
     "bio": "Coding sentinel for Gateway and CLI work.",

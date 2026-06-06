@@ -1622,7 +1622,7 @@ def test_gateway_local_connect_infers_home_space_from_agent_rows(monkeypatch, tm
             "name": "demo-hermes",
             "agent_id": "agent-existing",
             "space_id": "space-from-row",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
         }
     ]
     gateway_core.save_gateway_registry(registry)
@@ -1793,7 +1793,7 @@ def test_gateway_local_connect_rejects_registry_ref_for_managed_runtime(monkeypa
             "agent_id": "agent-hermes-1",
             "space_id": "space-1",
             "template_id": "hermes",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
             "install_id": "install-hermes-1",
         }
     ]
@@ -2557,13 +2557,13 @@ def test_hermes_sentinel_env_rejects_user_bootstrap_pat(tmp_path):
     token_file.write_text("axp_u_user.secret")
 
     with pytest.raises(ValueError, match="agent-bound token"):
-        gateway_core._build_hermes_sentinel_env(
+        gateway_core._build_sentinel_vendor_sdk_env(
             {
                 "name": "dev_sentinel",
                 "agent_id": "agent-1",
                 "space_id": "space-1",
                 "base_url": "https://paxai.app",
-                "runtime_type": "hermes_sentinel",
+                "runtime_type": "sentinel_vendor_sdk",
                 "token_file": str(token_file),
                 "workdir": str(tmp_path / "dev_sentinel"),
             }
@@ -2978,33 +2978,14 @@ def test_managed_sentinel_cli_runtime_resumes_agent_session(tmp_path, monkeypatc
             if len(popen_calls) == 1:
                 self.stdout = _FakePipe(
                     [
-                        json.dumps({"type": "thread.started", "thread_id": "thread-1"}),
-                        json.dumps(
-                            {
-                                "type": "item.started",
-                                "item": {"type": "command_execution", "id": "tool-1", "command": "pwd"},
-                            }
-                        ),
-                        json.dumps(
-                            {
-                                "type": "item.completed",
-                                "item": {
-                                    "type": "command_execution",
-                                    "id": "tool-1",
-                                    "command": "pwd",
-                                    "exit_code": 0,
-                                    "aggregated_output": "/tmp",
-                                },
-                            }
-                        ),
-                        json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "remembered"}}),
+                        json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "remembered"}]}}),
+                        json.dumps({"type": "result", "result": "remembered", "session_id": "sess-1"}),
                     ]
                 )
             else:
                 self.stdout = _FakePipe(
                     [
-                        json.dumps({"type": "thread.started", "thread_id": "thread-1"}),
-                        json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "cobalt"}}),
+                        json.dumps({"type": "result", "result": "cobalt", "session_id": "sess-1"}),
                     ]
                 )
 
@@ -3023,7 +3004,6 @@ def test_managed_sentinel_cli_runtime_resumes_agent_session(tmp_path, monkeypatc
             "space_id": "space-1",
             "base_url": "https://paxai.app",
             "runtime_type": "sentinel_cli",
-            "sentinel_runtime": "codex",
             "workdir": str(tmp_path),
             "token_file": str(token_file),
         },
@@ -3036,17 +3016,13 @@ def test_managed_sentinel_cli_runtime_resumes_agent_session(tmp_path, monkeypatc
 
     assert first == "remembered"
     assert second == "cobalt"
-    assert "resume" not in popen_calls[0]
-    assert "resume" in popen_calls[1]
-    assert "thread-1" in popen_calls[1]
+    assert "--resume" not in popen_calls[0]
+    assert "--resume" in popen_calls[1]
+    assert "sess-1" in popen_calls[1]
     assert [row["status"] for row in shared.processing] == [
         "thinking",
-        "tool_call",
-        "tool_complete",
         "thinking",
     ]
-    assert shared.tool_calls[0]["tool_name"] == "shell"
-    assert shared.tool_calls[0]["message_id"] == "msg-1"
 
 
 def test_sentinel_claude_command_is_current_claude_code_compatible(tmp_path, monkeypatch):
@@ -3065,7 +3041,7 @@ def test_sentinel_claude_command_is_current_claude_code_compatible(tmp_path, mon
     )
 
     assert cmd[:5] == ["claude", "-p", "--output-format", "stream-json", "--verbose"]
-    assert "--dangerously-skip-permissions" in cmd
+    assert "--dangerously-skip-permissions" not in cmd
     assert cmd[cmd.index("--add-dir") + 1] == str(workdir)
     assert "/home/ax-agent/shared/repos" not in cmd
     assert cmd[cmd.index("--resume") + 1] == "session-1"
@@ -3132,7 +3108,8 @@ while True:
             "agent_id": "agent-1",
             "space_id": "space-1",
             "base_url": "https://dev.paxai.app",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
+            "sentinel_sdk_runtime": "openai_sdk",
             "template_id": "hermes",
             "workdir": str(workdir),
             "token_file": str(token_file),
@@ -3158,7 +3135,69 @@ while True:
     assert env["AX_SPACE_ID"] == "space-1"
     assert env["AX_CONFIG_DIR"] == str(workdir / ".ax")
     assert snapshot["effective_state"] == "running"
-    assert snapshot["current_activity"] == "Hermes sentinel listener running"
+    assert snapshot["current_activity"] == "Sentinel listener running"
+
+
+def test_managed_sentinel_hermes_sdk_runtime_always_uses_hermes_sdk_runtime(tmp_path, monkeypatch):
+    """The dispatch layer must hardcode --runtime hermes_sdk for sentinel_hermes_sdk
+    agents — sentinel_sdk_runtime is irrelevant and not consulted.  Regression
+    guard for the architectural boundary introduced in ADR-012 decision 5."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+    token_file = tmp_path / "token"
+    token_file.write_text("axp_a_agent.secret")
+    workdir = tmp_path / "agents" / "hermes_sdk_agent"
+    workdir.mkdir(parents=True)
+    script = tmp_path / "agents" / "claude_agent_v2.py"
+    observed = tmp_path / "observed.json"
+    monkeypatch.setenv("TEST_HERMES_SDK_OBSERVED", str(observed))
+    script.write_text(
+        """
+import json
+import os
+import sys
+import time
+
+path = os.environ["TEST_HERMES_SDK_OBSERVED"]
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump({"argv": sys.argv}, handle)
+while True:
+    time.sleep(1)
+""".strip()
+    )
+    hermes_repo = tmp_path / "hermes-agent"
+    hermes_repo.mkdir()
+
+    runtime = gateway_core.ManagedAgentRuntime(
+        {
+            "name": "hermes_sdk_agent",
+            "agent_id": "agent-2",
+            "space_id": "space-2",
+            "base_url": "https://dev.paxai.app",
+            "runtime_type": "sentinel_hermes_sdk",
+            "workdir": str(workdir),
+            "token_file": str(token_file),
+            "hermes_repo_path": str(hermes_repo),
+            "hermes_python": sys.executable,
+            "log_path": str(tmp_path / "hermes.log"),
+        }
+    )
+
+    runtime.start()
+    deadline = time.time() + 3.0
+    while time.time() < deadline and not observed.exists():
+        time.sleep(0.05)
+    runtime.stop()
+
+    assert observed.exists(), "sentinel_hermes_sdk process did not start — check dispatch guard"
+    data = json.loads(observed.read_text())
+    assert "--runtime" in data["argv"]
+    runtime_idx = data["argv"].index("--runtime") + 1
+    assert data["argv"][runtime_idx] == "hermes_sdk", (
+        f"Expected --runtime hermes_sdk but got {data['argv'][runtime_idx]!r}; "
+        "dispatch must hardcode hermes_sdk, not consult sentinel_sdk_runtime"
+    )
 
 
 def test_managed_inbox_runtime_queues_message_without_reply(tmp_path, monkeypatch):
@@ -3898,16 +3937,19 @@ def test_gateway_runtime_types_command_json():
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     ids = [item["id"] for item in payload["runtime_types"]]
-    assert ids == ["echo", "exec", "hermes_plugin", "hermes_sentinel", "sentinel_cli", "claude_code_channel", "inbox"]
+    assert ids == ["echo", "exec", "hermes_plugin", "sentinel_hermes_sdk", "sentinel_vendor_sdk", "sentinel_cli", "claude_code_channel", "inbox"]
     exec_type = next(item for item in payload["runtime_types"] if item["id"] == "exec")
     assert exec_type["signals"]["activity"]
     assert exec_type["examples"]
     plugin_type = next(item for item in payload["runtime_types"] if item["id"] == "hermes_plugin")
     assert plugin_type["kind"] == "supervised_process"
     assert plugin_type.get("deprecated") is not True
-    hermes_type = next(item for item in payload["runtime_types"] if item["id"] == "hermes_sentinel")
-    assert hermes_type["kind"] == "supervised_process"
-    assert hermes_type.get("deprecated") is True
+    hermes_sdk_type = next(item for item in payload["runtime_types"] if item["id"] == "sentinel_hermes_sdk")
+    assert hermes_sdk_type["kind"] == "supervised_process"
+    assert hermes_sdk_type.get("deprecated") is not True
+    vendor_sdk_type = next(item for item in payload["runtime_types"] if item["id"] == "sentinel_vendor_sdk")
+    assert vendor_sdk_type["kind"] == "supervised_process"
+    assert vendor_sdk_type.get("deprecated") is not True
     sentinel_type = next(item for item in payload["runtime_types"] if item["id"] == "sentinel_cli")
     assert sentinel_type["signals"]["tools"]
     channel_type = next(item for item in payload["runtime_types"] if item["id"] == "claude_code_channel")
@@ -3978,7 +4020,7 @@ def test_gateway_ui_handler_serves_status_and_agent_detail(monkeypatch, tmp_path
             runtime_types = client.get("/api/runtime-types")
             assert runtime_types.status_code == 200
             runtime_payload = runtime_types.json()
-            assert runtime_payload["count"] == 7  # +hermes_plugin
+            assert runtime_payload["count"] == 8  # +hermes_plugin, +sentinel_hermes_sdk
             assert runtime_payload["runtime_types"][1]["id"] == "exec"
 
             templates = client.get("/api/templates")
@@ -5458,7 +5500,7 @@ def test_gateway_ui_external_runtime_announce_marks_plugin_active(monkeypatch, t
             "space_id": "space-1",
             "base_url": "https://paxai.app",
             "template_id": "hermes",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
             "desired_state": "running",
             "effective_state": "stopped",
             "transport": "gateway",
@@ -5521,7 +5563,7 @@ def test_gateway_ui_external_runtime_announce_respects_operator_stop(monkeypatch
             "space_id": "space-1",
             "base_url": "https://paxai.app",
             "template_id": "hermes",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
             "desired_state": "stopped",
             "effective_state": "stopped",
             "transport": "gateway",
@@ -5576,7 +5618,7 @@ def test_gateway_daemon_does_not_launch_managed_process_for_external_runtime(tmp
     entry = {
         "name": "nova",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "desired_state": "running",
         "effective_state": "running",
         "external_runtime_state": "connected",
@@ -5597,7 +5639,7 @@ def test_gateway_daemon_external_runtime_respects_operator_stop(tmp_path):
     entry = {
         "name": "nova",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "desired_state": "stopped",
         "effective_state": "running",
         "external_runtime_state": "connected",
@@ -5626,7 +5668,7 @@ def test_gateway_daemon_preserves_stale_external_plugin_without_legacy_fallback(
     entry = {
         "name": "nova",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "desired_state": "running",
         "effective_state": "running",
         "external_runtime_managed": True,
@@ -5651,7 +5693,7 @@ def test_gateway_daemon_marks_stopped_when_desired_state_is_stopped():
     entry = {
         "name": "nova",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "desired_state": "stopped",
         "effective_state": "running",
         "runtime_instance_id": "old-runtime",
@@ -6416,7 +6458,7 @@ def _stale_hermes_entry(
         "agent_id": agent_id,
         "space_id": "space-test",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "effective_state": "running",
         "liveness": liveness,
         "last_seen_age_seconds": age_seconds,
@@ -6568,9 +6610,9 @@ def test_hermes_command_includes_composed_system_prompt():
         "active_space_name": "GBR",
         "base_url": "https://paxai.app",
         "workdir": "/tmp/hermes-fusion",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
     }
-    cmd = gateway_core._build_hermes_sentinel_cmd(entry)
+    cmd = gateway_core._build_sentinel_vendor_sdk_cmd(entry, sdk_runtime="openai_sdk")
     assert "--system-prompt" in cmd
     payload_index = cmd.index("--system-prompt") + 1
     payload = cmd[payload_index]
@@ -6728,7 +6770,7 @@ def test_agent_workspace_context_text_includes_operator_prompt():
 def test_agent_workspace_context_text_without_prompt_shows_how_to_set_one():
     """Without a system_prompt, the doc points the operator at the
     `ax gateway agents update --system-prompt` command."""
-    entry = {"name": "no-persona", "template_id": "hermes", "runtime_type": "hermes_sentinel"}
+    entry = {"name": "no-persona", "template_id": "hermes", "runtime_type": "sentinel_vendor_sdk"}
     text = gateway_cmd._agent_workspace_context_text(entry, workdir="/tmp/no-persona")
     assert "No operator-supplied system prompt is configured" in text
     assert "ax gateway agents update no-persona --system-prompt" in text
@@ -6841,7 +6883,7 @@ def test_status_payload_filters_hidden_by_default(monkeypatch, tmp_path):
         "name": "hermes-live",
         "agent_id": "agent-live",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "effective_state": "running",
         "liveness": "connected",
         "last_seen_age_seconds": 5.0,
@@ -6865,7 +6907,7 @@ def test_status_payload_include_hidden_returns_all(monkeypatch, tmp_path):
         "name": "hermes-live",
         "agent_id": "agent-live",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "effective_state": "running",
         "liveness": "connected",
         "last_seen_age_seconds": 5.0,
@@ -7099,7 +7141,7 @@ def test_remove_managed_agent_calls_delete_agent_then_local_remove(monkeypatch, 
         "agent_id": "agent-doomed",
         "space_id": "space-x",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "token_file": str(token_path),
     }
     gateway_core.save_gateway_registry({"agents": [entry]})
@@ -7121,7 +7163,7 @@ def test_remove_managed_agent_proceeds_on_upstream_failure(monkeypatch, tmp_path
         "agent_id": "agent-doomed",
         "space_id": "space-x",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "token_file": str(token_path),
     }
     gateway_core.save_gateway_registry({"agents": [entry]})
@@ -7144,7 +7186,7 @@ def test_legacy_entry_without_lifecycle_phase_loads_as_active(monkeypatch, tmp_p
         "name": "hermes-legacy",
         "agent_id": "agent-legacy",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "effective_state": "running",
         "liveness": "stale",
         "last_seen_age_seconds": 30 * 60,
@@ -7190,7 +7232,7 @@ def test_archive_managed_agent_sets_phase_and_stops_runtime(monkeypatch, tmp_pat
         "name": "probe-doomed",
         "agent_id": "agent-doomed",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "desired_state": "running",
         "effective_state": "running",
         "liveness": "connected",
@@ -7218,7 +7260,7 @@ def test_archive_managed_agent_idempotent(monkeypatch, tmp_path):
         "name": "probe-already",
         "agent_id": "agent-already",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "lifecycle_phase": "archived",
         "archived_at": gateway_core._now_iso(),
         "archived_reason": "first call",
@@ -7240,7 +7282,7 @@ def test_archive_then_restore_returns_to_prior_desired_state(monkeypatch, tmp_pa
         "name": "probe-roundtrip",
         "agent_id": "agent-rt",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "desired_state": "running",
         "effective_state": "running",
         "liveness": "connected",
@@ -7266,7 +7308,7 @@ def test_restore_unarchived_agent_is_noop(monkeypatch, tmp_path):
         "name": "probe-active",
         "agent_id": "agent-active",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "lifecycle_phase": "active",
         "desired_state": "running",
     }
@@ -7304,7 +7346,7 @@ def test_save_registry_preserves_restore_written_during_daemon_tick(monkeypatch,
                 "name": "race-restore",
                 "agent_id": "agent-restore",
                 "template_id": "hermes",
-                "runtime_type": "hermes_sentinel",
+                "runtime_type": "sentinel_vendor_sdk",
                 "lifecycle_phase": "archived",
                 "archived_at": gateway_core._now_iso(),
                 "archived_reason": "earlier",
@@ -7348,7 +7390,7 @@ def test_save_registry_preserves_other_writer_added_row(monkeypatch, tmp_path):
                 "name": "incumbent",
                 "agent_id": "agent-incumbent",
                 "template_id": "hermes",
-                "runtime_type": "hermes_sentinel",
+                "runtime_type": "sentinel_vendor_sdk",
                 "lifecycle_phase": "active",
                 "desired_state": "running",
             }
@@ -7408,7 +7450,7 @@ def test_save_registry_preserves_other_writer_row_deletion(monkeypatch, tmp_path
                 "name": "incumbent",
                 "agent_id": "agent-incumbent",
                 "template_id": "hermes",
-                "runtime_type": "hermes_sentinel",
+                "runtime_type": "sentinel_vendor_sdk",
                 "lifecycle_phase": "active",
                 "desired_state": "running",
             },
@@ -7416,7 +7458,7 @@ def test_save_registry_preserves_other_writer_row_deletion(monkeypatch, tmp_path
                 "name": "to-remove",
                 "agent_id": "agent-to-remove",
                 "template_id": "hermes",
-                "runtime_type": "hermes_sentinel",
+                "runtime_type": "sentinel_vendor_sdk",
                 "lifecycle_phase": "active",
                 "desired_state": "running",
             },
@@ -7459,7 +7501,7 @@ def test_save_registry_keeps_caller_added_row_when_disk_lost_it(monkeypatch, tmp
                 "name": "incumbent",
                 "agent_id": "agent-incumbent",
                 "template_id": "hermes",
-                "runtime_type": "hermes_sentinel",
+                "runtime_type": "sentinel_vendor_sdk",
                 "lifecycle_phase": "active",
                 "desired_state": "running",
             }
@@ -7503,7 +7545,7 @@ def test_save_registry_preserves_other_writer_field_update(monkeypatch, tmp_path
                 "name": "race-stop",
                 "agent_id": "agent-race-stop",
                 "template_id": "hermes",
-                "runtime_type": "hermes_sentinel",
+                "runtime_type": "sentinel_vendor_sdk",
                 "lifecycle_phase": "active",
                 "desired_state": "running",
                 "effective_state": "running",
@@ -7575,7 +7617,7 @@ def test_save_registry_preserves_archive_written_during_daemon_tick(monkeypatch,
                 "name": "race-probe",
                 "agent_id": "agent-race",
                 "template_id": "hermes",
-                "runtime_type": "hermes_sentinel",
+                "runtime_type": "sentinel_vendor_sdk",
                 "lifecycle_phase": "active",
                 "desired_state": "running",
                 "liveness": "connected",
@@ -7611,7 +7653,7 @@ def test_status_payload_partitions_archived_separately(monkeypatch, tmp_path):
         "name": "hermes-live",
         "agent_id": "agent-live",
         "template_id": "hermes",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "effective_state": "running",
         "liveness": "connected",
         "last_seen_age_seconds": 5.0,
@@ -7651,7 +7693,7 @@ def test_runtime_start_skips_when_in_setup_error_backoff(monkeypatch, tmp_path):
             "agent_id": "agent-stuck",
             "space_id": "space-1",
             "base_url": "https://paxai.app",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
             "token_file": str(token_file),
             # Simulates the entry state after a setup error: error 1s ago,
             # well within the 30s backoff window.
@@ -7692,7 +7734,7 @@ def test_runtime_start_proceeds_after_setup_error_backoff_expires(monkeypatch, t
             "agent_id": "agent-expired",
             "space_id": "space-1",
             "base_url": "https://paxai.app",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
             "token_file": str(token_file),
             "last_runtime_error_at": long_ago,
         },
@@ -8114,7 +8156,7 @@ def test_setup_error_backoff_escalates(monkeypatch, tmp_path):
             "agent_id": "agent-esc",
             "space_id": "space-1",
             "base_url": "https://paxai.app",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
             "token_file": str(token_file),
             "last_runtime_error_at": error_at,
             "consecutive_setup_errors": 3,
@@ -8144,7 +8186,7 @@ def test_setup_error_backoff_clamps_at_schedule_max(monkeypatch, tmp_path):
             "agent_id": "agent-clamp",
             "space_id": "space-1",
             "base_url": "https://paxai.app",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
             "token_file": str(token_file),
             "last_runtime_error_at": error_at,
             "consecutive_setup_errors": 100,
@@ -8176,7 +8218,7 @@ def test_auto_disable_after_max_consecutive_errors(monkeypatch, tmp_path):
             "agent_id": "agent-dis",
             "space_id": "space-1",
             "base_url": "https://paxai.app",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
             "token_file": str(token_file),
             "last_runtime_error_at": long_ago,
             "consecutive_setup_errors": gateway_core.SETUP_ERROR_MAX_CONSECUTIVE - 1,
@@ -8206,7 +8248,7 @@ def test_disabled_runtime_start_is_noop(monkeypatch, tmp_path):
             "agent_id": "agent-noop",
             "space_id": "space-1",
             "base_url": "https://paxai.app",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
             "token_file": str(tmp_path / "tok"),
             "setup_disabled": True,
         },
@@ -8268,7 +8310,7 @@ def test_proactive_binary_check_catches_missing_python(monkeypatch, tmp_path):
             "agent_id": "agent-bin",
             "space_id": "space-1",
             "base_url": "https://paxai.app",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
             "token_file": str(tmp_path / "tok"),
             "hermes_python": missing_python,
             "last_runtime_error_at": long_ago,
@@ -8307,7 +8349,7 @@ def test_proactive_binary_check_skips_relative_path(monkeypatch, tmp_path):
             "agent_id": "agent-rel",
             "space_id": "space-1",
             "base_url": "https://paxai.app",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_vendor_sdk",
             "token_file": str(tmp_path / "tok"),
             "hermes_python": "python3",
             "workdir": str(workdir),
@@ -9500,31 +9542,38 @@ def test_gateway_local_connect_404_uses_actionable_guidance(monkeypatch):
 # falls back to the historical default so existing setups are unchanged.
 
 
-def test_hermes_sentinel_sdk_runtime_defaults_to_hermes_sdk_when_unset():
-    """Without any of the override fields, behavior must match the historical
-    hardcoded value so no operator's existing managed-agent registration
-    changes meaning after this fix."""
-    entry = {"name": "ada"}
-    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "hermes_sdk"
+def test_hermes_sentinel_sdk_runtime_returns_none_when_unset():
+    """sentinel_vendor_sdk requires sentinel_sdk_runtime — there is no default.
+    Returns None so the caller can record a setup error (ADR-012 decision 5)."""
+    entry = {"name": "ada", "runtime_type": "sentinel_vendor_sdk"}
+    assert gateway_core._sentinel_vendor_sdk_sdk_runtime(entry) is None
+
+
+def test_hermes_sentinel_sdk_runtime_not_applicable_to_sentinel_hermes_sdk_entries():
+    """_sentinel_vendor_sdk_sdk_runtime is only for sentinel_vendor_sdk agents.
+    For sentinel_hermes_sdk the runtime is hardcoded to hermes_sdk in the
+    dispatch layer — this function is never called for those entries."""
+    entry = {"name": "ada", "runtime_type": "sentinel_hermes_sdk"}
+    assert gateway_core._sentinel_vendor_sdk_sdk_runtime(entry) is None
 
 
 def test_hermes_sentinel_sdk_runtime_reads_sentinel_sdk_runtime_field():
     """Primary operator knob: `sentinel_sdk_runtime`. Should win over any
     fallbacks."""
     entry = {"name": "ada", "sentinel_sdk_runtime": "gemini_sdk"}
-    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "gemini_sdk"
+    assert gateway_core._sentinel_vendor_sdk_sdk_runtime(entry) == "gemini_sdk"
 
 
 def test_hermes_sentinel_sdk_runtime_reads_hermes_runtime_fallback():
     """Secondary knob (some operators may already be using this name)."""
     entry = {"name": "ada", "hermes_runtime": "groq_sdk"}
-    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "groq_sdk"
+    assert gateway_core._sentinel_vendor_sdk_sdk_runtime(entry) == "groq_sdk"
 
 
 def test_hermes_sentinel_sdk_runtime_reads_sdk_runtime_fallback():
     """Tertiary knob — terse alias."""
     entry = {"name": "ada", "sdk_runtime": "openai_sdk"}
-    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "openai_sdk"
+    assert gateway_core._sentinel_vendor_sdk_sdk_runtime(entry) == "openai_sdk"
 
 
 def test_hermes_sentinel_sdk_runtime_accepts_mistral_sdk():
@@ -9533,64 +9582,80 @@ def test_hermes_sentinel_sdk_runtime_accepts_mistral_sdk():
     the runtime merged without an entry in _HERMES_SENTINEL_SDK_RUNTIMES,
     so operators silently got hermes_sdk instead."""
     entry = {"name": "ada", "sentinel_sdk_runtime": "mistral_sdk"}
-    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "mistral_sdk"
+    assert gateway_core._sentinel_vendor_sdk_sdk_runtime(entry) == "mistral_sdk"
 
 
 def test_hermes_sentinel_sdk_runtime_accepts_xai_sdk():
     """xai_sdk (PR #71) is a registered runtime and must be selectable via
     the sentinel switch. Same allowlist-gap regression guard as mistral_sdk."""
     entry = {"name": "ada", "sentinel_sdk_runtime": "xai_sdk"}
-    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "xai_sdk"
+    assert gateway_core._sentinel_vendor_sdk_sdk_runtime(entry) == "xai_sdk"
 
 
-def test_hermes_sentinel_sdk_runtime_rejects_unknown_values():
-    """A typo or unknown runtime name must fall back to the default rather
-    than crash the launcher with a bad `--runtime` arg."""
-    entry = {"name": "ada", "sentinel_sdk_runtime": "made_up_runtime"}
-    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "hermes_sdk"
+def test_hermes_sentinel_sdk_runtime_returns_none_for_unknown_values():
+    """A typo or unrecognised runtime name returns None — no silent fallback.
+    The caller records a setup error so the operator sees the misconfiguration."""
+    entry = {"name": "ada", "runtime_type": "sentinel_vendor_sdk", "sentinel_sdk_runtime": "made_up_runtime"}
+    assert gateway_core._sentinel_vendor_sdk_sdk_runtime(entry) is None
 
 
 def test_hermes_sentinel_sdk_runtime_is_case_insensitive():
     """Operators may write `Gemini_SDK` or `GEMINI_SDK` in config; both
     should resolve to the canonical lowercase id."""
     entry = {"name": "ada", "sentinel_sdk_runtime": "GEMINI_SDK"}
-    assert gateway_core._hermes_sentinel_sdk_runtime(entry) == "gemini_sdk"
+    assert gateway_core._sentinel_vendor_sdk_sdk_runtime(entry) == "gemini_sdk"
 
 
 def test_build_hermes_sentinel_cmd_threads_configured_runtime_into_argv():
     """End-to-end: a registry entry with `sentinel_sdk_runtime` set must
-    cause the launcher to emit `--runtime gemini_sdk` instead of the
-    default `hermes_sdk`. Regression for the bug where the launcher
-    hardcoded the runtime name and made every provider runtime
-    unreachable via Gateway."""
+    cause the launcher to emit `--runtime gemini_sdk`. Regression for the
+    bug where the launcher hardcoded the runtime name and made every provider
+    runtime unreachable via Gateway."""
     entry = {
         "name": "gemini-test",
         "space_id": "space-x",
         "active_space_name": "RobertRSW's Workspace",
         "base_url": "https://paxai.app",
         "workdir": "/tmp/gemini-test",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
         "sentinel_sdk_runtime": "gemini_sdk",
     }
-    cmd = gateway_core._build_hermes_sentinel_cmd(entry)
+    sdk_runtime = gateway_core._sentinel_vendor_sdk_sdk_runtime(entry)
+    cmd = gateway_core._build_sentinel_vendor_sdk_cmd(entry, sdk_runtime=sdk_runtime)
     assert "--runtime" in cmd
     runtime_idx = cmd.index("--runtime") + 1
     assert cmd[runtime_idx] == "gemini_sdk"
 
 
-def test_build_hermes_sentinel_cmd_default_runtime_unchanged_for_existing_entries():
-    """Regression gate: any pre-existing managed-agent entry (without the
-    new sentinel_sdk_runtime field) must still get --runtime hermes_sdk
-    so this change is strictly additive."""
+def test_build_sentinel_vendor_sdk_cmd_passes_sdk_runtime_into_argv():
+    """sdk_runtime is always passed by the dispatch layer — the command
+    builder does not resolve it. Verify it appears verbatim in --runtime."""
     entry = {
         "name": "ada",
         "space_id": "space-y",
         "active_space_name": "WS",
         "base_url": "https://paxai.app",
         "workdir": "/tmp/ada",
-        "runtime_type": "hermes_sentinel",
+        "runtime_type": "sentinel_vendor_sdk",
     }
-    cmd = gateway_core._build_hermes_sentinel_cmd(entry)
+    cmd = gateway_core._build_sentinel_vendor_sdk_cmd(entry, sdk_runtime="openai_sdk")
+    assert "--runtime" in cmd
+    runtime_idx = cmd.index("--runtime") + 1
+    assert cmd[runtime_idx] == "openai_sdk"
+
+
+def test_build_sentinel_vendor_sdk_cmd_sentinel_hermes_sdk_uses_hermes_sdk():
+    """The dispatch layer resolves sentinel_hermes_sdk → hermes_sdk and passes
+    it into the shared command builder. Verify the builder honours it."""
+    entry = {
+        "name": "ada",
+        "space_id": "space-y",
+        "active_space_name": "WS",
+        "base_url": "https://paxai.app",
+        "workdir": "/tmp/ada",
+        "runtime_type": "sentinel_hermes_sdk",
+    }
+    cmd = gateway_core._build_sentinel_vendor_sdk_cmd(entry, sdk_runtime="hermes_sdk")
     assert "--runtime" in cmd
     runtime_idx = cmd.index("--runtime") + 1
     assert cmd[runtime_idx] == "hermes_sdk"

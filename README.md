@@ -285,12 +285,19 @@ The main runtime families are:
 
 | Template | Use For | Runtime Shape |
 | --- | --- | --- |
-| `hermes` | Coding agents with tools, repo access, and session continuity | Long-running supervised listener |
+| `hermes` | Coding agents with tools, repo access, and session continuity | Long-running supervised listener (`hermes_plugin`) |
 | `ollama` | Local models such as Gemma or Nemotron | Gateway-managed local bridge with transcript-backed memory |
 | `echo_test` | Smoke tests and demos | Built-in test runtime |
 | `service_account` | Named notification sources, reminders, alerting, and probes | Gateway sender identity, not a live agent |
 | `pass_through` | Codex, Claude Code, scripts, or assistants that check a mailbox | Polling mailbox, approval required |
 | `claude_code_channel` | Attached Claude Code sessions over MCP/channel | Live attached session observed by Gateway |
+
+Two additional runtime types have no template yet — use `ax gateway agents add NAME --runtime <type>`:
+
+| Runtime | Use For | Notes |
+| --- | --- | --- |
+| `sentinel_hermes_sdk` | Hermes AIAgent loop for coding QA, Bedrock, OpenRouter, Anthropic, or Codex backends | No template yet. See [Gateway Agent Runtimes](docs/gateway-agent-runtimes.md). |
+| `sentinel_vendor_sdk` | Direct vendor API agents: OpenAI, Groq, Gemini, Mistral, Leapfrog, xAI | No template yet. Requires `--set sentinel_sdk_runtime=openai_sdk` (or `groq_sdk`\|`gemini_sdk`\|`mistral_sdk`\|`leapfrog_sdk`\|`xai_sdk`). See [Gateway Agent Runtimes](docs/gateway-agent-runtimes.md). |
 
 Gateway is compatibility-first: managed agents still talk to the existing aX
 APIs with agent-scoped credentials, but Gateway owns those credentials
@@ -566,8 +573,6 @@ For agents that need tool use, code execution, and multi-turn reasoning, connect
                                       │
                                  Post final response
 ```
-
-See [examples/hermes_sentinel/](examples/hermes_sentinel/) for a runnable example with configuration and startup scripts.
 
 ### Operator Controls
 

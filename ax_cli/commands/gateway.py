@@ -1212,7 +1212,7 @@ def _normalize_runtime_type(runtime_type: str) -> str:
         return str(runtime_type_definition(runtime_type)["id"])
     except KeyError as exc:
         raise ValueError(
-            "Unsupported runtime type. Use echo, exec, hermes_plugin, hermes_sentinel, sentinel_cli, claude_code_channel, or inbox."
+            "Unsupported runtime type. Use echo, exec, hermes_plugin, sentinel_vendor_sdk, sentinel_cli, claude_code_channel, or inbox."
         ) from exc
 
 
@@ -1948,7 +1948,7 @@ def _agent_runtime_context_target(entry: dict, *, workdir: Path) -> Path | None:
     runtime = str(entry.get("runtime_type") or "").strip().lower()
     if template == "claude_code_channel" or runtime == "claude_code_channel":
         return workdir / "CLAUDE.md"
-    if template in {"hermes", "sentinel_cli"} or runtime in {"hermes_sentinel", "sentinel_cli"}:
+    if template in {"hermes", "sentinel_cli"} or runtime in {"sentinel_vendor_sdk", "sentinel_cli"}:
         return workdir / "AGENTS.md"
     return None
 
@@ -1957,7 +1957,7 @@ def _write_agent_workspace_config(entry: dict) -> None:
     template = str(entry.get("template_id") or "").strip().lower()
     runtime = str(entry.get("runtime_type") or "").strip().lower()
     if template not in {"hermes", "sentinel_cli", "claude_code_channel"} and runtime not in {
-        "hermes_sentinel",
+        "sentinel_vendor_sdk",
         "sentinel_cli",
         "claude_code_channel",
     }:
@@ -2543,7 +2543,7 @@ def _recover_managed_agents_from_evidence(names: list[str]) -> dict:
         if rt == "claude_code_channel":
             entry["template_id"] = "claude_code_channel"
             entry["template_label"] = "Claude Code Channel"
-        elif rt == "hermes_sentinel":
+        elif rt == "sentinel_vendor_sdk":
             entry["template_id"] = "hermes"
             entry["template_label"] = "Hermes"
         elif rt == "inbox":
@@ -5408,7 +5408,7 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
               <div class="form-grid">
                 <div class="control-group" id="exec-command-group">
                   <label for="agent-exec">Command Override</label>
-                  <input id="agent-exec" name="exec_command" placeholder="python3 examples/hermes_sentinel/hermes_bridge.py" />
+                  <input id="agent-exec" name="exec_command" placeholder="python3 examples/sentinel_vendor_sdk/hermes_bridge.py" />
                 </div>
                 <div class="control-group" id="workdir-group">
                   <label for="agent-workdir">Working Directory Override</label>
@@ -9426,7 +9426,7 @@ def add_agent(
     runtime_type: str = typer.Option(
         None,
         "--type",
-        help="Advanced/internal runtime backend: echo | exec | hermes_plugin | hermes_sentinel | sentinel_cli | claude_code_channel | inbox",
+        help="Advanced/internal runtime backend: echo | exec | hermes_plugin | sentinel_vendor_sdk | sentinel_cli | claude_code_channel | inbox",
     ),
     exec_cmd: str = typer.Option(None, "--exec", help="Advanced override for exec-based templates"),
     workdir: str = typer.Option(None, "--workdir", help="Advanced working directory override"),
@@ -9565,7 +9565,7 @@ def update_agent(
     runtime_type: str = typer.Option(
         None,
         "--type",
-        help="Advanced/internal runtime backend override: echo | exec | hermes_plugin | hermes_sentinel | sentinel_cli | claude_code_channel | inbox",
+        help="Advanced/internal runtime backend override: echo | exec | hermes_plugin | sentinel_vendor_sdk | sentinel_cli | claude_code_channel | inbox",
     ),
     exec_cmd: str = typer.Option(None, "--exec", help="Advanced override for exec-based templates"),
     workdir: str = typer.Option(None, "--workdir", help="Advanced working directory override"),
@@ -9957,7 +9957,7 @@ def smoke_agent(
     runtime_type = str(entry.get("runtime_type") or "echo").lower()
     prompt = (message or "").strip() or _recommended_test_message(entry) or "ping"
 
-    _channel_runtimes = {"claude_code_channel", "hermes_plugin", "hermes_sentinel", "hermes"}
+    _channel_runtimes = {"claude_code_channel", "hermes_plugin", "sentinel_vendor_sdk", "hermes"}
 
     try:
         if runtime_type == "echo":
@@ -10033,7 +10033,7 @@ def smoke_agent(
             }
         else:
             err_console.print(f"[yellow]smoke not supported for runtime_type={runtime_type!r}[/yellow]")
-            err_console.print("  Supported: echo, exec, claude_code_channel, hermes_plugin, hermes_sentinel")
+            err_console.print("  Supported: echo, exec, claude_code_channel, hermes_plugin, sentinel_vendor_sdk")
             raise typer.Exit(1)
     except typer.Exit:
         raise

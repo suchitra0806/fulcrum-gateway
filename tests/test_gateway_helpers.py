@@ -2792,17 +2792,29 @@ class TestIsSentinelCliRuntime:
 
         assert _is_sentinel_cli_runtime("sentinel_cli") is True
         assert _is_sentinel_cli_runtime("claude_cli") is True
-        assert _is_sentinel_cli_runtime("codex_cli") is True
+        assert _is_sentinel_cli_runtime("codex_cli") is False
         assert _is_sentinel_cli_runtime("echo") is False
 
 
-class TestIsHermesSentinelRuntime:
+class TestIsSentinelVendorSdkRuntime:
     def test_matches(self):
-        from ax_cli.gateway import _is_hermes_sentinel_runtime
+        from ax_cli.gateway import _is_sentinel_vendor_sdk_runtime
 
-        assert _is_hermes_sentinel_runtime("hermes_sentinel") is True
-        assert _is_hermes_sentinel_runtime("hermes_sdk") is True
-        assert _is_hermes_sentinel_runtime("hermes_plugin") is False
+        assert _is_sentinel_vendor_sdk_runtime("sentinel_vendor_sdk") is True
+        assert _is_sentinel_vendor_sdk_runtime("hermes_sentinel") is True  # legacy alias
+        assert _is_sentinel_vendor_sdk_runtime("hermes_sdk") is False  # promoted to sentinel_hermes_sdk
+        assert _is_sentinel_vendor_sdk_runtime("sentinel_hermes_sdk") is False
+        assert _is_sentinel_vendor_sdk_runtime("hermes_plugin") is False
+
+
+class TestIsSentinelHermesSdkRuntime:
+    def test_matches(self):
+        from ax_cli.gateway import _is_sentinel_hermes_sdk_runtime
+
+        assert _is_sentinel_hermes_sdk_runtime("sentinel_hermes_sdk") is True
+        assert _is_sentinel_hermes_sdk_runtime("hermes_sdk") is False
+        assert _is_sentinel_hermes_sdk_runtime("sentinel_vendor_sdk") is False
+        assert _is_sentinel_hermes_sdk_runtime("hermes_plugin") is False
 
 
 class TestIsHermesPluginRuntime:
@@ -2841,7 +2853,7 @@ class TestRuntimeTypeDeprecation:
     def test_successor_for_deprecated_runtime(self):
         from ax_cli.gateway_runtime_types import runtime_type_successor
 
-        assert runtime_type_successor("hermes_sentinel") == "hermes_plugin"
+        assert runtime_type_successor("hermes_sentinel") == "sentinel_vendor_sdk"
 
     def test_successor_none_for_current_runtime(self):
         from ax_cli.gateway_runtime_types import runtime_type_successor
@@ -2988,19 +3000,19 @@ class TestHermesRepoCandidates:
         assert Path.home() / "hermes-agent" in candidates
 
 
-class TestHermesSentinelModel:
+class TestSentinelVendorSdkModel:
     def test_hermes_model_field(self):
-        assert gw._hermes_sentinel_model({"hermes_model": "codex:gpt-4"}) == "codex:gpt-4"
+        assert gw._sentinel_vendor_sdk_model({"hermes_model": "codex:gpt-4"}) == "codex:gpt-4"
 
     def test_sentinel_model_field(self):
-        assert gw._hermes_sentinel_model({"sentinel_model": "my-model"}) == "my-model"
+        assert gw._sentinel_vendor_sdk_model({"sentinel_model": "my-model"}) == "my-model"
 
     def test_runtime_model(self):
-        assert gw._hermes_sentinel_model({"runtime_model": "rt-model"}) == "rt-model"
+        assert gw._sentinel_vendor_sdk_model({"runtime_model": "rt-model"}) == "rt-model"
 
     def test_default_from_env(self, monkeypatch):
         monkeypatch.delenv("AX_GATEWAY_HERMES_MODEL", raising=False)
-        result = gw._hermes_sentinel_model({})
+        result = gw._sentinel_vendor_sdk_model({})
         assert result
 
 
@@ -3482,27 +3494,18 @@ class TestPidIsAlive:
 
 class TestSentinelModel:
     def test_model_field(self):
-        assert gw._sentinel_model({"model": "gpt-4"}, "claude") == "gpt-4"
+        assert gw._sentinel_model({"model": "gpt-4"}) == "gpt-4"
 
-    def test_runtime_specific_field(self):
-        assert gw._sentinel_model({"claude_model": "claude-3"}, "claude") == "claude-3"
+    def test_sentinel_model_field(self):
+        assert gw._sentinel_model({"claude_model": "claude-3"}) == "claude-3"
 
     def test_none_when_unset(self):
-        assert gw._sentinel_model({}, "claude") is None
+        assert gw._sentinel_model({}) is None
 
 
 class TestSentinelRuntimeName:
     def test_default_claude(self):
         assert gw._sentinel_runtime_name({}) == "claude"
-
-    def test_codex_cli_runtime_type(self):
-        assert gw._sentinel_runtime_name({"runtime_type": "codex_cli"}) == "codex"
-
-    def test_configured_codex(self):
-        assert gw._sentinel_runtime_name({"sentinel_runtime": "codex_cli"}) == "codex"
-
-    def test_configured_claude(self):
-        assert gw._sentinel_runtime_name({"sentinel_runtime": "claude_cli"}) == "claude"
 
 
 class TestSentinelSessionKey:

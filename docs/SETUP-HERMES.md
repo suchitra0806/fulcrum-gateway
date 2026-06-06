@@ -16,6 +16,35 @@ working baseline but the plugin path is the long-term shape.
 - One long-lived gateway process serves every space the agent listens in
 - No fork or core changes to `hermes-agent` — pure plugin
 
+## Architecture
+
+```text
+aX UI / agents
+      │
+      ▼  SSE /api/v1/sse/messages    REST POST /api/v1/messages
+┌──────────────────┐                 ▲
+│ AxAdapter        │─── sends ───────┘
+│ plugins/.../ax/  │
+└────────┬─────────┘
+         │ MessageEvent          reply text
+         ▼                       ▲
+┌──────────────────┐             │
+│ Hermes gateway   │─── runs ────┘
+│ AIAgent + tools  │
+└──────────────────┘
+```
+
+Two class flags on `AxAdapter` drive Hermes-side behavior and should not be
+changed without understanding their downstream effects:
+
+- `SUPPORTS_MESSAGE_EDITING = False` — intermediate streaming edits are not
+  sent to a chat bubble. Without this, every tool-call delta would create a
+  new or edited message in the space, producing noisy duplicates.
+- `SUPPORTS_ACTIVITY_STATUS = True` — tool/activity updates are routed to the
+  original mention's processing-status stream, not as separate chat messages.
+  This is what makes tool calls appear on the activity bubble of the triggering
+  @-mention.
+
 ## Hermes-native setup contract
 
 The aX integration is a **platform adapter**. It should look like
@@ -115,6 +144,12 @@ TERMINAL_CWD=/Users/jacob/hermes-agents/nova         # tools default to the agen
 
 `chmod 600 ~/.hermes/.env`.
 
+> **Security:** `~/.hermes/.env` contains a live agent PAT (`AX_TOKEN=axp_a_…`).
+> Do not commit this file, copy it into workdir configs, or include it in
+> logs or PR descriptions. Use placeholders in any documentation. The Gateway
+> token broker is the authoritative source; regenerate via
+> `ax gateway agents rotate-token <name>` if compromised.
+
 ### `~/.hermes/config.yaml` (host-wide hermes config)
 
 Two settings that matter for aX agents:
@@ -170,7 +205,7 @@ cd ~/hermes-agents/nova
 
 In another terminal, mention the agent from any aX client:
 
-```
+```text
 @nova hello
 ```
 
@@ -202,7 +237,7 @@ Use one short live pass before calling a setup good:
 ### Today
 
 | Layer | Mechanism | Strength |
-|---|---|---|
+| --- | --- | --- |
 | Default working area | `terminal.cwd` + launch from workdir | **Soft.** Bash defaults to the workdir; `pwd` returns it. Absolute paths still work. |
 | Dangerous-command gate | `approvals.mode: on` (default) | **Real boundary.** Hermes prompts the operator (in chat, via aX) before running anything classified dangerous. See `~/hermes-agent/SECURITY.md` §2. |
 | Output redaction | `agent/redact.py` | API keys / tokens are scrubbed before reaching display layer. |
@@ -264,6 +299,7 @@ their per-agent `$HERMES_HOME/config.yaml` automatically — `gateway agents
 show <name>` exposes this via the `ax_platform_enabled` doctor check.
 If you're running `hermes gateway run` manually against `~/.hermes/`, add
 the entry yourself:
+
 ```yaml
 plugins:
   enabled:
@@ -272,6 +308,7 @@ plugins:
 
 **`Plugin 'ax-platform' has no register() function`**
 → The plugin's `__init__.py` must re-export `register` from `adapter`:
+
 ```python
 from .adapter import register
 __all__ = ["register"]

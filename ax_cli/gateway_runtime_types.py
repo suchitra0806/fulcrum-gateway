@@ -101,7 +101,7 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
                     "name": "exec_command",
                     "label": "Exec Command",
                     "required": True,
-                    "placeholder": "python3 examples/hermes_sentinel/hermes_bridge.py",
+                    "placeholder": "python3 examples/sentinel_vendor_sdk/hermes_bridge.py",
                 },
                 {
                     "name": "workdir",
@@ -123,7 +123,7 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
                 },
                 {
                     "label": "Hermes Sentinel",
-                    "exec_command": "python3 examples/hermes_sentinel/hermes_bridge.py",
+                    "exec_command": "python3 examples/sentinel_vendor_sdk/hermes_bridge.py",
                     "workdir": str(repo_root),
                     "note": "Requires a local hermes-agent checkout plus auth setup.",
                 },
@@ -143,53 +143,113 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
                 "tools": "Gateway can record tool usage when the bridge emits tool events.",
             },
         },
-        "hermes_sentinel": {
-            "id": "hermes_sentinel",
-            "label": "Hermes Sentinel (legacy)",
+        "sentinel_vendor_sdk": {
+            "id": "sentinel_vendor_sdk",
+            "label": "Vendor SDK Sentinel",
             "description": (
-                "Legacy Gateway-supervised Hermes sentinel using the in-tree "
-                "claude_agent_v2.py listener semantics. New agents should use "
-                "hermes_plugin instead — this runtime is kept only so existing "
-                "entries continue to work until they are explicitly migrated."
+                "Gateway-supervised sentinel process dispatching to lightweight direct "
+                "vendor API runtimes (openai_sdk, groq_sdk, mistral_sdk, gemini_sdk, "
+                "leapfrog_sdk). Tool access is controlled by connector policy. "
+                "Renamed from hermes_sentinel in 0.7.0 — see ADR-012."
             ),
             "kind": "supervised_process",
             "passive": False,
-            "deprecated": True,
-            # Successor runtime an `ax gateway agents update --type <id>`
-            # migration should land on. Surfaced in `agents show` so
-            # operators discover the drift instead of running deprecated
-            # code paths silently after upgrading axctl (#90).
-            "successor_runtime_type": "hermes_plugin",
+            "deprecated": False,
             "requires": [],
             "form_fields": [
                 {
                     "name": "workdir",
                     "label": "Workdir",
                     "required": True,
-                    "placeholder": "/home/ax-agent/agents/dev_sentinel",
+                    "placeholder": "/home/ax-agent/agents/my_sdk_agent",
                 },
                 {
                     "name": "model",
                     "label": "Model",
                     "required": False,
-                    "placeholder": "codex:gpt-5.5",
+                    "placeholder": "gpt-4o",
                 },
             ],
             "examples": [
                 {
-                    "label": "Hermes dev sentinel (legacy)",
-                    "runtime_type": "hermes_sentinel",
-                    "workdir": "/home/ax-agent/agents/dev_sentinel",
-                    "note": "Legacy in-tree listener. Prefer hermes_plugin for new agents.",
+                    "label": "OpenAI SDK agent",
+                    "runtime_type": "sentinel_vendor_sdk",
+                    "workdir": "/home/ax-agent/agents/openai_agent",
+                    "sentinel_sdk_runtime": "openai_sdk",
                 },
             ],
             "signals": {
                 **_shared_signals(),
                 "activity": (
-                    "Gateway reports process liveness; the sentinel listener emits the same processing "
-                    "and tool activity signals as the pre-Gateway setup."
+                    "Gateway reports process liveness; the sentinel emits processing "
+                    "and tool activity signals via the SDK runtime callbacks."
                 ),
-                "tools": "Tool telemetry comes from claude_agent_v2.py/Hermes callbacks, not a one-shot bridge.",
+                "tools": "Tool telemetry comes from connector_call events in the SDK runtime.",
+            },
+        },
+        "hermes_sentinel": {
+            "id": "hermes_sentinel",
+            "label": "Hermes Sentinel (legacy)",
+            "description": "Legacy name for sentinel_vendor_sdk — renamed in 0.7.0. See ADR-012.",
+            "kind": "supervised_process",
+            "passive": False,
+            "deprecated": True,
+            "successor_runtime_type": "sentinel_vendor_sdk",
+            "requires": [],
+            "form_fields": [],
+            "signals": {},
+        },
+        "sentinel_hermes_sdk": {
+            "id": "sentinel_hermes_sdk",
+            "label": "Hermes SDK Sentinel",
+            "description": (
+                "Gateway-supervised sentinel running the in-process Hermes AIAgent loop "
+                "(90-turn agentic loop, parallel tool execution, context compression). "
+                "Supports Bedrock IAM auth (bedrock:claude-*), Anthropic API "
+                "(anthropic:claude-*), OpenRouter (openrouter:<model>), and Codex "
+                "(codex:gpt-*) backends. Tool access is controlled by connector policy "
+                "plus Hermes tool security shims. Promoted from hermes_sdk inside "
+                "sentinel_vendor_sdk in 0.7.0 — see ADR-012."
+            ),
+            "kind": "supervised_process",
+            "passive": False,
+            "requires": [],
+            "form_fields": [
+                {
+                    "name": "workdir",
+                    "label": "Workdir",
+                    "required": True,
+                    "placeholder": "/home/ax-agent/agents/my_hermes_agent",
+                },
+                {
+                    "name": "model",
+                    "label": "Model",
+                    "required": True,
+                    "placeholder": "bedrock:claude-sonnet-4-6 or anthropic:claude-sonnet-4-6",
+                },
+            ],
+            "examples": [
+                {
+                    "label": "Bedrock Claude agent",
+                    "runtime_type": "sentinel_hermes_sdk",
+                    "workdir": "/home/ax-agent/agents/bedrock_agent",
+                    "model": "bedrock:claude-sonnet-4-6",
+                    "note": "Auth via IAM instance profile — no API key required.",
+                },
+                {
+                    "label": "Anthropic API agent",
+                    "runtime_type": "sentinel_hermes_sdk",
+                    "workdir": "/home/ax-agent/agents/anthropic_agent",
+                    "model": "anthropic:claude-sonnet-4-6",
+                },
+            ],
+            "signals": {
+                **_shared_signals(),
+                "activity": (
+                    "Gateway reports process liveness; the Hermes AIAgent loop emits "
+                    "tool-progress and status callbacks that surface as activity signals."
+                ),
+                "tools": "Tool telemetry from Hermes tool-progress callbacks and connector_call events.",
             },
         },
         "hermes_plugin": {
@@ -370,7 +430,7 @@ def runtime_type_successor(runtime_type: str | None) -> str | None:
 
 def runtime_type_list() -> list[dict[str, Any]]:
     catalog = runtime_type_catalog()
-    ordered_ids = ["echo", "exec", "hermes_plugin", "hermes_sentinel", "sentinel_cli", "claude_code_channel", "inbox"]
+    ordered_ids = ["echo", "exec", "hermes_plugin", "sentinel_hermes_sdk", "sentinel_vendor_sdk", "sentinel_cli", "claude_code_channel", "inbox"]
     return [catalog[runtime_id] for runtime_id in ordered_ids if runtime_id in catalog]
 
 
@@ -380,7 +440,7 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
     composio_skill_path = _gateway_composio_connectors_skill_path()
     runtime_signals = {
         key: runtime_type_definition(key)["signals"]
-        for key in ("echo", "exec", "hermes_plugin", "hermes_sentinel", "sentinel_cli", "claude_code_channel", "inbox")
+        for key in ("echo", "exec", "hermes_plugin", "sentinel_hermes_sdk", "sentinel_vendor_sdk", "sentinel_cli", "claude_code_channel", "inbox")
     }
     return {
         "echo_test": {

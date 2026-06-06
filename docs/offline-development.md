@@ -7,7 +7,7 @@ to the aX platform. The Gateway starts normally, agents can be registered, and t
 ## What works offline
 
 | Capability | Works offline | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Gateway start / stop | Yes | |
 | Agent registration (`agents add`) | Yes | Uses local fake session |
 | Agent listing, inspection | Yes | |
@@ -145,7 +145,8 @@ AX_OFFLINE=1 ax gateway agents smoke my-hermes-agent --message "ping"
 | `exec` / `command` | In-process subprocess |
 | `claude_code_channel` | Delivery via gateway SSE + reply polling |
 | `hermes_plugin` | Delivery via gateway SSE + reply polling |
-| `hermes_sentinel` | Delivery via gateway SSE + reply polling |
+| `sentinel_hermes_sdk` | Delivery via gateway SSE + reply polling |
+| `sentinel_vendor_sdk` | Delivery via gateway SSE + reply polling |
 | `inbox` / `passive` | Not supported (no handler) |
 | `sentinel_cli` | Not supported offline (requires live AI CLI) |
 

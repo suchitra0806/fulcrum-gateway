@@ -987,7 +987,7 @@ class TestRenderAgentDetail:
         rendered = _render_text(gw_cmd._render_agent_detail(entry, activity=[]))
         assert "hermes_sentinel" in rendered
         assert "deprecated" in rendered
-        assert "hermes_plugin" in rendered  # successor surfaced
+        assert "sentinel_vendor_sdk" in rendered  # successor surfaced
         assert "nova" in rendered  # migration command includes the agent name
 
     def test_adapter_row_quiet_for_current_runtime(self):

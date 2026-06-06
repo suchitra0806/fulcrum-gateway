@@ -57,6 +57,7 @@ def test_is_predicates():
     assert not gateway_core._is_hermes_plugin_runtime("hermes_sentinel")
     assert gateway_core._is_supervised_subprocess_runtime("hermes_plugin")
     assert gateway_core._is_supervised_subprocess_runtime("hermes_sentinel")
+    assert gateway_core._is_supervised_subprocess_runtime("sentinel_hermes_sdk")
     assert not gateway_core._is_supervised_subprocess_runtime("echo")
     assert not gateway_core._is_supervised_subprocess_runtime("exec")
 
