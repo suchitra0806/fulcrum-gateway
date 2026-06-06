@@ -127,7 +127,23 @@ def _toolkit_policy_error(tool_slug: str, toolkit: str | None, policy: ToolFilte
     return ConnectorPolicyError(tool_slug, f"{detail} not in allowed toolkits {policy.allowed_toolkits}")
 
 
-def filter_tools(items: list[dict[str, Any]], policy: ToolFilterPolicy) -> list[dict[str, Any]]:
+def tool_sort_key(item: dict[str, Any]) -> str:
+    """Stable sort key for a tool item — its name (or enum), lowercased."""
+    return str(item.get("name") or item.get("enum") or "").lower()
+
+
+def filter_tools(
+    items: list[dict[str, Any]],
+    policy: ToolFilterPolicy,
+    *,
+    apply_limit: bool = True,
+) -> list[dict[str, Any]]:
+    """Apply allow/deny policy to ``items``.
+
+    By default the result is capped at ``policy.tools_limit`` (the historical
+    behaviour). Pass ``apply_limit=False`` to get every tool that matched the
+    policy so callers can report how many were clipped by the limit.
+    """
     result: list[dict[str, Any]] = []
     for item in items:
         name = str(item.get("name") or item.get("enum") or "")
@@ -137,7 +153,7 @@ def filter_tools(items: list[dict[str, Any]], policy: ToolFilterPolicy) -> list[
         if not _toolkit_allowed(toolkit, policy):
             continue
         result.append(item)
-        if len(result) >= policy.tools_limit:
+        if apply_limit and len(result) >= policy.tools_limit:
             break
     return result
 

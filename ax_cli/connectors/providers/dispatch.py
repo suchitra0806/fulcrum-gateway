@@ -13,8 +13,9 @@ from ..activity import (
     record_connector_tool_failed,
     record_connector_tool_started,
 )
+from ..constants import MAX_TOOLS_LIMIT
 from ..errors import ConnectorPolicyError, ConnectorProviderError
-from ..filtering import assert_tool_allowed, filter_tools, from_config
+from ..filtering import assert_tool_allowed, filter_tools, from_config, tool_sort_key
 from ..types import ConnectorRow
 from . import composio_adapter, http_mcp_adapter
 from .registry import has_capability
@@ -104,17 +105,34 @@ def list_tools(
         result = adapter.list_tools(auth_env, connector.config, connector.name)
         items = result.get("tools", [])
     else:
+        # Catalog providers (e.g. Composio) have no list endpoint; we page a
+        # single empty search capped at MAX_TOOLS_LIMIT. Providers with more
+        # than MAX_TOOLS_LIMIT tools are silently truncated here — there is no
+        # pagination yet, so `total` reflects what this one page returned, not
+        # everything the provider offers.
         result = adapter.search_tools(
             "",
             auth_env,
             connector.config,
             connector.name,
-            limit=200,
+            limit=MAX_TOOLS_LIMIT,
         )
         items = result.get("items", [])
     policy = from_config(connector.config)
-    filtered = filter_tools(items, policy)
-    return {"items": filtered, "total": len(items), "filtered": len(filtered)}
+    # Match the full policy first (apply_limit=False) so we can report how many
+    # tools were clipped by tools_limit. Sort by name so the clip is
+    # deterministic rather than dependent on catalog order.
+    matched = filter_tools(items, policy, apply_limit=False)
+    matched.sort(key=tool_sort_key)
+    filtered = matched[: policy.tools_limit]
+    return {
+        "items": filtered,
+        "total": len(items),
+        "matched": len(matched),
+        "filtered": len(filtered),
+        "limit": policy.tools_limit,
+        "clipped": len(matched) > len(filtered),
+    }
 
 
 def search_tools(

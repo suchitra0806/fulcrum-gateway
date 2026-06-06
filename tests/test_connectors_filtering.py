@@ -10,6 +10,7 @@ from ax_cli.connectors.filtering import (
     assert_tool_allowed,
     filter_tools,
     from_config,
+    tool_sort_key,
     validate_fnmatch_pattern,
     validate_policy_patterns,
 )
@@ -144,6 +145,15 @@ class TestFilterTools:
         result = filter_tools(SAMPLE_TOOLS, policy)
         assert len(result) == 2
 
+    def test_apply_limit_false_returns_all_matches(self):
+        # tools_limit=2 would clip, but apply_limit=False reports every match
+        policy = ToolFilterPolicy(allowed_toolkits=["github"], tools_limit=2)
+        items = [{"name": f"GITHUB_T_{i}", "appName": "github"} for i in range(10)]
+        limited = filter_tools(items, policy)
+        unlimited = filter_tools(items, policy, apply_limit=False)
+        assert len(limited) == 2
+        assert len(unlimited) == 10
+
     def test_combined_policy(self):
         policy = ToolFilterPolicy(
             allowed_tools=["GITHUB_*", "JIRA_*"],
@@ -171,6 +181,22 @@ class TestFilterTools:
         policy = ToolFilterPolicy()
         result = filter_tools(items, policy)
         assert len(result) == 1
+
+
+# ── tool_sort_key ────────────────────────────────────────────────────────────
+
+
+class TestToolSortKey:
+    def test_sorts_by_name_case_insensitive(self):
+        items = [{"name": "ZULU"}, {"name": "alpha"}, {"name": "Mike"}]
+        items.sort(key=tool_sort_key)
+        assert [i["name"] for i in items] == ["alpha", "Mike", "ZULU"]
+
+    def test_falls_back_to_enum(self):
+        assert tool_sort_key({"enum": "GITHUB_X"}) == "github_x"
+
+    def test_missing_name_sorts_empty(self):
+        assert tool_sort_key({}) == ""
 
 
 # ── assert_tool_allowed ──────────────────────────────────────────────────────
