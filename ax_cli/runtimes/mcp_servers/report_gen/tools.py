@@ -63,6 +63,7 @@ def _check_sql_readonly(sql: str, dialect: str = "sqlite") -> None:
         exp.Create,
         exp.Alter,
         exp.TruncateTable,
+        exp.Into,  # SELECT INTO creates a table in Postgres (equivalent to CREATE TABLE AS SELECT)
     )
     suspicious_functions = {"load_extension", "attach", "detach", "pragma"}
 
