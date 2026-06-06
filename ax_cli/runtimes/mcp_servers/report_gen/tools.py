@@ -31,6 +31,59 @@ QUERY_TIMEOUT_S = float(os.environ.get("AX_REPORT_GEN_QUERY_TIMEOUT_S") or 5.0)
 ROW_LIMIT_DEFAULT = 500
 
 
+# Per-dialect denylist of dangerous SQL function calls the layer-1 AST gate
+# rejects in addition to write-shaped subtree nodes. Keep the entries scoped to
+# the dialect that actually exposes the function so we do not pretend to inspect
+# a dialect we have no signal for. An unknown dialect falls through to an empty
+# set, which is the conservative posture: layer 2 (read-only transaction) and
+# layer 3 (reader-role grants) still backstop the call, and layer 1 stays honest
+# about its own coverage. See issue #198.
+_SUSPICIOUS_BY_DIALECT: dict[str, frozenset[str]] = {
+    "sqlite": frozenset(
+        {
+            # load_extension parses as a function call; ATTACH/DETACH/PRAGMA are
+            # reserved keywords so sqlglot rejects them at parse time before the
+            # AST walk runs. Kept in the denylist so a future sqlglot version
+            # that parses them as functions does not silently regress.
+            "load_extension",
+            "attach",
+            "detach",
+            "pragma",
+        }
+    ),
+    "postgres": frozenset(
+        {
+            # Filesystem reads on the server host. Layer 3 (reader-role) blocks
+            # the privileged variants, but layer 1 should still reject so the
+            # denylist is honest about its own coverage of Postgres.
+            "pg_read_file",
+            "pg_read_binary_file",
+            # Large-object filesystem export / import (server-side I/O).
+            "lo_export",
+            "lo_import",
+            # Cross-database SQL via the dblink extension. Bypasses the
+            # local-transaction read-only flag for the remote target.
+            "dblink",
+            "dblink_exec",
+            # DoS surface: a malicious query can hold a backend worker for an
+            # arbitrary interval, defeating the connection-pool's protections.
+            "pg_sleep",
+        }
+    ),
+}
+
+
+def _suspicious_for_dialect(dialect: str) -> frozenset[str]:
+    """Return the dangerous-function denylist for `dialect`, or empty for unknown.
+
+    The empty-set fallback for unknown dialects is intentional. The function is
+    called once at the start of each `_check_sql_readonly` pass, so a typo or a
+    backend we have no signal for must not crash the safety gate; the lower
+    layers still enforce read-only semantics.
+    """
+    return _SUSPICIOUS_BY_DIALECT.get(dialect.lower(), frozenset())
+
+
 class ReadOnlyViolation(Exception):
     """Raised when AST inspection rejects a query."""
 
@@ -65,7 +118,7 @@ def _check_sql_readonly(sql: str, dialect: str = "sqlite") -> None:
         exp.TruncateTable,
         exp.Into,  # SELECT INTO creates a table in Postgres (equivalent to CREATE TABLE AS SELECT)
     )
-    suspicious_functions = {"load_extension", "attach", "detach", "pragma"}
+    suspicious_functions = _suspicious_for_dialect(dialect)
 
     for stmt in parsed:
         if stmt is None:

@@ -21,6 +21,7 @@ from ax_cli.runtimes.mcp_servers.report_gen.tools import (  # noqa: E402
     _check_sql_readonly,
     _handle_db_query,
     _handle_db_schema,
+    _suspicious_for_dialect,
     build_tools,
     get_db_schema,
     run_query,
@@ -33,6 +34,7 @@ def isolated_db(tmp_path_factory, monkeypatch_session=None):
     # Module-scoped monkeypatch can't use the function-scoped fixture; do it
     # manually with os.environ + cleanup.
     import os
+
     tmp = tmp_path_factory.mktemp("report_gen")
     db_path = tmp / "synthetic.db"
     prior = os.environ.get("AX_REPORT_GEN_DB_PATH")
@@ -56,19 +58,14 @@ def test_get_db_schema_returns_all_five_tables():
     schema = get_db_schema()
     assert schema["synthetic"] is True
     table_names = {t["name"] for t in schema["tables"]}
-    assert table_names == {
-        "theater", "unit", "ammo_stockpile", "personnel_readiness", "supply_route"
-    }
+    assert table_names == {"theater", "unit", "ammo_stockpile", "personnel_readiness", "supply_route"}
 
 
 def test_get_db_schema_includes_foreign_keys():
     schema = get_db_schema()
     by_name = {t["name"]: t for t in schema["tables"]}
     fk = by_name["ammo_stockpile"]["foreign_keys"]
-    assert any(
-        f["column"] == "theater_id" and f["references_table"] == "theater"
-        for f in fk
-    )
+    assert any(f["column"] == "theater_id" and f["references_table"] == "theater" for f in fk)
 
 
 def test_get_db_schema_reports_row_counts():
@@ -119,14 +116,17 @@ def test_run_query_row_limit_not_triggered_when_below():
 # --- SQL safety: AST layer (sqlglot) ---
 
 
-@pytest.mark.parametrize("sql", [
-    "DELETE FROM theater WHERE id = 1",
-    "UPDATE theater SET name = 'X' WHERE id = 1",
-    "INSERT INTO theater (id, name) VALUES (99, 'NEWCOM')",
-    "DROP TABLE theater",
-    "CREATE TABLE foo (id INTEGER)",
-    "ALTER TABLE theater ADD COLUMN evil TEXT",
-])
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM theater WHERE id = 1",
+        "UPDATE theater SET name = 'X' WHERE id = 1",
+        "INSERT INTO theater (id, name) VALUES (99, 'NEWCOM')",
+        "DROP TABLE theater",
+        "CREATE TABLE foo (id INTEGER)",
+        "ALTER TABLE theater ADD COLUMN evil TEXT",
+    ],
+)
 def test_check_sql_readonly_rejects_writes(sql):
     with pytest.raises(ReadOnlyViolation):
         _check_sql_readonly(sql)
@@ -172,6 +172,84 @@ def test_check_sql_readonly_rejects_unparseable_sql():
         _check_sql_readonly("not even sql")
 
 
+# --- SQL safety: dialect-aware suspicious-function denylist (#198) ---
+
+
+@pytest.mark.parametrize(
+    "fn",
+    [
+        "pg_read_file",
+        "pg_read_binary_file",
+        "lo_export",
+        "lo_import",
+        "dblink",
+        "dblink_exec",
+        "pg_sleep",
+    ],
+)
+def test_check_sql_readonly_rejects_postgres_dangerous_functions(fn):
+    # Each Postgres-specific dangerous function parses as a function call under
+    # dialect="postgres" and gets rejected on the Anonymous-node walk. The
+    # SQLite-flavored default denylist would have let these through silently
+    # before #198.
+    sql = f"SELECT {fn}('arg')"
+    with pytest.raises(ReadOnlyViolation, match="Suspicious function"):
+        _check_sql_readonly(sql, dialect="postgres")
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT count(*) FROM theater",
+        "SELECT coalesce(name, 'unknown') FROM theater",
+        "SELECT now()",
+        "SELECT date_trunc('day', created_at) FROM theater",
+        "SELECT lower(name) FROM theater",
+    ],
+)
+def test_check_sql_readonly_passes_legitimate_postgres_functions(sql):
+    # Belt-and-suspenders: ordinary Postgres scalar functions must still pass
+    # under dialect="postgres" so the dialect-aware denylist is not over-broad.
+    _check_sql_readonly(sql, dialect="postgres")
+
+
+def test_check_sql_readonly_unknown_dialect_falls_back_to_empty_denylist():
+    # An unknown dialect must not crash the gate and must not raise on a function
+    # that is only dangerous in a dialect we have no signal for. Layer 2 / 3
+    # still enforce read-only semantics; layer 1 stays honest about coverage.
+    _check_sql_readonly("SELECT pg_read_file('/etc/passwd')", dialect="duckdb")
+
+
+def test_suspicious_for_dialect_returns_per_dialect_sets():
+    sqlite_set = _suspicious_for_dialect("sqlite")
+    postgres_set = _suspicious_for_dialect("postgres")
+    assert "load_extension" in sqlite_set
+    assert "pg_read_file" in postgres_set
+    assert "dblink" in postgres_set
+    # The dialect-specific sets are disjoint at the level the denylist cares
+    # about: a SQLite function name should not appear in the Postgres set, and
+    # vice versa. A future refactor that conflates the two would break this.
+    assert sqlite_set.isdisjoint(postgres_set)
+
+
+def test_suspicious_for_dialect_unknown_returns_empty_frozenset():
+    result = _suspicious_for_dialect("mysql")
+    assert result == frozenset()
+    # Case-insensitive lookup: a typo-cased "Postgres" should still resolve to
+    # the canonical Postgres set rather than the empty fallback.
+    assert "pg_sleep" in _suspicious_for_dialect("Postgres")
+
+
+def test_check_sql_readonly_existing_sqlite_denylist_still_fires():
+    # Regression guard: the existing SQLite-side `load_extension` rejection must
+    # continue to work after the refactor to dialect-aware lookup. The other
+    # SQLite reserved keywords (attach/detach/pragma) are still rejected at
+    # parse time by sqlglot, which the existing
+    # `test_check_sql_readonly_rejects_reserved_extension_keywords` test covers.
+    with pytest.raises(ReadOnlyViolation, match="Suspicious function"):
+        _check_sql_readonly("SELECT load_extension('evil.so')", dialect="sqlite")
+
+
 # --- SQL safety: full run_query path returns structured errors ---
 
 
@@ -182,9 +260,7 @@ def test_run_query_returns_readonly_violation_code():
 
 
 def test_run_query_rejects_cte_smuggled_delete_via_error_code():
-    result = run_query(
-        "WITH x AS (DELETE FROM theater WHERE id = 1 RETURNING *) SELECT * FROM x"
-    )
+    result = run_query("WITH x AS (DELETE FROM theater WHERE id = 1 RETURNING *) SELECT * FROM x")
     assert result["code"] == "READONLY_VIOLATION"
 
 
@@ -237,9 +313,7 @@ def test_db_schema_handler_returns_mcp_content_block():
 
 
 def test_db_query_handler_returns_mcp_content_block():
-    result = _handle_db_query(
-        {"sql": "SELECT name FROM theater WHERE name = 'CENTCOM'"}
-    )
+    result = _handle_db_query({"sql": "SELECT name FROM theater WHERE name = 'CENTCOM'"})
     payload = json.loads(result["content"][0]["text"])
     assert payload["row_count"] == 1
     assert payload["rows"][0]["name"] == "CENTCOM"
