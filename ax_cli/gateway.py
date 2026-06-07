@@ -58,6 +58,21 @@ RUNTIME_HIDDEN_AFTER_SECONDS = 15 * 60.0  # default: hide stale agents after 15 
 SETUP_ERROR_BACKOFF_SCHEDULE = (30.0, 60.0, 120.0, 300.0, 600.0)
 SETUP_ERROR_MAX_CONSECUTIVE = 10
 
+HERMES_KNOWN_PROVIDERS: dict[str, dict[str, str]] = {
+    "anthropic": {
+        "base_url": "https://api.anthropic.com",
+        "default_model": "claude-sonnet-4-20250514",
+    },
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "default_model": "anthropic/claude-sonnet-4",
+    },
+    "bedrock": {
+        "base_url": "",
+        "default_model": "claude-sonnet-4-20250514",
+    },
+}
+
 
 def _setup_error_signature(error: str) -> str:
     """SHA-256 hex digest of a setup-error message for dedup (#34).
@@ -4709,6 +4724,32 @@ def _render_hermes_plugin_config_yaml(entry: dict[str, Any], *, home: Path, oper
             loaded = None
         if isinstance(loaded, dict):
             cfg = loaded
+    entry_provider = str(entry.get("provider") or "").strip() or None
+    if entry_provider:
+        provider_info = HERMES_KNOWN_PROVIDERS.get(entry_provider, {})
+        cfg["provider"] = entry_provider
+        if provider_info.get("default_model") and not cfg.get("model"):
+            cfg["model"] = provider_info["default_model"]
+        providers_cfg = cfg.get("providers")
+        if not isinstance(providers_cfg, dict):
+            providers_cfg = {}
+        if entry_provider not in providers_cfg:
+            providers_cfg[entry_provider] = {}
+        prov_block = providers_cfg[entry_provider]
+        if provider_info.get("default_model") and not prov_block.get("default_model"):
+            prov_block["default_model"] = provider_info["default_model"]
+        if provider_info.get("base_url") and not prov_block.get("base_url"):
+            prov_block["base_url"] = provider_info["base_url"]
+        providers_cfg[entry_provider] = prov_block
+        cfg["providers"] = providers_cfg
+        aux = cfg.get("auxiliary")
+        if isinstance(aux, dict):
+            title_gen = aux.get("title_generation")
+            if isinstance(title_gen, dict) and not title_gen.get("provider"):
+                title_gen["provider"] = entry_provider
+                if provider_info.get("default_model") and not title_gen.get("model"):
+                    title_gen["model"] = provider_info["default_model"]
+
     terminal_cfg = cfg.get("terminal")
     if not isinstance(terminal_cfg, dict):
         terminal_cfg = {}
@@ -7103,12 +7144,34 @@ class GatewayDaemon:
             for sig in (signal.SIGINT, signal.SIGTERM):
                 previous_handlers[sig] = signal.getsignal(sig)
                 signal.signal(sig, _request_stop)
+
+        _gw_heartbeat_client = None
+        _gw_heartbeat_id = session.get("gateway_id")
+        _gw_last_heartbeat = 0.0
+        _GW_HEARTBEAT_INTERVAL = 60.0
+        if _gw_heartbeat_id:
+            try:
+                _gw_heartbeat_client = self.client_factory(
+                    base_url=str(session.get("base_url") or ""),
+                    token=str(session.get("token") or ""),
+                )
+            except Exception:
+                _gw_heartbeat_client = None
+
         try:
             while not self._stop.is_set():
                 registry = load_gateway_registry()
                 registry = self._reconcile_registry(registry, session)
                 self._sweep_lifecycle(registry, session=session)
                 save_gateway_registry(registry)
+                if _gw_heartbeat_client and _gw_heartbeat_id:
+                    _now_mono = time.monotonic()
+                    if _now_mono - _gw_last_heartbeat >= _GW_HEARTBEAT_INTERVAL:
+                        try:
+                            _gw_heartbeat_client.send_gateway_heartbeat(_gw_heartbeat_id)
+                        except Exception:
+                            pass
+                        _gw_last_heartbeat = _now_mono
                 if once:
                     break
                 time.sleep(self.poll_interval)

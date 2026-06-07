@@ -1212,6 +1212,62 @@ def _normalize_timeout_seconds(timeout_seconds: int | None) -> int | None:
     return normalized
 
 
+def _resolve_hermes_model(workdir: str | None) -> str | None:
+    """Read the actual model from the hermes config so the platform shows the truth."""
+    candidates = []
+    if workdir:
+        candidates.append(Path(workdir).expanduser().resolve() / ".hermes" / "config.yaml")
+    candidates.append(Path.home() / ".hermes" / "config.yaml")
+    for cfg_path in candidates:
+        if not cfg_path.exists():
+            continue
+        try:
+            import yaml as _yaml
+
+            loaded = _yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and loaded.get("model"):
+                provider = loaded.get("provider", "")
+                model_name = str(loaded["model"])
+                if provider:
+                    return f"{provider}:{model_name}"
+                return model_name
+        except Exception:
+            continue
+    return None
+
+
+def _validate_hermes_provider(provider: str) -> None:
+    """Check that ~/.hermes/auth.json has a credential pool entry for the provider."""
+    auth_path = Path.home() / ".hermes" / "auth.json"
+    if not auth_path.exists():
+        raise ValueError(
+            f"~/.hermes/auth.json not found. Cannot validate provider '{provider}'. "
+            "Create auth.json with a credential pool entry for this provider."
+        )
+    try:
+        data = json.loads(auth_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"Cannot read ~/.hermes/auth.json: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("~/.hermes/auth.json is not a JSON object.")
+    pool = data.get("credential_pool") or {}
+    if not isinstance(pool, dict):
+        raise ValueError("~/.hermes/auth.json credential_pool is not a JSON object.")
+    if provider not in pool:
+        available = ", ".join(sorted(pool.keys())) or "(empty)"
+        raise ValueError(
+            f"Provider '{provider}' not found in ~/.hermes/auth.json credential pool. "
+            f"Available providers: {available}. "
+            f"Add a credential entry for '{provider}' before registering."
+        )
+    creds = pool[provider]
+    if not isinstance(creds, list) or not creds:
+        raise ValueError(
+            f"Provider '{provider}' in ~/.hermes/auth.json has no credential entries. "
+            "Add at least one credential with auth_type and access_token."
+        )
+
+
 def _agent_row_space_ids(registry: dict) -> set[str]:
     return {
         str(item.get("space_id") or "").strip()
@@ -1475,6 +1531,7 @@ def _register_managed_agent(
     exec_cmd: str | None = None,
     workdir: str | None = None,
     ollama_model: str | None = None,
+    provider: str | None = None,
     space_id: str | None = None,
     audience: str = "both",
     description: str | None = None,
@@ -1531,6 +1588,14 @@ def _register_managed_agent(
         workdir = str(Path(explicit_workdir).expanduser().resolve())
     _validate_runtime_registration(runtime_type, exec_cmd)
     timeout_effective = _normalize_timeout_seconds(timeout_seconds)
+    normalized_provider = str(provider or "").strip() or None
+    if normalized_provider and runtime_type != "hermes_plugin":
+        raise ValueError("--provider is only supported for hermes_plugin runtimes.")
+    if normalized_provider:
+        _validate_hermes_provider(normalized_provider)
+
+    if not model and runtime_type == "hermes_plugin":
+        model = _resolve_hermes_model(workdir or explicit_workdir)
 
     client = _load_gateway_user_client()
     session = _load_gateway_session_or_exit()
@@ -1565,6 +1630,7 @@ def _register_managed_agent(
                 space_id=selected_space,
                 description=description,
                 model=model,
+                gateway_id=session.get("gateway_id"),
             ),
             max_retries=INTERACTIVE_429_MAX_RETRIES,
             base_wait=INTERACTIVE_429_BASE_WAIT,
@@ -1622,6 +1688,8 @@ def _register_managed_agent(
         entry_payload["allowed_users"] = str(allowed_users).strip()
     if normalized_connector_ref:
         entry_payload["connector_ref"] = normalized_connector_ref
+    if normalized_provider:
+        entry_payload["provider"] = normalized_provider
     if requires_approval:
         entry_payload["install_id"] = str(uuid.uuid4())
     entry = upsert_agent_entry(registry, entry_payload)
@@ -1898,6 +1966,7 @@ def _update_managed_agent(
     exec_cmd: str | object = _UNSET,
     workdir: str | object = _UNSET,
     ollama_model: str | object = _UNSET,
+    provider: str | None = None,
     description: str | None = None,
     model: str | None = None,
     system_prompt: str | object = _UNSET,
@@ -1977,6 +2046,12 @@ def _update_managed_agent(
         )
 
     _validate_runtime_registration(runtime_effective, exec_effective)
+    normalized_provider = str(provider or "").strip() or None
+    if normalized_provider and runtime_effective != "hermes_plugin":
+        raise ValueError("--provider is only supported for hermes_plugin runtimes.")
+    if normalized_provider:
+        _validate_hermes_provider(normalized_provider)
+        entry["provider"] = normalized_provider
 
     if desired_state is not None:
         normalized_desired = desired_state.lower().strip()
@@ -1985,6 +2060,9 @@ def _update_managed_agent(
         entry["desired_state"] = normalized_desired
     if timeout_seconds is not _UNSET:
         entry["timeout_seconds"] = _normalize_timeout_seconds(timeout_seconds)  # type: ignore[arg-type]
+
+    if not model and runtime_effective == "hermes_plugin":
+        model = _resolve_hermes_model(workdir_effective or str(entry.get("workdir") or ""))
 
     session = _load_gateway_session_or_exit()
     upstream_fields: dict = {}
@@ -7552,6 +7630,17 @@ def login(
         except Exception:
             selected_space_name = None
 
+    from .. import __version__ as _gw_version
+
+    gateway_id = None
+    gateway_name = f"gateway-{socket.gethostname()}"
+    try:
+        gw_result = client.register_gateway(gateway_name, version=_gw_version)
+        gateway_id = gw_result.get("id")
+        err_console.print(f"[green]Registered gateway {gateway_name}[/green] (id={gateway_id})")
+    except Exception as exc:
+        err_console.print(f"[yellow]Gateway registration skipped:[/yellow] {exc}")
+
     payload = {
         "token": resolved_token,
         "base_url": resolved_base_url,
@@ -7560,15 +7649,22 @@ def login(
         "space_name": selected_space_name,
         "username": me.get("username"),
         "email": me.get("email"),
+        "gateway_id": gateway_id,
+        "gateway_name": gateway_name,
         "saved_at": None,
     }
     path = save_gateway_session(payload)
     registry = load_gateway_registry()
     registry.setdefault("gateway", {})
     registry["gateway"]["session_connected"] = True
+    registry["gateway"]["gateway_id"] = gateway_id
     save_gateway_registry(registry)
     record_gateway_activity(
-        "gateway_login", username=me.get("username"), base_url=resolved_base_url, space_id=selected_space
+        "gateway_login",
+        username=me.get("username"),
+        base_url=resolved_base_url,
+        space_id=selected_space,
+        gateway_id=gateway_id,
     )
 
     result = {
@@ -7578,6 +7674,7 @@ def login(
         "space_name": selected_space_name,
         "username": me.get("username"),
         "email": me.get("email"),
+        "gateway_id": gateway_id,
     }
     if as_json:
         print_json(result)
@@ -9292,6 +9389,16 @@ def add_agent(
     exec_cmd: str = typer.Option(None, "--exec", help="Advanced override for exec-based templates"),
     workdir: str = typer.Option(None, "--workdir", help="Advanced working directory override"),
     ollama_model: str = typer.Option(None, "--ollama-model", help="Ollama model override for the Ollama template"),
+    provider: str = typer.Option(
+        None,
+        "--provider",
+        help=(
+            "LLM provider for Hermes agents (anthropic | openrouter | bedrock). "
+            "Overrides the operator's ~/.hermes/config.yaml provider/model/providers "
+            "sections in the per-agent config. Validated against ~/.hermes/auth.json "
+            "credential pool at registration time."
+        ),
+    ),
     space_id: str = typer.Option(
         None,
         "--space",
@@ -9371,6 +9478,7 @@ def add_agent(
             exec_cmd=exec_cmd,
             workdir=workdir,
             ollama_model=ollama_model,
+            provider=provider,
             space_id=space_id,
             audience=audience,
             description=description,
@@ -9414,6 +9522,15 @@ def update_agent(
     exec_cmd: str = typer.Option(None, "--exec", help="Advanced override for exec-based templates"),
     workdir: str = typer.Option(None, "--workdir", help="Advanced working directory override"),
     ollama_model: str = typer.Option(None, "--ollama-model", help="Ollama model override for the Ollama template"),
+    provider: str = typer.Option(
+        None,
+        "--provider",
+        help=(
+            "LLM provider for Hermes agents (anthropic | openrouter | bedrock). "
+            "Overrides the operator's ~/.hermes/config.yaml provider/model/providers "
+            "sections in the per-agent config."
+        ),
+    ),
     description: str = typer.Option(None, "--description", help="Update platform agent description"),
     model: str = typer.Option(None, "--model", help="Update platform agent model"),
     system_prompt: str = typer.Option(
@@ -9474,6 +9591,7 @@ def update_agent(
             exec_cmd=exec_cmd if exec_cmd is not None else _UNSET,
             workdir=workdir if workdir is not None else _UNSET,
             ollama_model=ollama_model if ollama_model is not None else _UNSET,
+            provider=provider,
             description=description,
             model=model,
             system_prompt=resolved_prompt,
