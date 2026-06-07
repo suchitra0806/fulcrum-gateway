@@ -170,7 +170,9 @@ def _find_agent_in_space(client, name: str, space_id: str) -> Optional[dict]:
     return next((a for a in agents if a.get("name", "").lower() == name.lower()), None)
 
 
-def _create_agent_in_space(client, *, name: str, space_id: str, description: str | None, model: str | None, gateway_id: str | None = None) -> dict:
+def _create_agent_in_space(
+    client, *, name: str, space_id: str, description: str | None, model: str | None, gateway_id: str | None = None
+) -> dict:
     """Create an agent in a space.
 
     PAT/exchange clients use the management API (``/api/v1/agents/manage/create``).
@@ -186,7 +188,12 @@ def _create_agent_in_space(client, *, name: str, space_id: str, description: str
     if hasattr(client, "_exchanger") and client._exchanger:
         try:
             result = client.mgmt_create_agent(
-                name, space_id=space_id, description=description, model=model, agent_type="gateway", gateway_id=gateway_id
+                name,
+                space_id=space_id,
+                description=description,
+                model=model,
+                agent_type="gateway",
+                gateway_id=gateway_id,
             )
             # Management API may wrap the agent in {"agent": {...}} — unwrap so
             # callers always get the agent dict and .get("id") resolves correctly.
