@@ -1233,10 +1233,27 @@ class AxClient:
         jwt = self._exchanger.get_token("user_admin", scope=scope)
         return {**self._base_headers, "Authorization": f"Bearer {jwt}"}
 
+    def register_gateway(self, name: str, *, url: str | None = None, version: str | None = None) -> dict:
+        """POST /api/v1/gateways/register — register this gateway with the platform."""
+        body: dict = {"name": name}
+        if url:
+            body["url"] = url
+        if version:
+            body["version"] = version
+        r = self._http.post("/api/v1/gateways/register", json=body, headers=self._auth_headers())
+        r.raise_for_status()
+        return self._parse_json(r)
+
+    def send_gateway_heartbeat(self, gateway_id: str) -> dict:
+        """POST /api/v1/gateways/{id}/heartbeat — refresh gateway presence."""
+        r = self._http.post(f"/api/v1/gateways/{gateway_id}/heartbeat", headers=self._auth_headers())
+        r.raise_for_status()
+        return self._parse_json(r)
+
     def mgmt_create_agent(self, name: str, **kwargs) -> dict:
         """Create an agent — requires user_admin + agents.create."""
         body: dict = {"name": name}
-        for k in ("description", "system_prompt", "model", "space_id", "agent_type"):
+        for k in ("description", "system_prompt", "model", "space_id", "agent_type", "gateway_id"):
             if k in kwargs and kwargs[k] is not None:
                 body[k] = kwargs[k]
         return self._management_json_with_fallback(

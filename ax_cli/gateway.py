@@ -7131,12 +7131,34 @@ class GatewayDaemon:
             for sig in (signal.SIGINT, signal.SIGTERM):
                 previous_handlers[sig] = signal.getsignal(sig)
                 signal.signal(sig, _request_stop)
+
+        _gw_heartbeat_client = None
+        _gw_heartbeat_id = session.get("gateway_id")
+        _gw_last_heartbeat = 0.0
+        _GW_HEARTBEAT_INTERVAL = 60.0
+        if _gw_heartbeat_id:
+            try:
+                _gw_heartbeat_client = self.client_factory(
+                    base_url=str(session.get("base_url") or ""),
+                    token=str(session.get("token") or ""),
+                )
+            except Exception:
+                _gw_heartbeat_client = None
+
         try:
             while not self._stop.is_set():
                 registry = load_gateway_registry()
                 registry = self._reconcile_registry(registry, session)
                 self._sweep_lifecycle(registry, session=session)
                 save_gateway_registry(registry)
+                if _gw_heartbeat_client and _gw_heartbeat_id:
+                    _now_mono = time.monotonic()
+                    if _now_mono - _gw_last_heartbeat >= _GW_HEARTBEAT_INTERVAL:
+                        try:
+                            _gw_heartbeat_client.send_gateway_heartbeat(_gw_heartbeat_id)
+                        except Exception:
+                            pass
+                        _gw_last_heartbeat = _now_mono
                 if once:
                     break
                 time.sleep(self.poll_interval)

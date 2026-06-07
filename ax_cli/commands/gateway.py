@@ -1645,6 +1645,7 @@ def _register_managed_agent(
                 space_id=selected_space,
                 description=description,
                 model=model,
+                gateway_id=session.get("gateway_id"),
             ),
             max_retries=INTERACTIVE_429_MAX_RETRIES,
             base_wait=INTERACTIVE_429_BASE_WAIT,
@@ -7568,6 +7569,19 @@ def login(
         except Exception:
             selected_space_name = None
 
+    import socket
+
+    from .. import __version__ as _gw_version
+
+    gateway_id = None
+    gateway_name = f"gateway-{socket.gethostname()}"
+    try:
+        gw_result = client.register_gateway(gateway_name, version=_gw_version)
+        gateway_id = gw_result.get("id")
+        err_console.print(f"[green]Registered gateway {gateway_name}[/green] (id={gateway_id})")
+    except Exception as exc:
+        err_console.print(f"[yellow]Gateway registration skipped:[/yellow] {exc}")
+
     payload = {
         "token": resolved_token,
         "base_url": resolved_base_url,
@@ -7576,15 +7590,22 @@ def login(
         "space_name": selected_space_name,
         "username": me.get("username"),
         "email": me.get("email"),
+        "gateway_id": gateway_id,
+        "gateway_name": gateway_name,
         "saved_at": None,
     }
     path = save_gateway_session(payload)
     registry = load_gateway_registry()
     registry.setdefault("gateway", {})
     registry["gateway"]["session_connected"] = True
+    registry["gateway"]["gateway_id"] = gateway_id
     save_gateway_registry(registry)
     record_gateway_activity(
-        "gateway_login", username=me.get("username"), base_url=resolved_base_url, space_id=selected_space
+        "gateway_login",
+        username=me.get("username"),
+        base_url=resolved_base_url,
+        space_id=selected_space,
+        gateway_id=gateway_id,
     )
 
     result = {
@@ -7594,6 +7615,7 @@ def login(
         "space_name": selected_space_name,
         "username": me.get("username"),
         "email": me.get("email"),
+        "gateway_id": gateway_id,
     }
     if as_json:
         print_json(result)
