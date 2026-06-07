@@ -1212,22 +1212,6 @@ def _normalize_timeout_seconds(timeout_seconds: int | None) -> int | None:
     return normalized
 
 
-HERMES_KNOWN_PROVIDERS: dict[str, dict[str, str]] = {
-    "anthropic": {
-        "base_url": "https://api.anthropic.com",
-        "default_model": "claude-sonnet-4-20250514",
-    },
-    "openrouter": {
-        "base_url": "https://openrouter.ai/api/v1",
-        "default_model": "anthropic/claude-sonnet-4",
-    },
-    "bedrock": {
-        "base_url": "",
-        "default_model": "claude-sonnet-4-20250514",
-    },
-}
-
-
 def _resolve_hermes_model(workdir: str | None) -> str | None:
     """Read the actual model from the hermes config so the platform shows the truth."""
     candidates = []
@@ -1261,13 +1245,14 @@ def _validate_hermes_provider(provider: str) -> None:
             "Create auth.json with a credential pool entry for this provider."
         )
     try:
-        import json as _json
-
-        pool = _json.loads(auth_path.read_text(encoding="utf-8"))
+        data = json.loads(auth_path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise ValueError(f"Cannot read ~/.hermes/auth.json: {exc}") from exc
-    if not isinstance(pool, dict):
+    if not isinstance(data, dict):
         raise ValueError("~/.hermes/auth.json is not a JSON object.")
+    pool = data.get("credential_pool") or {}
+    if not isinstance(pool, dict):
+        raise ValueError("~/.hermes/auth.json credential_pool is not a JSON object.")
     if provider not in pool:
         available = ", ".join(sorted(pool.keys())) or "(empty)"
         raise ValueError(
@@ -1604,12 +1589,12 @@ def _register_managed_agent(
     _validate_runtime_registration(runtime_type, exec_cmd)
     timeout_effective = _normalize_timeout_seconds(timeout_seconds)
     normalized_provider = str(provider or "").strip() or None
-    if normalized_provider and runtime_type not in ("hermes_plugin", "hermes_sentinel"):
-        raise ValueError("--provider is only supported for Hermes-based runtimes (hermes_plugin, hermes_sentinel).")
+    if normalized_provider and runtime_type != "hermes_plugin":
+        raise ValueError("--provider is only supported for hermes_plugin runtimes.")
     if normalized_provider:
         _validate_hermes_provider(normalized_provider)
 
-    if not model and runtime_type in ("hermes_plugin", "hermes_sentinel"):
+    if not model and runtime_type == "hermes_plugin":
         model = _resolve_hermes_model(workdir or explicit_workdir)
 
     client = _load_gateway_user_client()
@@ -2062,8 +2047,8 @@ def _update_managed_agent(
 
     _validate_runtime_registration(runtime_effective, exec_effective)
     normalized_provider = str(provider or "").strip() or None
-    if normalized_provider and runtime_effective not in ("hermes_plugin", "hermes_sentinel"):
-        raise ValueError("--provider is only supported for Hermes-based runtimes (hermes_plugin, hermes_sentinel).")
+    if normalized_provider and runtime_effective != "hermes_plugin":
+        raise ValueError("--provider is only supported for hermes_plugin runtimes.")
     if normalized_provider:
         _validate_hermes_provider(normalized_provider)
         entry["provider"] = normalized_provider
@@ -2076,7 +2061,7 @@ def _update_managed_agent(
     if timeout_seconds is not _UNSET:
         entry["timeout_seconds"] = _normalize_timeout_seconds(timeout_seconds)  # type: ignore[arg-type]
 
-    if not model and runtime_effective in ("hermes_plugin", "hermes_sentinel"):
+    if not model and runtime_effective == "hermes_plugin":
         model = _resolve_hermes_model(workdir_effective or str(entry.get("workdir") or ""))
 
     session = _load_gateway_session_or_exit()
@@ -7568,8 +7553,6 @@ def login(
             )
         except Exception:
             selected_space_name = None
-
-    import socket
 
     from .. import __version__ as _gw_version
 

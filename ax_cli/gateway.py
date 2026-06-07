@@ -58,6 +58,21 @@ RUNTIME_HIDDEN_AFTER_SECONDS = 15 * 60.0  # default: hide stale agents after 15 
 SETUP_ERROR_BACKOFF_SCHEDULE = (30.0, 60.0, 120.0, 300.0, 600.0)
 SETUP_ERROR_MAX_CONSECUTIVE = 10
 
+HERMES_KNOWN_PROVIDERS: dict[str, dict[str, str]] = {
+    "anthropic": {
+        "base_url": "https://api.anthropic.com",
+        "default_model": "claude-sonnet-4-20250514",
+    },
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "default_model": "anthropic/claude-sonnet-4",
+    },
+    "bedrock": {
+        "base_url": "",
+        "default_model": "claude-sonnet-4-20250514",
+    },
+}
+
 
 def _setup_error_signature(error: str) -> str:
     """SHA-256 hex digest of a setup-error message for dedup (#34).
@@ -4711,8 +4726,6 @@ def _render_hermes_plugin_config_yaml(entry: dict[str, Any], *, home: Path, oper
             cfg = loaded
     entry_provider = str(entry.get("provider") or "").strip() or None
     if entry_provider:
-        from ax_cli.commands.gateway import HERMES_KNOWN_PROVIDERS
-
         provider_info = HERMES_KNOWN_PROVIDERS.get(entry_provider, {})
         cfg["provider"] = entry_provider
         if provider_info.get("default_model") and not cfg.get("model"):
