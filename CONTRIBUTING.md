@@ -146,6 +146,38 @@ A contribution is complete when:
 - Docs updated if the change is user-facing
 - Conventional commit message for changelog
 
+## Ways of Working
+
+### Issues are the backlog — pick them up
+
+Open issues are fair game. If something is unassigned and you have capacity, take it. No need to ask permission — just assign yourself and start a branch.
+
+### Don't let review feedback sit
+
+If a reviewer requests changes on your PR, respond within 1-2 business days. Stale PRs with unaddressed feedback block the queue and create merge conflicts for everyone else.
+
+### Review each other's PRs
+
+Code review is everyone's job. Don't wait for a specific person — if you have context on the area, review it. Spreading review load keeps the team unblocked.
+
+### Keep PRs fresh
+
+If your PR or issue is over 1-2 weeks old without progress:
+- Get reviews and merge it, OR
+- Convert it to a draft, OR
+- Close it (you can always reopen later)
+
+Stale PRs rot — they accumulate conflicts, block related work, and mislead the team about what's actually in flight.
+
+### Reviewer fix-and-merge
+
+If you're reviewing a PR and it needs a trivial fix (one failing test, a typo, a missing import), it's fine to commit the fix yourself, approve, and merge. Don't bounce it back for something you can solve in 30 seconds.
+
+### Don't approve and merge your own work
+
+- If you approve a PR, let someone else merge it.
+- If your PR gets a review requesting changes, don't commit the fix and then merge it yourself. Let the original reviewer confirm the fix.
+
 ## Release Process
 
 See [docs/release-process.md](docs/release-process.md).
