@@ -171,11 +171,11 @@ Stale PRs rot — they accumulate conflicts, block related work, and mislead the
 
 ### Reviewer fix-and-merge
 
-If you're reviewing a PR and it needs a trivial fix (one failing test, a typo, a missing import), it's fine to commit the fix yourself, approve, and merge. Don't bounce it back for something you can solve in 30 seconds.
+If you're reviewing a PR and it needs a trivial fix (one failing test, a typo, a missing import), it's fine to commit the fix yourself, approve, and merge. Don't bounce it back for something you can solve in 30 seconds. This is the one exception to the rule below — you verified the fix yourself, so you're the final reviewer.
 
-### Don't approve and merge your own work
+### Don't approve-then-merge someone else's unchanged work
 
-- If you approve a PR, let someone else merge it.
+- If you approve a PR without committing a fix, let someone else merge it.
 - If your PR gets a review requesting changes, don't commit the fix and then merge it yourself. Let the original reviewer confirm the fix.
 
 ## Release Process
