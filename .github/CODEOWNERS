@@ -1,26 +1,6 @@
-# CODEOWNERS — ax-cli
-# These owners are automatically requested for review on PRs.
-
-# Default owner — all files
-* @madtank @sarob
-
-# CI/CD and publishing
-.github/ @madtank
-.github/workflows/ @madtank
-.github/CODEOWNERS @madtank
-.github/dependabot.yml @madtank
-.github/pull_request_template.md @madtank
-pyproject.toml @madtank
-release-please-config.json @madtank
-.release-please-manifest.json @madtank
-CHANGELOG.md @madtank
-CONTRIBUTING.md @madtank
-SECURITY.md @madtank
-docs/release-process.md @madtank
-docs/operator-qa-runbook.md @madtank
-
-# Channel MCP server (Bun/TypeScript) — anvil owns the runtime + SSE bridge
-channel/ @anvil @madtank
-
-# Specs — anvil and madtank co-own the design surface
-specs/ @anvil @madtank
+* @FulcrumDefense/engineering
+CODE_OF_CONDUCT.md @sarob @markgalpin
+CONTRIBUTING.md @sarob @markgalpin
+SECURITY.md @sarob @markgalpin
+CHANGELOG.md @sarob @markgalpin
+LICENSE @sarob @markgalpin
