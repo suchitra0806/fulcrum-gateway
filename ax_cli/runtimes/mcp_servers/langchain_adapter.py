@@ -8,7 +8,7 @@ expects Pydantic models. This adapter spawns each configured MCP server
 Usage from langgraph_bridge.py:
 
     from ax_cli.runtimes.mcp_servers.langchain_adapter import load_mcps_from_env
-    extra_tools, mcp_clients = load_mcps_from_env()
+    extra_tools, mcp_clients, _warnings = load_mcps_from_env()
     tools = _default_tools() + extra_tools
     # ... build ToolNode(tools, wrap_tool_call=_make_security_wrap(workdir))
     # ... atexit.register(lambda: [c.close() for c in mcp_clients])
@@ -49,27 +49,36 @@ def load_mcps_from_env(
     *,
     config_env: str = "AX_BRIDGE_MCP_SERVERS",
     debug: bool = False,
-) -> tuple[list[Any], list[McpStdioClient]]:
-    """Read the MCP config from env, spawn servers, return (tools, clients).
+) -> tuple[list[Any], list[McpStdioClient], list[str]]:
+    """Read the MCP config from env, spawn servers, return (tools, clients, warnings).
 
-    Returns `([], [])` when the env var is unset or empty so the bridge
+    Returns `([], [], [])` when the env var is unset or empty so the bridge
     behaves identically to the pre-MCP state when no MCPs are configured.
+
+    `warnings` is a list of human-readable error strings for each parse or
+    per-server init failure encountered. Callers that have an activity-event
+    channel (e.g. `_load_mcp_tools` in the LangGraph bridge) should emit one
+    activity event per warning so SSE consumers see the same signal that
+    stderr carries.
 
     Caller is responsible for `client.close()` on the returned clients at
     bridge shutdown (e.g. via `atexit.register`).
     """
     raw = (os.environ.get(config_env) or "").strip()
     if not raw:
-        return [], []
+        return [], [], []
+
+    warnings: list[str] = []
 
     try:
         config = _load_config(raw)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
-        _stderr(f"[mcp-adapter] failed to parse {config_env}: {exc}")
-        return [], []
+        msg = f"[mcp-adapter] failed to parse {config_env}: {exc}"
+        _stderr(msg)
+        return [], [], [msg]
 
     if not isinstance(config, dict) or not config:
-        return [], []
+        return [], [], []
 
     tools: list[Any] = []
     clients: list[McpStdioClient] = []
@@ -77,11 +86,15 @@ def load_mcps_from_env(
 
     for label, server_cfg in config.items():
         if not isinstance(server_cfg, dict):
-            _stderr(f"[mcp-adapter] {label}: config must be an object; got {type(server_cfg).__name__}")
+            msg = f"[mcp-adapter] {label}: config must be an object; got {type(server_cfg).__name__}"
+            _stderr(msg)
+            warnings.append(msg)
             continue
         command = server_cfg.get("command")
         if not isinstance(command, list) or not command:
-            _stderr(f"[mcp-adapter] {label}: missing or invalid 'command' (must be a non-empty list)")
+            msg = f"[mcp-adapter] {label}: missing or invalid 'command' (must be a non-empty list)"
+            _stderr(msg)
+            warnings.append(msg)
             continue
         env_override = server_cfg.get("env") or None
         cwd = server_cfg.get("cwd") or None
@@ -99,12 +112,16 @@ def load_mcps_from_env(
             client.initialize()
             specs = client.list_tools()
         except Exception as exc:  # noqa: BLE001 — bridge degrades gracefully
-            _stderr(f"[mcp-adapter] {label}: failed to initialize: {exc}")
+            msg = f"[mcp-adapter] {label}: failed to initialize: {exc}"
+            _stderr(msg)
+            warnings.append(msg)
             client.close()
             continue
 
         if not specs:
-            _stderr(f"[mcp-adapter] {label}: server exposes no tools")
+            msg = f"[mcp-adapter] {label}: server exposes no tools"
+            _stderr(msg)
+            warnings.append(msg)
             client.close()
             continue
 
@@ -114,7 +131,7 @@ def load_mcps_from_env(
             tools.append(_make_langchain_tool(client, spec, tool_name=tool_name))
         _stderr(f"[mcp-adapter] {label}: registered {len(specs)} tool(s) ({', '.join(s.name for s in specs)})")
 
-    return tools, clients
+    return tools, clients, warnings
 
 
 def _load_config(raw: str) -> Any:

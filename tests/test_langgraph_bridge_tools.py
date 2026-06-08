@@ -497,3 +497,83 @@ def test_multi_node_graph_compiles_without_nameerror(monkeypatch, tmp_path):
     )
     assert result.used_llm is True
     assert "stub final answer" in result.reply
+
+
+# ── 11. _load_mcp_tools: activity events on MCP failures (issue #239) ────────
+#
+# Pre-fix, load_mcps_from_env() swallowed parse/init errors and returned
+# ([], []). _load_mcp_tools() saw an empty list and returned [] with no event.
+# Post-fix, load_mcps_from_env() returns a third element: a list of warning
+# strings. _load_mcp_tools() emits one activity event per warning so SSE
+# consumers see the same signal that stderr already carries.
+
+
+def test_load_mcp_tools_emits_activity_event_on_parse_failure(monkeypatch):
+    """Invalid MCP config: _load_mcp_tools forwards the warning as an activity event."""
+    import ax_cli.runtimes.mcp_servers.langchain_adapter as _adapter
+
+    captured: list[dict] = []
+    monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: captured.append(payload))
+    warning_msg = "[mcp-adapter] failed to parse AX_BRIDGE_MCP_SERVERS: bad json"
+    monkeypatch.setattr(_adapter, "load_mcps_from_env", lambda **kw: ([], [], [warning_msg]))
+
+    result = langgraph_bridge._load_mcp_tools()
+
+    assert result == []
+    activity_events = [e for e in captured if e.get("kind") == "activity"]
+    assert len(activity_events) == 1
+    assert activity_events[0]["activity"] == warning_msg
+
+
+def test_load_mcp_tools_emits_activity_event_on_server_init_failure(monkeypatch):
+    """Per-server init failure: warning is forwarded as an activity event."""
+    import ax_cli.runtimes.mcp_servers.langchain_adapter as _adapter
+
+    captured: list[dict] = []
+    monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: captured.append(payload))
+    warning_msg = "[mcp-adapter] my_server: failed to initialize: binary not found"
+    monkeypatch.setattr(_adapter, "load_mcps_from_env", lambda **kw: ([], [], [warning_msg]))
+
+    result = langgraph_bridge._load_mcp_tools()
+
+    assert result == []
+    activity_events = [e for e in captured if e.get("kind") == "activity"]
+    assert len(activity_events) == 1
+    assert "failed to initialize" in activity_events[0]["activity"]
+
+
+def test_load_mcp_tools_no_spurious_event_when_no_warnings(monkeypatch):
+    """Empty warnings list: _load_mcp_tools emits no activity events."""
+    import ax_cli.runtimes.mcp_servers.langchain_adapter as _adapter
+
+    captured: list[dict] = []
+    monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: captured.append(payload))
+    monkeypatch.setattr(_adapter, "load_mcps_from_env", lambda **kw: ([], [], []))
+
+    result = langgraph_bridge._load_mcp_tools()
+
+    assert result == []
+    activity_events = [e for e in captured if e.get("kind") == "activity"]
+    assert activity_events == []
+
+
+def test_load_mcp_tools_emits_one_event_per_warning(monkeypatch):
+    """Multiple warnings (e.g. two failing servers) each get their own activity event."""
+    import ax_cli.runtimes.mcp_servers.langchain_adapter as _adapter
+
+    captured: list[dict] = []
+    monkeypatch.setattr(langgraph_bridge, "emit_event", lambda payload: captured.append(payload))
+    warnings = [
+        "[mcp-adapter] srv_a: failed to initialize: err A",
+        "[mcp-adapter] srv_b: failed to initialize: err B",
+    ]
+    monkeypatch.setattr(_adapter, "load_mcps_from_env", lambda **kw: ([], [], warnings))
+
+    result = langgraph_bridge._load_mcp_tools()
+
+    assert result == []
+    activity_events = [e for e in captured if e.get("kind") == "activity"]
+    assert len(activity_events) == 2
+    activities = {e["activity"] for e in activity_events}
+    assert "[mcp-adapter] srv_a: failed to initialize: err A" in activities
+    assert "[mcp-adapter] srv_b: failed to initialize: err B" in activities

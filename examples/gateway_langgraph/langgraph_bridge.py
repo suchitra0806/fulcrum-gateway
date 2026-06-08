@@ -335,10 +335,12 @@ def _load_mcp_tools() -> list:
         return []
     try:
         debug = os.environ.get("AX_MCP_DEBUG", "").lower() in {"1", "true", "yes", "on"}
-        tools, clients = load_mcps_from_env(debug=debug)
+        tools, clients, warnings = load_mcps_from_env(debug=debug)
     except Exception as exc:  # noqa: BLE001
         emit_event({"kind": "activity", "activity": f"MCP load failed; skipping MCP tools ({exc})"})
         return []
+    for w in warnings:
+        emit_event({"kind": "activity", "activity": w})
     if not tools:
         return []
     _MCP_CLIENTS.extend(clients)
