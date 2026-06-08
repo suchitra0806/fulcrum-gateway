@@ -9,7 +9,6 @@ existing automation keeps working but emits a hint.
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 from typer.testing import CliRunner
 
@@ -103,7 +102,3 @@ def test_help_describes_positional_query():
     assert result.exit_code == 0
     # Typer renders the argument name in uppercase on the usage line.
     assert "QUERY" in result.output
-
-    # Replace any patch from import-time isolation; this test only inspects help.
-    with patch("ax_cli.connectors.search_tools", lambda *a, **k: {"items": []}):
-        pass
