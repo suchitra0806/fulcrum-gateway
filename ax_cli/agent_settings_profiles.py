@@ -19,7 +19,7 @@ _AX_PROFILES_KEY = "_axProfiles"
 #
 # settings_path: relative path within the agent workdir for the settings file.
 _CLIENT_CONFIG: dict[str, dict[str, Any]] = {
-    "claude": {
+    "claude_cli": {
         "settings_path": ".claude/settings.local.json",
     },
 }
@@ -30,7 +30,8 @@ SUPPORTED_CLIENTS: frozenset[str] = frozenset(_CLIENT_CONFIG)
 # profile client (which MCP/coding-agent tool the agent runs, and therefore
 # which settings file and profile fragments apply). These are different axes —
 # `claude_code_channel` and `sentinel_cli` both run the Claude Code CLI and
-# share its `.claude/settings.local.json` surface, so both resolve to `claude`.
+# share its `.claude/settings.local.json` surface, so both resolve to `claude_cli`
+# (per ADR-014 — `claude_cli` names the tool, not the AI model).
 # `hermes_plugin` and the sentinel SDK runtimes run Hermes's own AIAgent (no
 # `.claude/settings.local.json`; their capability surface is connector policy
 # instead — see docs/agent-permission-model.md), and runtimes with no
@@ -38,8 +39,8 @@ SUPPORTED_CLIENTS: frozenset[str] = frozenset(_CLIENT_CONFIG)
 # Unmapped runtimes resolve to None so callers can surface a clear message
 # rather than guessing.
 _GATEWAY_RUNTIME_TO_CLIENT: dict[str, str] = {
-    "claude_code_channel": "claude",
-    "sentinel_cli": "claude",
+    "claude_code_channel": "claude_cli",
+    "sentinel_cli": "claude_cli",
 }
 
 

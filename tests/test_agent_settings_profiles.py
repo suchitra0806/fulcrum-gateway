@@ -26,10 +26,10 @@ from ax_cli.agent_settings_profiles import (
 
 def test_list_available_returns_base(tmp_path, monkeypatch):
     monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", tmp_path)
-    (tmp_path / "claude").mkdir()
-    (tmp_path / "claude" / "base.json").write_text('{"permissions": {"allow": []}}')
-    (tmp_path / "claude" / "extra.json").write_text('{"permissions": {"allow": []}}')
-    assert list_available("claude") == ["base", "extra"]
+    (tmp_path / "claude_cli").mkdir()
+    (tmp_path / "claude_cli" / "base.json").write_text('{"permissions": {"allow": []}}')
+    (tmp_path / "claude_cli" / "extra.json").write_text('{"permissions": {"allow": []}}')
+    assert list_available("claude_cli") == ["base", "extra"]
 
 
 def test_list_available_unknown_client_returns_empty(tmp_path, monkeypatch):
@@ -39,8 +39,8 @@ def test_list_available_unknown_client_returns_empty(tmp_path, monkeypatch):
 
 def test_list_all_returns_all_clients():
     result = list_all()
-    assert "claude" in result
-    assert "base" in result["claude"]
+    assert "claude_cli" in result
+    assert "base" in result["claude_cli"]
     assert "echo" in result
     assert "test" in result["echo"]
 
@@ -56,7 +56,7 @@ def test_list_all_empty_when_no_profiles_dir(tmp_path, monkeypatch):
 
 
 def test_supported_clients_includes_claude():
-    assert "claude" in SUPPORTED_CLIENTS
+    assert "claude_cli" in SUPPORTED_CLIENTS
 
 
 def test_supported_clients_excludes_echo():
@@ -80,11 +80,11 @@ def test_diff_raises_for_unsupported_client(tmp_path):
 
 @pytest.mark.parametrize("runtime_type", ["claude_code_channel", "sentinel_cli"])
 def test_gateway_runtime_to_client_maps_claude_backed_runtimes(runtime_type):
-    assert _gateway_runtime_to_client(runtime_type) == "claude"
+    assert _gateway_runtime_to_client(runtime_type) == "claude_cli"
 
 
 def test_gateway_runtime_to_client_is_case_and_whitespace_insensitive():
-    assert _gateway_runtime_to_client(" Claude_Code_Channel ") == "claude"
+    assert _gateway_runtime_to_client(" Claude_Code_Channel ") == "claude_cli"
 
 
 @pytest.mark.parametrize(
@@ -138,25 +138,25 @@ def test_deep_merge_new_key_added():
 
 def test_resolve_base_profile(tmp_path, monkeypatch):
     monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", tmp_path)
-    (tmp_path / "claude").mkdir()
-    (tmp_path / "claude" / "base.json").write_text(json.dumps({"permissions": {"allow": ["mcp__ax-channel__*"]}}))
-    result = resolve(["base"], "claude")
+    (tmp_path / "claude_cli").mkdir()
+    (tmp_path / "claude_cli" / "base.json").write_text(json.dumps({"permissions": {"allow": ["mcp__ax-channel__*"]}}))
+    result = resolve(["base"], "claude_cli")
     assert result == {"permissions": {"allow": ["mcp__ax-channel__*"]}}
 
 
 def test_resolve_missing_profile_raises(tmp_path, monkeypatch):
     monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", tmp_path)
-    (tmp_path / "claude").mkdir()
+    (tmp_path / "claude_cli").mkdir()
     with pytest.raises(FileNotFoundError, match="missing"):
-        resolve(["missing"], "claude")
+        resolve(["missing"], "claude_cli")
 
 
 def test_resolve_multiple_profiles_merged(tmp_path, monkeypatch):
     monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", tmp_path)
-    (tmp_path / "claude").mkdir()
-    (tmp_path / "claude" / "base.json").write_text(json.dumps({"permissions": {"allow": ["mcp__ax-channel__*"]}}))
-    (tmp_path / "claude" / "extra.json").write_text(json.dumps({"permissions": {"allow": ["Bash(echo:*)"]}}))
-    result = resolve(["base", "extra"], "claude")
+    (tmp_path / "claude_cli").mkdir()
+    (tmp_path / "claude_cli" / "base.json").write_text(json.dumps({"permissions": {"allow": ["mcp__ax-channel__*"]}}))
+    (tmp_path / "claude_cli" / "extra.json").write_text(json.dumps({"permissions": {"allow": ["Bash(echo:*)"]}}))
+    result = resolve(["base", "extra"], "claude_cli")
     assert set(result["permissions"]["allow"]) == {"mcp__ax-channel__*", "Bash(echo:*)"}
 
 
@@ -175,7 +175,7 @@ def _read_settings(workdir: Path) -> dict:
 
 
 def _base_profile_dir(tmp_path: Path) -> Path:
-    d = tmp_path / "profiles" / "claude"
+    d = tmp_path / "profiles" / "claude_cli"
     d.mkdir(parents=True)
     (d / "base.json").write_text(json.dumps({"permissions": {"allow": ["mcp__ax-channel__*"]}}))
     return tmp_path / "profiles"
@@ -187,7 +187,7 @@ def test_apply_creates_settings_file(tmp_path, monkeypatch):
     workdir = tmp_path / "agent"
     workdir.mkdir()
 
-    written = apply(["base"], "claude", workdir)
+    written = apply(["base"], "claude_cli", workdir)
 
     assert written == workdir / ".claude" / "settings.local.json"
     result = _read_settings(workdir)
@@ -202,7 +202,7 @@ def test_apply_merges_into_existing(tmp_path, monkeypatch):
     workdir.mkdir()
     _write_settings(workdir, {"enabledMcpjsonServers": ["ax-channel"], "permissions": {"allow": ["existing"]}})
 
-    apply(["base"], "claude", workdir)
+    apply(["base"], "claude_cli", workdir)
 
     result = _read_settings(workdir)
     assert "existing" in result["permissions"]["allow"]
@@ -216,7 +216,7 @@ def test_apply_merges_lists_outside_permissions_across_profiles(tmp_path, monkey
     (enabledMcpjsonServers) and deny rules (permissions.deny); applying two
     such fragments should union each of those lists too, the same way
     test_resolve_multiple_profiles_merged proves it for permissions.allow."""
-    d = tmp_path / "profiles" / "claude"
+    d = tmp_path / "profiles" / "claude_cli"
     d.mkdir(parents=True)
     (d / "base.json").write_text(
         json.dumps(
@@ -238,7 +238,7 @@ def test_apply_merges_lists_outside_permissions_across_profiles(tmp_path, monkey
     workdir = tmp_path / "agent"
     workdir.mkdir()
 
-    apply(["base", "extra"], "claude", workdir)
+    apply(["base", "extra"], "claude_cli", workdir)
 
     result = _read_settings(workdir)
     assert set(result["enabledMcpjsonServers"]) == {"ax-channel", "other-channel"}
@@ -253,7 +253,7 @@ def test_apply_reset_replaces_existing(tmp_path, monkeypatch):
     workdir.mkdir()
     _write_settings(workdir, {"permissions": {"allow": ["should-be-gone"]}, "other": "value"})
 
-    apply(["base"], "claude", workdir, reset=True)
+    apply(["base"], "claude_cli", workdir, reset=True)
 
     result = _read_settings(workdir)
     assert result["permissions"]["allow"] == ["mcp__ax-channel__*"]
@@ -267,7 +267,7 @@ def test_apply_records_ax_profiles_key(tmp_path, monkeypatch):
     workdir = tmp_path / "agent"
     workdir.mkdir()
 
-    apply(["base"], "claude", workdir)
+    apply(["base"], "claude_cli", workdir)
 
     assert _read_settings(workdir)["_axProfiles"] == ["base"]
 
@@ -278,13 +278,13 @@ def test_apply_records_ax_profiles_key(tmp_path, monkeypatch):
 
 
 def test_current_profile_list_empty_when_no_file(tmp_path):
-    assert current_profile_list(tmp_path / "nodir", "claude") == []
+    assert current_profile_list(tmp_path / "nodir", "claude_cli") == []
 
 
 def test_current_profile_list_returns_stored_profiles(tmp_path):
     (tmp_path / ".claude").mkdir()
     (tmp_path / ".claude" / "settings.local.json").write_text(json.dumps({"_axProfiles": ["base", "extra"]}))
-    assert current_profile_list(tmp_path, "claude") == ["base", "extra"]
+    assert current_profile_list(tmp_path, "claude_cli") == ["base", "extra"]
 
 
 def test_current_profile_list_rejects_unsupported_client(tmp_path):
@@ -303,7 +303,7 @@ def test_diff_shows_additions(tmp_path, monkeypatch):
     workdir = tmp_path / "agent"
     workdir.mkdir()
 
-    result = diff(["base"], "claude", workdir)
+    result = diff(["base"], "claude_cli", workdir)
 
     assert "permissions.allow: mcp__ax-channel__*" in result["add"]
     assert result["remove"] == []
@@ -318,7 +318,7 @@ def test_diff_shows_removals_on_reset(tmp_path, monkeypatch):
     workdir.mkdir()
     _write_settings(workdir, {"permissions": {"allow": ["old-permission"]}})
 
-    result = diff(["base"], "claude", workdir)
+    result = diff(["base"], "claude_cli", workdir)
 
     assert "permissions.allow: old-permission" in result["remove"]
     assert "permissions.allow: mcp__ax-channel__*" in result["add"]
@@ -331,7 +331,7 @@ def test_diff_no_change_when_already_applied(tmp_path, monkeypatch):
     workdir.mkdir()
     _write_settings(workdir, {"permissions": {"allow": ["mcp__ax-channel__*"]}, "_axProfiles": ["base"]})
 
-    result = diff(["base"], "claude", workdir)
+    result = diff(["base"], "claude_cli", workdir)
 
     assert result["add"] == []
     assert result["remove"] == []
@@ -343,7 +343,7 @@ def test_diff_reports_changes_outside_permissions_allow(tmp_path, monkeypatch):
     are merged by apply() via the same generic _deep_merge, so a profile
     that touches them must show up in the +/- summary too."""
     profiles_root = tmp_path / "profiles"
-    d = profiles_root / "claude"
+    d = profiles_root / "claude_cli"
     d.mkdir(parents=True)
     (d / "base.json").write_text(
         json.dumps(
@@ -357,7 +357,7 @@ def test_diff_reports_changes_outside_permissions_allow(tmp_path, monkeypatch):
     workdir = tmp_path / "agent"
     workdir.mkdir()
 
-    result = diff(["base"], "claude", workdir)
+    result = diff(["base"], "claude_cli", workdir)
 
     assert "enabledMcpjsonServers: ax-channel" in result["add"]
     assert "permissions.deny: Bash(rm:*)" in result["add"]
@@ -375,7 +375,7 @@ def test_diff_ignores_ax_profiles_bookkeeping_key(tmp_path, monkeypatch):
     workdir.mkdir()
     _write_settings(workdir, {"_axProfiles": ["other-profile"]})
 
-    result = diff(["base"], "claude", workdir)
+    result = diff(["base"], "claude_cli", workdir)
 
     assert not any("_axProfiles" in entry for entry in result["add"] + result["remove"])
 
@@ -399,7 +399,7 @@ def test_agent_info_from_registry_derives_client_from_runtime_type(monkeypatch):
 
     info = mod.agent_info_from_registry("agent-maker")
 
-    assert info == {"workdir": "/tmp/agent-maker", "runtime_type": "claude_code_channel", "client": "claude"}
+    assert info == {"workdir": "/tmp/agent-maker", "runtime_type": "claude_code_channel", "client": "claude_cli"}
 
 
 def test_agent_info_from_registry_client_none_for_unsupported_runtime(monkeypatch):

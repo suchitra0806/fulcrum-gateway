@@ -13,7 +13,7 @@ runner = CliRunner()
 
 
 def _profiles_root(tmp_path: Path) -> Path:
-    d = tmp_path / "profiles" / "claude"
+    d = tmp_path / "profiles" / "claude_cli"
     d.mkdir(parents=True)
     (d / "base.json").write_text(json.dumps({"permissions": {"allow": ["mcp__ax-channel__*"]}}))
     return tmp_path / "profiles"
@@ -28,7 +28,7 @@ def _mock_claude_registry(monkeypatch, workdir: Path) -> None:
     """
     monkeypatch.setattr(
         "ax_cli.commands.agent_profiles.agent_info_from_registry",
-        lambda name: {"workdir": str(workdir), "runtime_type": "claude_code_channel", "client": "claude"},
+        lambda name: {"workdir": str(workdir), "runtime_type": "claude_code_channel", "client": "claude_cli"},
     )
 
 
@@ -42,15 +42,15 @@ def test_profiles_list_table_all_clients(tmp_path, monkeypatch):
     result = runner.invoke(app, ["agents", "profiles", "list"])
     assert result.exit_code == 0
     assert "base" in result.output
-    assert "claude" in result.output
+    assert "claude_cli" in result.output
 
 
 def test_profiles_list_table_filtered(tmp_path, monkeypatch):
     monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", _profiles_root(tmp_path))
-    result = runner.invoke(app, ["agents", "profiles", "list", "--client", "claude"])
+    result = runner.invoke(app, ["agents", "profiles", "list", "--client", "claude_cli"])
     assert result.exit_code == 0
     assert "base" in result.output
-    assert "claude" in result.output
+    assert "claude_cli" in result.output
 
 
 def test_profiles_list_json_all_clients(tmp_path, monkeypatch):
@@ -58,15 +58,15 @@ def test_profiles_list_json_all_clients(tmp_path, monkeypatch):
     result = runner.invoke(app, ["agents", "profiles", "list", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
-    assert data == {"claude": ["base"]}
+    assert data == {"claude_cli": ["base"]}
 
 
 def test_profiles_list_json_filtered(tmp_path, monkeypatch):
     monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", _profiles_root(tmp_path))
-    result = runner.invoke(app, ["agents", "profiles", "list", "--client", "claude", "--json"])
+    result = runner.invoke(app, ["agents", "profiles", "list", "--client", "claude_cli", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
-    assert data == {"claude": ["base"]}
+    assert data == {"claude_cli": ["base"]}
 
 
 def test_profiles_list_empty_client(tmp_path, monkeypatch):
@@ -151,7 +151,7 @@ def test_profiles_apply_json_output(tmp_path, monkeypatch):
     data = json.loads(result.output)
     assert data["agent"] == "my-agent"
     assert data["profiles"] == ["base"]
-    assert data["client"] == "claude"
+    assert data["client"] == "claude_cli"
     assert data["reset"] is False
 
 
