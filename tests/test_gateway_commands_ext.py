@@ -861,6 +861,100 @@ class TestAgentsAddCommand:
         result = runner.invoke(app, ["gateway", "agents", "add", "bad"])
         assert result.exit_code != 0
 
+    def test_ephemeral_session_wiped_after_successful_add(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "config"
+        monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+        gateway_core.save_gateway_session(
+            {
+                "token": "axp_u_test.token",
+                "base_url": "https://paxai.app",
+                "space_id": "space-1",
+                "username": "madtank",
+                "ephemeral": True,
+            }
+        )
+        entry = {
+            "name": "echo1",
+            "template_label": "Echo Test",
+            "asset_type_label": "test",
+            "desired_state": "running",
+            "timeout_seconds": None,
+            "token_file": "/tmp/tok",
+        }
+        monkeypatch.setattr(gw_cmd, "_register_managed_agent", lambda **kw: entry)
+        monkeypatch.setattr(gw_cmd, "_resolve_system_prompt_input", lambda **kw: None)
+        session_path = gateway_core.session_path()
+        assert session_path.exists()
+
+        result = runner.invoke(app, ["gateway", "agents", "add", "echo1", "--json"])
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["ephemeral_session_wiped"] == str(session_path)
+        assert not session_path.exists()
+        recent = gateway_core.load_recent_gateway_activity()
+        assert any(item.get("event") == "gateway_session_wiped_ephemeral" for item in recent)
+
+    def test_ephemeral_session_preserved_when_add_fails(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "config"
+        monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+        gateway_core.save_gateway_session(
+            {
+                "token": "axp_u_test.token",
+                "base_url": "https://paxai.app",
+                "space_id": "space-1",
+                "username": "madtank",
+                "ephemeral": True,
+            }
+        )
+        monkeypatch.setattr(
+            gw_cmd,
+            "_register_managed_agent",
+            lambda **kw: (_ for _ in ()).throw(ValueError("bad agent")),
+        )
+        monkeypatch.setattr(gw_cmd, "_resolve_system_prompt_input", lambda **kw: None)
+        session_path = gateway_core.session_path()
+
+        result = runner.invoke(app, ["gateway", "agents", "add", "bad"])
+
+        assert result.exit_code != 0
+        # Failed mint must not wipe the session — operator should retry without
+        # being forced to re-paste the PAT.
+        assert session_path.exists()
+        session = gateway_core.load_gateway_session()
+        assert session.get("ephemeral") is True
+        assert session.get("token") == "axp_u_test.token"
+
+    def test_non_ephemeral_session_survives_successful_add(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "config"
+        monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+        gateway_core.save_gateway_session(
+            {
+                "token": "axp_u_test.token",
+                "base_url": "https://paxai.app",
+                "space_id": "space-1",
+                "username": "madtank",
+            }
+        )
+        entry = {
+            "name": "echo1",
+            "template_label": "Echo Test",
+            "asset_type_label": "test",
+            "desired_state": "running",
+            "timeout_seconds": None,
+            "token_file": "/tmp/tok",
+        }
+        monkeypatch.setattr(gw_cmd, "_register_managed_agent", lambda **kw: entry)
+        monkeypatch.setattr(gw_cmd, "_resolve_system_prompt_input", lambda **kw: None)
+        session_path = gateway_core.session_path()
+
+        result = runner.invoke(app, ["gateway", "agents", "add", "echo1", "--json"])
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert "ephemeral_session_wiped" not in data
+        assert session_path.exists()
+
 
 # ── CLI: gateway agents update ────────────────────────────────────────
 
