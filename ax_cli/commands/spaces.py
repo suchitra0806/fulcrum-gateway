@@ -140,6 +140,10 @@ def use_space(
 
         gw_sync = apply_space_to_gateway_session(sid, space_name=space_row.get("name"))
     except Exception:
+        # Fail-soft: a Gateway-side problem must never break the CLI-config write
+        # above. Log at debug (visible under -v) so a swallowed programming error
+        # from a future refactor is still traceable by maintainers (issue #160).
+        log.debug("gateway session sync failed during `ax spaces use`", exc_info=True)
         gw_sync = None
     allowed, agent_name = _bound_agent_allows_space(client, sid)
     result = {
