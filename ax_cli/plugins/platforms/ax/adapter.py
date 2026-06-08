@@ -655,8 +655,14 @@ def check_requirements() -> bool:
         return False
 
 
-def is_connected() -> bool:
-    """Coarse env-only check used by gateway status before adapter init."""
+def is_connected(config: Any = None) -> bool:
+    """Coarse env-only check used by gateway status before adapter init.
+
+    Hermes's registry-driven enable pass calls this as ``is_connected(config)``
+    with a probe ``PlatformConfig`` (the contract Discord/Google Chat follow);
+    the ``config`` argument is accepted but unused since aX identity is
+    sourced from env vars, not YAML platform blocks.
+    """
     return bool(
         os.getenv("AX_TOKEN") and os.getenv("AX_SPACE_ID") and os.getenv("AX_AGENT_NAME") and os.getenv("AX_AGENT_ID")
     )
