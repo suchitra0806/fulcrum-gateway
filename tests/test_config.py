@@ -1393,6 +1393,61 @@ class TestResolveUserTokenExtended:
         assert result is None
 
 
+# ---- user-PAT precedence unification (#175) ----
+
+
+class TestUserPatPrecedenceUnified:
+    """get_client and get_user_client must agree on which user PAT wins.
+
+    Canonical rule: environment override beats the on-disk file. Before #175
+    resolve_user_token put ~/.ax/user.toml ahead of AX_TOKEN, so an operator on
+    the encrypted-env workflow who set AX_TOKEN had it honored by runtime
+    commands but silently shadowed by the stored file on user-login commands.
+    """
+
+    def _store_user_login(self, tmp_path, monkeypatch, token):
+        monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        _save_user_config({"token": token, "base_url": "https://paxai.app", "principal_type": "user"})
+
+    def test_ax_token_user_pat_wins_over_stored_file(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("AX_USER_TOKEN", raising=False)
+        self._store_user_login(tmp_path, monkeypatch, "axp_u_file.secret")
+        monkeypatch.setenv("AX_TOKEN", "axp_u_env.secret")
+
+        assert resolve_user_token() == "axp_u_env.secret"
+
+    def test_ax_user_token_outranks_ax_token_and_file(self, tmp_path, monkeypatch):
+        self._store_user_login(tmp_path, monkeypatch, "axp_u_file.secret")
+        monkeypatch.setenv("AX_TOKEN", "axp_u_env.secret")
+        monkeypatch.setenv("AX_USER_TOKEN", "axp_u_login.secret")
+
+        assert resolve_user_token() == "axp_u_login.secret"
+
+    def test_agent_ax_token_does_not_shadow_user_file(self, tmp_path, monkeypatch):
+        # The common runtime case: AX_TOKEN holds an agent PAT. It must not
+        # displace the stored user login for user-authored commands.
+        monkeypatch.delenv("AX_USER_TOKEN", raising=False)
+        self._store_user_login(tmp_path, monkeypatch, "axp_u_file.secret")
+        monkeypatch.setenv("AX_TOKEN", "axp_a_agent.secret")
+
+        assert resolve_user_token() == "axp_u_file.secret"
+
+    def test_runtime_and_user_clients_agree_on_shared_user_pat(self, tmp_path, monkeypatch):
+        # Acceptance: with AX_TOKEN (a user PAT) and a stored file both present,
+        # the runtime path and the user-login path resolve to the SAME
+        # credential. resolve_token backs get_client (config.py get_client) and
+        # resolve_user_token backs get_user_client; the resolvers are the single
+        # source of truth for each client's token, so their agreement *is* the
+        # client agreement. Asserted at the resolver layer to avoid building a
+        # live AxClient in a pure config-resolution unit test.
+        monkeypatch.delenv("AX_USER_TOKEN", raising=False)
+        self._store_user_login(tmp_path, monkeypatch, "axp_u_file.secret")
+        monkeypatch.setenv("AX_TOKEN", "axp_u_shared.secret")
+
+        assert resolve_token() == resolve_user_token() == "axp_u_shared.secret"
+
+
 # ---- _check_config_permissions ----
 
 
