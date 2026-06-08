@@ -28,6 +28,15 @@ stores a separate registry, session, PID file, UI state, queues, and agent token
 files. `AX_GATEWAY_DIR=/path/to/gateway-state` is available when a deployment
 needs an explicit state root.
 
+Managed-agent token paths are stored in `registry.json` **relative to the
+gateway state dir** (`agents/<name>/token`) and resolved against it at read
+time, so a registry stays portable across hosts and containers — bind-mount the
+state dir at a different absolute path (e.g. a macOS host's `~/ax-agents/...`
+mounted into a Linux devcontainer) and the same registry opens without
+re-minting. Registries written by older builds carried an absolute path frozen
+at mint time; those are healed automatically on load (see
+[Corruption repair](#corruption-repair)).
+
 ## Current Gateway State
 
 Gateway has enough plumbing to register agents, mint managed agent tokens, show
@@ -329,6 +338,25 @@ inconsistencies in `registry.json` (e.g., missing fields, invalid state
 values), it resets the affected entry to a safe default state and logs a
 warning. This is a best-effort recovery — if the registry file itself is
 unparseable, see the [recovery scenario](scenarios/recover-corrupted-registry.md).
+
+Registry load also runs a one-shot path migration: any managed-agent
+`token_file` frozen as an absolute `…/agents/<name>/token` path (from an older
+`agents add`) is rewritten in place to the portable relative form
+`agents/<name>/token`. The migration is idempotent and matches on the canonical
+token shape, so it heals a path captured under a *different* host's state dir.
+The rewrite is applied in memory on load and persisted on the next registry
+save.
+
+> **Custom token paths:** the match is purely structural — *any* `token_file`
+> whose tail is `agents/<name>/token` (where `<name>` is the entry's name) is
+> rewritten to the relative form and resolved under the current `gateway_dir()`,
+> even if the original absolute path pointed outside the gateway state dir. This
+> is deliberate: it is what heals a Mac-minted `/Users/.../agents/nova/token`
+> opened inside a Linux container. Gateway only ever writes managed tokens to
+> `<gateway_dir>/agents/<name>/token` (ADR-005), so the only way to hit this with
+> a path you do *not* want relocated is to hand-edit `registry.json`. If you
+> deliberately point a managed agent at a custom token location, avoid the
+> `agents/<name>/token` tail shape so the migration leaves it alone.
 
 ---
 
