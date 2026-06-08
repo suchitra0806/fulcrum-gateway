@@ -14,7 +14,7 @@ from ax_cli.connectors.errors import (
     ConnectorRateLimitError,
     ConnectorTransientError,
 )
-from ax_cli.connectors.providers.http_mcp_adapter import execute_tool, list_tools
+from ax_cli.connectors.providers.http_mcp_adapter import _jsonrpc_request, execute_tool, list_tools
 
 
 @pytest.fixture()
@@ -218,3 +218,25 @@ class TestErrorClassification:
                 execute_tool("nope", {}, auth_env, config, "test-mcp")
             assert type(exc_info.value) is ConnectorProviderError
             assert exc_info.value.status_code == 404
+
+
+# ── JSON-RPC request id (#94) ─────────────────────────────────────────────────
+
+
+class TestJsonRpcRequestId:
+    def test_ids_are_unique_positive_ints(self):
+        a = _jsonrpc_request("tools/list")
+        b = _jsonrpc_request("tools/list")
+        assert isinstance(a["id"], int) and isinstance(b["id"], int)
+        assert a["id"] >= 1 and b["id"] >= 1
+        assert a["id"] != b["id"]  # spec: id correlates response to request
+        assert a["jsonrpc"] == "2.0" and a["method"] == "tools/list"
+
+    def test_each_outbound_request_carries_a_distinct_id(self, auth_env: dict, config: dict):
+        mock_data = {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
+        with patch("httpx.post", return_value=_mock_response(200, mock_data)) as mock_post:
+            list_tools(auth_env, config, "test-mcp")
+            list_tools(auth_env, config, "test-mcp")
+        ids = [c.kwargs["json"]["id"] for c in mock_post.call_args_list]
+        assert len(ids) == 2
+        assert ids[0] != ids[1]

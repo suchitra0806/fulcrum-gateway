@@ -6,6 +6,7 @@ capability — that is Composio-specific.
 
 from __future__ import annotations
 
+import itertools
 import logging
 from typing import Any
 
@@ -15,6 +16,12 @@ from ..constants import CONNECT_TIMEOUT, READ_TIMEOUT
 from ..errors import ConnectorProviderError, classify_provider_error
 
 log = logging.getLogger("connectors.http_mcp")
+
+# Monotonic JSON-RPC request id. The spec uses the id to correlate a response
+# with its request; a hard-coded id mis-correlates if a server ever batches or
+# pipelines. `count` is atomic under the GIL, so a per-call `next()` is enough
+# without extra locking (issue #94).
+_request_id = itertools.count(1)
 
 
 def _base_url(config: dict[str, Any], connector_name: str) -> str:
@@ -43,7 +50,7 @@ def _headers(auth_env: dict[str, str], config: dict[str, Any]) -> dict[str, str]
 
 
 def _jsonrpc_request(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    req: dict[str, Any] = {"jsonrpc": "2.0", "method": method, "id": 1}
+    req: dict[str, Any] = {"jsonrpc": "2.0", "method": method, "id": next(_request_id)}
     if params:
         req["params"] = params
     return req
