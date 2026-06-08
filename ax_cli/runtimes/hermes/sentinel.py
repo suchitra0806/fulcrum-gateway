@@ -65,8 +65,8 @@ def _parse_retry_after(resp: "httpx.Response", default: float = 60.0) -> float:
         except ValueError:
             pass
         try:
-            from email.utils import parsedate_to_datetime
             import datetime
+            from email.utils import parsedate_to_datetime
 
             retry_dt = parsedate_to_datetime(raw)
             delta = (retry_dt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
@@ -306,7 +306,7 @@ class AxAPI:
                         return payload
             elif resp.status_code == 429:
                 delay = _parse_retry_after(resp)
-                log.warning("send_message: rate-limited by paxai.app — backing off %.0fs (Retry-After)", delay)
+                log.warning("send_message: rate limited — backing off %.0fs (Retry-After)", delay)
                 time.sleep(delay)
             else:
                 log.warning(f"send_message: {resp.status_code} {resp.text[:200]}")
@@ -326,7 +326,7 @@ class AxAPI:
             )
             if resp.status_code == 429:
                 delay = _parse_retry_after(resp)
-                log.warning("edit_message: rate-limited by paxai.app — backing off %.0fs (Retry-After)", delay)
+                log.warning("edit_message: rate limited — backing off %.0fs (Retry-After)", delay)
                 time.sleep(delay)
                 return False
             return resp.status_code == 200
@@ -1233,7 +1233,7 @@ def run(args):
             with api.connect_sse() as resp:
                 if resp.status_code == 429:
                     delay = _parse_retry_after(resp)
-                    log.warning("SSE connect: rate-limited by paxai.app — backing off %.0fs (Retry-After)", delay)
+                    log.warning("SSE connect: rate limited — backing off %.0fs (Retry-After)", delay)
                     time.sleep(delay)
                     raise ConnectionError("SSE 429")
                 if resp.status_code != 200:
