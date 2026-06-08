@@ -45,7 +45,7 @@ class _ClientProfile:
 
 
 _CLIENTS: dict[str, _ClientProfile] = {
-    "claude": _ClientProfile(
+    "claude_cli": _ClientProfile(
         env_dir=Path.home() / ".claude" / "channels" / "ax-channel",
         launch_template=(
             "claude --strict-mcp-config --mcp-config {mcp_path}"
@@ -407,7 +407,7 @@ def write_channel_setup(
     *,
     agent_name: str,
     workdir: Path,
-    client: str = "claude",
+    client: str = "claude_cli",
     space_id: str | None = None,
     base_url: str | None = None,
     token_file: Optional[Path] = None,
@@ -1411,7 +1411,7 @@ def setup_channel(
     agent: str = typer.Argument(..., help="Agent name to configure"),
     workdir: Path = typer.Option(Path.cwd(), "--workdir", help="Directory where .mcp.json should be written"),
     client: str = typer.Option(
-        "claude",
+        "claude_cli",
         "--client",
         help=f"MCP client to configure for. Supported: {', '.join(_SUPPORTED_CLIENTS)}",
     ),
