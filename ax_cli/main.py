@@ -34,6 +34,38 @@ def _reconfigure_stdio_to_utf8() -> None:
 
 _reconfigure_stdio_to_utf8()
 
+
+_MIN_PYTHON = (3, 12)
+
+
+def _require_supported_python() -> None:
+    """Fail fast with an actionable message on unsupported Python versions.
+
+    ``requires-python`` in ``pyproject.toml`` rejects <3.12 at install time,
+    but that guard is bypassed when axctl is run from a source checkout, a
+    mis-resolved virtualenv, or a system interpreter that already has the
+    package available. The team develops and tests exclusively on 3.12+, and
+    the 3.11→3.12 deltas (``TaskGroup`` exception wrapping, asyncio/SSE timing,
+    tightened regex group rules) surface as bugs we cannot reproduce on a 3.11
+    host. Exit early with an upgrade instruction rather than letting the user
+    hit a cryptic downstream failure.
+
+    Runs before the typer/httpx imports below so the message is reachable even
+    if a dependency itself trips on the old interpreter.
+    """
+    if sys.version_info < _MIN_PYTHON:
+        current = ".".join(str(p) for p in sys.version_info[:3])
+        required = ".".join(str(p) for p in _MIN_PYTHON)
+        sys.stderr.write(
+            f"axctl requires Python {required}+, but it is running on "
+            f"Python {current}.\nUpgrade to Python {required} or newer and "
+            f"reinstall (e.g. `pipx reinstall axctl` or `pip install -U axctl`).\n"
+        )
+        raise SystemExit(1)
+
+
+_require_supported_python()
+
 import httpx  # noqa: E402  — must follow stdio reconfig
 import typer  # noqa: E402
 
