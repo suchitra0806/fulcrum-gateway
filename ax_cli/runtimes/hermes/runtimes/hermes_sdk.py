@@ -292,6 +292,26 @@ def _secure_hermes_tools(workdir: str):
     with path/command guards from agents/tools/__init__.py.
     Agents can only write to their own worktrees/workspace/tmp.
     Agents cannot read token files or credential directories.
+
+    **Trust boundary.** These guards are the credential-exfiltration
+    boundary for managed agents. ``BLOCKED_READ_PATTERNS`` keeps
+    ``read_file`` and ``execute_code`` from touching token / credential
+    paths, and the write-path guard keeps ``write_file`` and ``patch``
+    inside the agent's workdir. Without this wrap, an agent could read
+    ``~/.ax/user.toml`` or other secret-bearing files directly.
+
+    **Degraded mode.** When the underlying ``tools`` package or any of
+    its dependencies cannot be imported (typical: an IL2 deployment
+    that ships the Hermes runtime without the tool registry), this
+    function raises. The caller in :func:`HermesSDKRuntime.execute`
+    routes that exception through :func:`_install_secure_tools` which
+    surfaces the failure as a ``cb.on_status`` event and a stderr
+    WARNING so operators see the sandbox loss instead of discovering
+    it via behavior. The caller proceeds with unsandboxed tools today
+    for backward compatibility with existing deployments; a strict
+    fail-closed posture under an opt-in env var is a separate
+    follow-up. Do not run a degraded runtime in a deployment where
+    tool sandboxing is part of the trust boundary.
     """
     import json as _json
 
@@ -340,6 +360,45 @@ def _secure_hermes_tools(workdir: str):
         return None
 
     _wrap("execute_code", _check_code)
+
+
+def _install_secure_tools(workdir: str, cb: StreamCallback | None = None) -> bool:
+    """Install Hermes tool security wraps and surface failures loudly.
+
+    Calls :func:`_secure_hermes_tools` and returns True on success. When the
+    wrap fails (typical: a deployment that ships the Hermes runtime without
+    the tool registry), the failure is surfaced through three operator-facing
+    channels so the security degradation is not silently absorbed (#151):
+
+    - ``log.error`` at runtime-log level (was ``log.warning`` before #151).
+    - ``cb.on_status(...)`` so the gateway and the SSE listener see a status
+      event reflecting the security loss.
+    - A ``WARNING`` line on stderr with ``flush=True`` for operators running
+      the runtime directly without a callback consumer.
+
+    Returns False if the wrap failed (caller proceeds with unsandboxed tools
+    for backward compatibility today; this is the loud-but-functional posture,
+    matching the langgraph bridge fix in PR #121). A strict fail-closed mode
+    under an opt-in env var is a separate follow-up.
+    """
+    try:
+        _secure_hermes_tools(workdir)
+        return True
+    except Exception as exc:
+        warning = (
+            "hermes_sdk: tool security setup failed: "
+            f"{exc!r}. Tool calls (terminal, read_file, write_file, patch, "
+            "execute_code) will run unsandboxed. Without these guards an "
+            "agent can read credential-bearing files outside its workdir."
+        )
+        log.error(warning)
+        if cb is not None:
+            try:
+                cb.on_status(f"security_wrapper_degraded: {exc!r}")
+            except Exception:
+                pass
+        print(f"WARNING: {warning}", file=sys.stderr, flush=True)
+        return False
 
 
 def _register_connector_tools(workdir: str) -> None:
@@ -655,10 +714,11 @@ class HermesSDKRuntime(BaseRuntime):
 
         # ── Secure tools: wrap hermes tools with path/command guards ──
         # Agents can only read shared repos + own dir, write to worktrees only.
-        try:
-            _secure_hermes_tools(workdir)
-        except Exception as e:
-            log.warning("hermes_sdk: tool security setup failed: %s", e)
+        # Failures route through _install_secure_tools so the degradation is
+        # surfaced via cb.on_status + stderr WARNING rather than absorbed into
+        # a single log.warning line (#151). Loud-but-functional posture; the
+        # runtime proceeds with unsandboxed tools today for backward compat.
+        _install_secure_tools(workdir, cb=cb)
 
         # ── Build conversation history ──
         history = list(extra.get("history", []))

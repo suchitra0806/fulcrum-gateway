@@ -32,7 +32,8 @@ class ToolFilterPolicy:
     denied_tools: list[str] = dataclasses.field(default_factory=list)
     allowed_toolkits: list[str] = dataclasses.field(default_factory=list)
     denied_toolkits: list[str] = dataclasses.field(default_factory=list)
-    tools_limit: int = DEFAULT_TOOLS_LIMIT
+    tools_limit: int | None = DEFAULT_TOOLS_LIMIT
+    """Max tools to surface, or None for unbounded (no cap)."""
 
 
 def validate_fnmatch_pattern(pattern: str, *, field: str) -> None:
@@ -61,21 +62,34 @@ def validate_policy_patterns(config: dict[str, Any]) -> None:
         _validate_pattern_list(_as_list(config.get(key)), field=key)
 
 
+def _normalize_tools_limit(value: Any) -> int | None:
+    """Resolve a configured tools_limit to a cap, or None for "unbounded".
+
+    A value <= 0 is the unbounded sentinel and maps to None (no cap); a
+    positive value is clamped to MAX_TOOLS_LIMIT. An unparseable value falls
+    back to DEFAULT_TOOLS_LIMIT.
+
+    Note: "unbounded" still only surfaces as many tools as the upstream catalog
+    fetch returns, which is itself capped at MAX_TOOLS_LIMIT until catalog
+    pagination lands (#140).
+    """
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_TOOLS_LIMIT
+    if limit <= 0:
+        return None
+    return min(limit, MAX_TOOLS_LIMIT)
+
+
 def from_config(config: dict[str, Any]) -> ToolFilterPolicy:
     validate_policy_patterns(config)
-    limit = config.get(KEY_TOOLS_LIMIT, DEFAULT_TOOLS_LIMIT)
-    if isinstance(limit, str):
-        try:
-            limit = int(limit)
-        except ValueError:
-            limit = DEFAULT_TOOLS_LIMIT
-    limit = max(1, min(int(limit), MAX_TOOLS_LIMIT))
     return ToolFilterPolicy(
         allowed_tools=_validate_pattern_list(_as_list(config.get(KEY_ALLOWED_TOOLS)), field=KEY_ALLOWED_TOOLS),
         denied_tools=_validate_pattern_list(_as_list(config.get(KEY_DENIED_TOOLS)), field=KEY_DENIED_TOOLS),
         allowed_toolkits=_validate_pattern_list(_as_list(config.get(KEY_ALLOWED_TOOLKITS)), field=KEY_ALLOWED_TOOLKITS),
         denied_toolkits=_validate_pattern_list(_as_list(config.get(KEY_DENIED_TOOLKITS)), field=KEY_DENIED_TOOLKITS),
-        tools_limit=limit,
+        tools_limit=_normalize_tools_limit(config.get(KEY_TOOLS_LIMIT, DEFAULT_TOOLS_LIMIT)),
     )
 
 
@@ -153,7 +167,7 @@ def filter_tools(
         if not _toolkit_allowed(toolkit, policy):
             continue
         result.append(item)
-        if apply_limit and len(result) >= policy.tools_limit:
+        if apply_limit and policy.tools_limit is not None and len(result) >= policy.tools_limit:
             break
     return result
 

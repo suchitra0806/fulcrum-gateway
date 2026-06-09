@@ -73,6 +73,17 @@ def execute_tool(
     policy = from_config(connector.config)
     identity = {k: v for k, v in [("agent_name", agent_name), ("agent_id", agent_id)] if v}
     invocation_ctx = {**identity, "invocation_id": new_invocation_id()}
+    # Callers that have the toolkit from list_tools context pass it in;
+    # callers that only have the slug (notably the Hermes _connector_call
+    # tool) get None. Let the adapter recover the toolkit from the slug
+    # so allowed_toolkits / denied_toolkits policies still apply on the
+    # execution path — otherwise `_toolkit_allowed(None, policy)` rejects
+    # every call when an allow-list is set (#128).
+    if toolkit is None:
+        adapter_mod = _ADAPTERS.get(connector.provider)
+        derive = getattr(adapter_mod, "toolkit_from_slug", None) if adapter_mod is not None else None
+        if derive is not None:
+            toolkit = derive(tool_slug)
     try:
         assert_tool_allowed(tool_slug, policy, toolkit=toolkit)
     except ConnectorPolicyError as exc:

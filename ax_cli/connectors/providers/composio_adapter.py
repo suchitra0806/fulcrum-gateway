@@ -24,6 +24,26 @@ log = logging.getLogger("connectors.composio")
 DEFAULT_BASE_URL = DEFAULT_COMPOSIO_BASE_URL
 
 
+def toolkit_from_slug(tool_slug: str) -> str | None:
+    """Derive the toolkit (app namespace) from a Composio tool slug.
+
+    Composio slugs follow the ``<TOOLKIT>_<OPERATION>`` convention
+    (e.g., ``GITHUB_LIST_PULL_REQUESTS`` → ``github``). The list-tools
+    response carries the toolkit in ``appName``, but execution-time
+    callers that only have the slug (e.g. the Hermes ``_connector_call``
+    tool) need a way to recover it so ``allowed_toolkits`` /
+    ``denied_toolkits`` policies still apply. See #128.
+
+    Returns ``None`` for slugs without an underscore — we don't invent a
+    toolkit from a single token, since that would silently coerce a
+    namespace-less tool through a whitelist that didn't name it.
+    """
+    if not tool_slug or "_" not in tool_slug:
+        return None
+    prefix = tool_slug.split("_", 1)[0]
+    return prefix.lower() or None
+
+
 def _base_url(config: dict[str, Any]) -> str:
     url = str(config.get("composio_base_url") or DEFAULT_BASE_URL).rstrip("/")
     if url.endswith("/v2"):
