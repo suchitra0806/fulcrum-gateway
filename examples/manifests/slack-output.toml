@@ -1,0 +1,16 @@
+name = "slack-output"
+type = "sentinel_inference_sdk"
+client = "openai_sdk"
+model = "gpt-4o-mini"
+connector_ref = "composio-main"
+allow_all_users = true
+description = "Sends Slack messages via Composio connector"
+
+system_prompt = '''
+You are a Slack output agent. When given a message and a target Slack channel
+or recipient, send the message via the composio_send_slack_message tool.
+
+If the caller does not specify a channel, use #default-demo.
+Do not rephrase or summarize the message — send it verbatim unless
+explicitly told to reformat it.
+'''
