@@ -2552,7 +2552,7 @@ def test_gateway_managed_token_loader_requires_bound_agent_id(tmp_path):
         )
 
 
-def test_hermes_sentinel_env_rejects_user_bootstrap_pat(tmp_path):
+def test_sentinel_inference_sdk_env_rejects_user_bootstrap_pat(tmp_path):
     token_file = tmp_path / "token"
     token_file.write_text("axp_u_user.secret")
 
@@ -3067,7 +3067,7 @@ def test_sentinel_claude_command_prefers_explicit_add_dir(tmp_path):
     assert cmd[cmd.index("--add-dir") + 1] == str(add_dir)
 
 
-def test_managed_hermes_sentinel_runtime_supervises_long_running_listener(tmp_path, monkeypatch):
+def test_managed_sentinel_inference_sdk_runtime_supervises_long_running_listener(tmp_path, monkeypatch):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
@@ -8572,7 +8572,7 @@ def test_distinct_errors_sharing_long_prefix_do_not_falsely_dedup(monkeypatch, t
 
 def test_hermes_plugin_setup_error_increments_consecutive_count(monkeypatch, tmp_path):
     """#33: the hermes_plugin runtime must go through the same
-    consecutive-error counter + auto-disable plumbing as hermes_sentinel.
+    consecutive-error counter + auto-disable plumbing as sentinel_inference_sdk.
 
     Before this fix, _start_hermes_plugin_process called the old inline
     _record_supervised_setup_error which only recorded state — no counter,
@@ -9594,7 +9594,7 @@ def test_resolve_inference_client_is_case_insensitive():
     assert gateway_core._resolve_inference_client(entry) == "gemini_sdk"
 
 
-def test_build_hermes_sentinel_cmd_threads_configured_runtime_into_argv():
+def test_build_sentinel_inference_sdk_cmd_threads_configured_runtime_into_argv():
     """End-to-end: a registry entry with `client` set must cause the launcher
     to emit `--runtime gemini_sdk`. Regression for the bug where the launcher
     hardcoded the runtime name and made every provider runtime unreachable."""

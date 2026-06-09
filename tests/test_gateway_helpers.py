@@ -2327,7 +2327,7 @@ class TestHermesSetupStatus:
         )
         entry = {
             "template_id": "hermes",
-            "runtime_type": "hermes_sentinel",
+            "runtime_type": "sentinel_inference_sdk",
         }
         result = hermes_setup_status(entry)
         assert result["ready"] is False
@@ -2801,8 +2801,8 @@ class TestIsSentinelVendorSdkRuntime:
         from ax_cli.gateway import _is_sentinel_inference_sdk_runtime
 
         assert _is_sentinel_inference_sdk_runtime("sentinel_inference_sdk") is True
-        assert _is_sentinel_inference_sdk_runtime("hermes_sentinel") is True  # legacy alias
-        assert _is_sentinel_inference_sdk_runtime("hermes_sdk") is False  # promoted to sentinel_hermes_sdk
+        assert _is_sentinel_inference_sdk_runtime("hermes_sentinel") is False
+        assert _is_sentinel_inference_sdk_runtime("hermes_sdk") is False
         assert _is_sentinel_inference_sdk_runtime("sentinel_hermes_sdk") is False
         assert _is_sentinel_inference_sdk_runtime("hermes_plugin") is False
 
@@ -2822,18 +2822,12 @@ class TestIsHermesPluginRuntime:
         from ax_cli.gateway import _is_hermes_plugin_runtime
 
         assert _is_hermes_plugin_runtime("hermes_plugin") is True
-        assert _is_hermes_plugin_runtime("hermes_sentinel") is False
 
 
 class TestRuntimeTypeDeprecation:
     """Catalog helpers that surface deprecated runtime types in display
     paths so a registry minted by an older axctl doesn't silently pin a
     legacy code path after upgrade (#90)."""
-
-    def test_deprecated_true_for_marked_runtime(self):
-        from ax_cli.gateway_runtime_types import runtime_type_deprecated
-
-        assert runtime_type_deprecated("hermes_sentinel") is True
 
     def test_deprecated_false_for_current_runtime(self):
         from ax_cli.gateway_runtime_types import runtime_type_deprecated
@@ -2849,11 +2843,6 @@ class TestRuntimeTypeDeprecation:
         assert runtime_type_deprecated("not-a-real-runtime") is False
         assert runtime_type_deprecated("") is False
         assert runtime_type_deprecated(None) is False
-
-    def test_successor_for_deprecated_runtime(self):
-        from ax_cli.gateway_runtime_types import runtime_type_successor
-
-        assert runtime_type_successor("hermes_sentinel") == "sentinel_inference_sdk"
 
     def test_successor_none_for_current_runtime(self):
         from ax_cli.gateway_runtime_types import runtime_type_successor

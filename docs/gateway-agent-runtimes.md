@@ -6,7 +6,7 @@ agent brain into a new runtime shape.
 The proven local setup before Gateway was:
 
 - Long-running sentinel listeners in `/home/ax-agent/agents`, launched by
-  scripts such as `start_hermes_sentinel.sh`.
+  scripts such as `start_sentinel.sh`.
 - Hermes-backed coding agents using `claude_agent_v2.py --runtime hermes_sdk`
   with Codex/OpenAI models.
 - Claude Code sessions connected through `axctl channel` using agent-bound
@@ -68,11 +68,6 @@ Current useful modes:
   calls (`openai_sdk`, `groq_sdk`, `gemini_sdk`, `mistral_sdk`, `leapfrog_sdk`,
   `xai_sdk`). Lightweight single-turn API path; no local Hermes framework
   dependency. `sentinel_sdk_runtime` is required with no default.
-- `hermes_sentinel` *(legacy alias)*: Former name for the sentinel supervisor
-  runtimes, kept so existing registry entries keep working. Migrate to
-  `sentinel_hermes_sdk` if the agent used `--runtime hermes_sdk`, or to
-  `sentinel_inference_sdk` (with `sentinel_sdk_runtime` set) if it used a
-  direct vendor API backend.
 - `claude_code_channel`: attached Claude Code channel. Gateway registers the
   identity and token; `ax-channel` delivers live mentions into the Claude Code
   session.
@@ -92,8 +87,7 @@ Codex/OpenAI path, for example `codex:gpt-5.5` when available.
 The old working launcher shape is:
 
 ```bash
-/home/ax-agent/agents/start_hermes_sentinel.sh dev_sentinel \
-  --runtime hermes_sdk \
+ax gateway agents add dev_sentinel --type sentinel_hermes_sdk \
   --model codex:gpt-5.5
 ```
 

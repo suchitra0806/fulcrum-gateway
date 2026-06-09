@@ -4292,7 +4292,7 @@ def _is_sentinel_cli_runtime(runtime_type: object) -> bool:
 
 
 def _is_sentinel_inference_sdk_runtime(runtime_type: object) -> bool:
-    return str(runtime_type or "").strip().lower() in {"sentinel_inference_sdk", "hermes_sentinel"}
+    return str(runtime_type or "").strip().lower() == "sentinel_inference_sdk"
 
 
 def _is_sentinel_hermes_sdk_runtime(runtime_type: object) -> bool:
@@ -4462,7 +4462,6 @@ def _compose_agent_system_prompt(entry: dict[str, Any]) -> str | None:
     return "\n\n".join(parts) if parts else None
 
 
-# SDK runtimes that sentinel_inference_sdk can drive via `--runtime`.
 # Valid inference SDK clients for sentinel_inference_sdk (per ADR-012 / ADR-014).
 # hermes_sdk is intentionally excluded: use sentinel_hermes_sdk runtime type.
 _INFERENCE_SDK_CLIENTS = {
@@ -4472,6 +4471,13 @@ _INFERENCE_SDK_CLIENTS = {
     "leapfrog_sdk",
     "mistral_sdk",
     "xai_sdk",
+}
+
+# Valid MCP host clients for sentinel_cli. Maps client value → binary name.
+# claude_code_channel always uses claude_cli and sets it automatically — operators
+# do not supply --client for that runtime type.
+_MCP_HOST_CLIENT_BINARIES: dict[str, str] = {
+    "claude_cli": "claude",
 }
 
 
@@ -4915,10 +4921,22 @@ def _sentinel_model(entry: dict[str, Any]) -> str | None:
     return None
 
 
+def _resolve_sentinel_cli_binary(entry: dict[str, Any]) -> str:
+    """Return the MCP host binary for a sentinel_cli agent.
+
+    claude_code_channel always uses 'claude' — its client field is set
+    automatically and this function is not called for it.
+    """
+    configured = str(entry.get("client") or "").strip().lower()
+    return _MCP_HOST_CLIENT_BINARIES.get(configured, "claude")
+
+
 def _build_sentinel_claude_cmd(entry: dict[str, Any], session_id: str | None) -> list[str]:
     add_dir = str(entry.get("add_dir") or entry.get("workdir") or os.getcwd())
+    runtime_type = str(entry.get("runtime_type") or "").strip().lower()
+    binary = "claude" if runtime_type == "claude_code_channel" else _resolve_sentinel_cli_binary(entry)
     cmd = [
-        "claude",
+        binary,
         "-p",
         "--output-format",
         "stream-json",

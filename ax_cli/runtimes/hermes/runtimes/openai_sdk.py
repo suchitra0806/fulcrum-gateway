@@ -327,9 +327,7 @@ class OpenAISDKRuntime(BaseRuntime):
             # Process the streamed response
             turn_text = ""
             tool_calls = []
-            current_fn_name = ""
             current_fn_args = ""
-            current_call_id = ""
 
             for event in stream:
                 etype = getattr(event, "type", "")
@@ -348,9 +346,7 @@ class OpenAISDKRuntime(BaseRuntime):
                 elif etype == "response.output_item.added":
                     item = event.item
                     if getattr(item, "type", "") == "function_call":
-                        current_fn_name = item.name
                         current_fn_args = ""
-                        current_call_id = item.call_id
 
                 elif etype == "response.output_item.done":
                     item = event.item
@@ -360,7 +356,6 @@ class OpenAISDKRuntime(BaseRuntime):
                             "name": item.name,
                             "arguments": item.arguments,
                         })
-                        current_fn_name = ""
                         current_fn_args = ""
 
                 elif etype == "response.completed":

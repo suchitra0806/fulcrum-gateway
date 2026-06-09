@@ -151,7 +151,7 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
                 "to vendor LLMs (openai_sdk, groq_sdk, mistral_sdk, gemini_sdk, "
                 "leapfrog_sdk, xai_sdk). Requires --client to select the SDK. "
                 "Tool access is controlled by connector policy. "
-                "Renamed from hermes_sentinel in 0.7.0 — see ADR-012."
+                "See ADR-012 for the rename history."
             ),
             "kind": "supervised_process",
             "passive": False,
@@ -187,18 +187,6 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
                 ),
                 "tools": "Tool telemetry comes from connector_call events in the SDK runtime.",
             },
-        },
-        "hermes_sentinel": {
-            "id": "hermes_sentinel",
-            "label": "Hermes Sentinel (legacy)",
-            "description": "Legacy name for sentinel_inference_sdk — renamed in 0.7.0. See ADR-012.",
-            "kind": "supervised_process",
-            "passive": False,
-            "deprecated": True,
-            "successor_runtime_type": "sentinel_inference_sdk",
-            "requires": [],
-            "form_fields": [],
-            "signals": {},
         },
         "sentinel_hermes_sdk": {
             "id": "sentinel_hermes_sdk",

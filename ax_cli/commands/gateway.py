@@ -44,6 +44,8 @@ from ..commands.bootstrap import (
 )
 from ..config import resolve_space_id, resolve_user_token
 from ..gateway import (
+    _INFERENCE_SDK_CLIENTS,
+    _MCP_HOST_CLIENT_BINARIES,
     AX_PLUGIN_NAME,
     GatewayDaemon,
     _format_daemon_log_line,
@@ -1616,6 +1618,27 @@ def _register_managed_agent(
     if normalized_provider:
         _validate_hermes_provider(normalized_provider)
 
+    normalized_agent_client = str(agent_client or "").strip() or None
+    if normalized_agent_client:
+        if runtime_type == "claude_code_channel":
+            raise ValueError("--client is not accepted for claude_code_channel; the client is always claude_cli.")
+        elif runtime_type == "sentinel_inference_sdk":
+            valid = sorted(_INFERENCE_SDK_CLIENTS)
+            if normalized_agent_client not in _INFERENCE_SDK_CLIENTS:
+                raise ValueError(
+                    f"--client '{normalized_agent_client}' is not a recognised inference SDK client. "
+                    f"Valid values: {', '.join(valid)}."
+                )
+        elif runtime_type == "sentinel_cli":
+            valid_mcp = sorted(_MCP_HOST_CLIENT_BINARIES)
+            if normalized_agent_client not in _MCP_HOST_CLIENT_BINARIES:
+                raise ValueError(
+                    f"--client '{normalized_agent_client}' is not a recognised MCP host client. "
+                    f"Valid values: {', '.join(valid_mcp)}."
+                )
+    if runtime_type == "claude_code_channel":
+        agent_client = "claude_cli"
+
     if not model and runtime_type == "hermes_plugin":
         model = _resolve_hermes_model(workdir or explicit_workdir)
     normalized_model = str(model or "").strip() or None
@@ -2067,6 +2090,22 @@ def _update_managed_agent(
     if agent_client is not _UNSET:
         sdk_clean = str(agent_client or "").strip()
         if sdk_clean:
+            if runtime_effective == "claude_code_channel":
+                raise ValueError("--client is not accepted for claude_code_channel; the client is always claude_cli.")
+            elif runtime_effective == "sentinel_inference_sdk":
+                valid = sorted(_INFERENCE_SDK_CLIENTS)
+                if sdk_clean not in _INFERENCE_SDK_CLIENTS:
+                    raise ValueError(
+                        f"--client '{sdk_clean}' is not a recognised inference SDK client. "
+                        f"Valid values: {', '.join(valid)}."
+                    )
+            elif runtime_effective == "sentinel_cli":
+                valid_mcp = sorted(_MCP_HOST_CLIENT_BINARIES)
+                if sdk_clean not in _MCP_HOST_CLIENT_BINARIES:
+                    raise ValueError(
+                        f"--client '{sdk_clean}' is not a recognised MCP host client. "
+                        f"Valid values: {', '.join(valid_mcp)}."
+                    )
             entry["client"] = sdk_clean
         else:
             entry.pop("client", None)
@@ -9490,7 +9529,7 @@ def add_agent(
     client: str = typer.Option(
         None,
         "--client",
-        help="MCP host or inference SDK client (claude_cli for sentinel_cli/claude_code_channel; openai_sdk | gemini_sdk | groq_sdk | mistral_sdk | leapfrog_sdk | xai_sdk for sentinel_inference_sdk).",
+        help="MCP host or inference SDK client (claude_cli for sentinel_cli; openai_sdk | gemini_sdk | groq_sdk | mistral_sdk | leapfrog_sdk | xai_sdk for sentinel_inference_sdk). Not accepted for claude_code_channel.",
     ),
     start: bool = typer.Option(True, "--start/--no-start", help="Desired running state after registration"),
     as_json: bool = JSON_OPTION,
@@ -9628,7 +9667,7 @@ def update_agent(
     client: str = typer.Option(
         None,
         "--client",
-        help="MCP host or inference SDK client (claude_cli for sentinel_cli/claude_code_channel; openai_sdk | gemini_sdk | groq_sdk | mistral_sdk | leapfrog_sdk | xai_sdk for sentinel_inference_sdk).",
+        help="MCP host or inference SDK client (claude_cli for sentinel_cli; openai_sdk | gemini_sdk | groq_sdk | mistral_sdk | leapfrog_sdk | xai_sdk for sentinel_inference_sdk). Not accepted for claude_code_channel.",
     ),
     desired_state: str = typer.Option(None, "--desired-state", help="running | stopped"),
     as_json: bool = JSON_OPTION,

@@ -100,7 +100,7 @@ Gateway spawns the `sentinel.py` supervisor, which dispatches to a direct vendor
 
 These runtimes call vendor LLM APIs directly — no Claude CLI subprocess, no permission bypass flags. Tool access is controlled by the same Gateway connector system as `hermes_plugin`. The model is identical: `connector_search` and `connector_call` are meta-tools the agent uses to discover and invoke connector-backed tools, with connector policy enforced at both search time and call time.
 
-`sentinel_inference_sdk` was named `hermes_sentinel` prior to 0.7.0. See [ADR-012](adr/ADR-012-vendor-sdk-security-cleanup.md).
+`sentinel_inference_sdk` replaced `hermes_sentinel` in 0.7.0. See [ADR-012](adr/ADR-012-vendor-sdk-security-cleanup.md).
 
 ### `sentinel_hermes_sdk` — in-process Hermes AIAgent loop
 
