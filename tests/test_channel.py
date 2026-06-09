@@ -2136,7 +2136,12 @@ class TestSseLoopGatewayTouches:
         class _ImmediateShutdownClient(FakeClient):
             def connect_sse(self, *, space_id):
                 return FakeSseResponse(
-                    {"id": "m1", "content": "@peer-agent hi", "author": {"id": "u1", "name": "u", "type": "user"}, "mentions": ["peer-agent"]}
+                    {
+                        "id": "m1",
+                        "content": "@peer-agent hi",
+                        "author": {"id": "u1", "name": "u", "type": "user"},
+                        "mentions": ["peer-agent"],
+                    }
                 )
 
             def get_message(self, message_id):
@@ -2224,5 +2229,4 @@ class TestSseLoopGatewayTouches:
 
         ping_touches = [t for t in touches if t.get("event") == "channel_ping"]
         assert ping_touches, "expected a channel_ping touch"
-        assert all("sse_connected" not in t for t in ping_touches), \
-            "channel_ping must not write sse_connected"
+        assert all("sse_connected" not in t for t in ping_touches), "channel_ping must not write sse_connected"

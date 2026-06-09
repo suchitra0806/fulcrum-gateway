@@ -1009,7 +1009,7 @@ def check(
 
 placement_app = typer.Typer(
     name="placement",
-    help="Agent space-placement management (per GATEWAY-PLACEMENT-POLICY-001)",
+    help="Agent space-placement management",
     no_args_is_help=True,
 )
 app.add_typer(placement_app, name="placement")
@@ -1023,10 +1023,9 @@ def placement_get(
     """Show an agent's current space placement.
 
     Today renders the basic placement shape (``space_id``, ``pinned``,
-    ``allowed_spaces`` when present). When backend implements the full
-    GATEWAY-PLACEMENT-POLICY-001 machinery (``policy_kind`` /
-    ``placement_state`` / ``policy_revision``), those fields surface
-    transparently — same forward-compat pattern as ``ax agents check``.
+    ``allowed_spaces`` when present). The fields ``policy_kind`` /
+    ``placement_state`` / ``policy_revision`` surface transparently when
+    the backend provides them — same forward-compat pattern as ``ax agents check``.
     """
     client = get_client()
     try:
@@ -1082,9 +1081,9 @@ def placement_set(
     Requires ownership of the agent + membership in the target space.
 
     When the agent is Gateway-managed, the placement change propagates
-    to the runtime per GATEWAY-PLACEMENT-POLICY-001's transition flow.
-    For direct-mode agents, the change applies to the agent record but
-    the running listener may need a restart to pick up the new space.
+    to the runtime on the next supervision cycle. For direct-mode agents,
+    the change applies to the agent record but the running listener may
+    need a restart to pick up the new space.
     """
     client = get_client()
     try:

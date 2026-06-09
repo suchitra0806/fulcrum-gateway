@@ -1,7 +1,7 @@
 # CONNECTED-ASSET-GOVERNANCE-001: Registry, Provenance, Capabilities, Grants, Secrets, and Approval
 
-**Status:** Draft  
-**Owner:** @madtank  
+**Status:** Draft — pending review. Ownership transferred to @markgalpin 2026-06-05. Architecture decisions since this was written affect the enforcement model described here. @markgalpin will review this as part of a broader spec review when time permits. If you need to rely on anything in this spec, check with @markgalpin first.
+**Owner:** @markgalpin (transferred from @madtank)
 **Date:** 2026-04-22  
 **Related:** GATEWAY-CONNECTIVITY-001, GATEWAY-AGENT-REGISTRY-001, GATEWAY-ASSET-TAXONOMY-001, AGENT-PAT-001, DEVICE-TRUST-001, RUNTIME-CONFIG-001, AX-SCHEDULE-001
 
@@ -206,11 +206,10 @@ Example:
   "gateway_id": "gw_jacob_macbook",
   "install_id": "inst_456",
   "binding_type": "local_runtime",
-  "path": "/Users/jacob/hermes-agent",
+  "path": "/Users/jacob/agents/dev_sentinel",
   "launch_spec": {
-    "runtime_type": "exec",
-    "command": "python3 examples/hermes_sentinel/hermes_bridge.py",
-    "workdir": "/Users/jacob/claude_home/ax-cli"
+    "runtime_type": "sentinel_hermes_sdk",
+    "workdir": "/Users/jacob/agents/dev_sentinel"
   },
   "created_by": "user_123",
   "created_via": "web_ui",

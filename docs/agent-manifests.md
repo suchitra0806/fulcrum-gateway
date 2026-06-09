@@ -66,7 +66,7 @@ investigations on request. Default to terse answers.
 | `allow_all_users` | `--allow-all-users` | Hermes plugin only. Boolean. Default `false`. |
 | `allowed_users` | `--allowed-users` | Hermes plugin only. Comma-separated handles. |
 | `exec_command` | `--exec` | Advanced override for exec-based templates. |
-| `ollama_model` | `--ollama-model` | Conditional — required for the Ollama template. |
+| `model` | `--model` | Inference model name. For `sentinel_inference_sdk`: API model (e.g. `gemini-2.0-flash`). For `ollama` template: local model name (e.g. `gemma4:latest`). Previously `ollama_model` for Ollama — removed as a breaking change. |
 | `connector_ref` | `--connector-ref` | Outbound connector name (required for `langgraph_composio`). |
 | `audience` | `--audience` | Register-time only. Default `"both"`. |
 

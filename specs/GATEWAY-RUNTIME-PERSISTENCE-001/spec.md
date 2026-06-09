@@ -68,7 +68,7 @@ process, subscribes to incoming work via SSE, and replies inline.
 **Out:**
 - Multi-process scheduling / GPU contention (one Ollama runtime per agent for now).
 - Distributed runtimes (everything runs on the user's local machine).
-- Migrating Hermes (it's already persistent — `hermes_sentinel` runtime).
+- Migrating Hermes (it's already persistent — `sentinel_hermes_sdk` / `sentinel_inference_sdk` runtimes).
 
 ## Architecture
 

@@ -53,7 +53,7 @@ class ManifestDict(TypedDict, total=False):
     allow_all_users: bool
     allowed_users: str  # comma-separated list per existing CLI
     exec_command: str  # → exec_cmd
-    ollama_model: str
+    client: str
     connector_ref: str
     audience: str  # PAT audience for register-time only
 
@@ -76,7 +76,7 @@ FIELD_TO_KWARG: dict[str, str] = {
     "allow_all_users": "allow_all_users",
     "allowed_users": "allowed_users",
     "exec_command": "exec_cmd",
-    "ollama_model": "ollama_model",
+    "client": "agent_client",
     "connector_ref": "connector_ref",
     "audience": "audience",
 }
@@ -97,7 +97,7 @@ ENTRY_TO_MANIFEST: dict[str, str] = {
     "allow_all_users": "allow_all_users",
     "allowed_users": "allowed_users",
     "exec_command": "exec_command",
-    "ollama_model": "ollama_model",
+    "client": "client",
     "connector_ref": "connector_ref",
 }
 
@@ -349,7 +349,7 @@ def build_update_kwargs(manifest: ManifestDict, *, unset_sentinel: Any) -> dict[
         "allow_all_users",
         "allowed_users",
         "exec_command",
-        "ollama_model",
+        "client",
         "connector_ref",
     }
     kwargs: dict[str, Any] = {}

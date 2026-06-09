@@ -94,6 +94,7 @@ def test_history_store_delete():
 
 def test_load_config_no_files(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     result = _load_config()
     assert result == {}
 
@@ -114,7 +115,7 @@ def test_parse_args_defaults(monkeypatch):
     monkeypatch.setattr("sys.argv", ["sentinel"])
     args = parse_args()
     assert not args.dry_run
-    assert args.runtime == "claude"
+    assert args.runtime == "hermes_sdk"
     assert args.timeout == 300
 
 
@@ -127,7 +128,7 @@ def test_parse_args_custom(monkeypatch):
             "--agent",
             "mybot",
             "--runtime",
-            "codex",
+            "openai_sdk",
             "--timeout",
             "600",
         ],
@@ -135,5 +136,5 @@ def test_parse_args_custom(monkeypatch):
     args = parse_args()
     assert args.dry_run
     assert args.agent == "mybot"
-    assert args.runtime == "codex"
+    assert args.runtime == "openai_sdk"
     assert args.timeout == 600

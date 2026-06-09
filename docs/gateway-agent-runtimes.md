@@ -6,7 +6,7 @@ agent brain into a new runtime shape.
 The proven local setup before Gateway was:
 
 - Long-running sentinel listeners in `/home/ax-agent/agents`, launched by
-  scripts such as `start_hermes_sentinel.sh`.
+  scripts such as `start_sentinel.sh`.
 - Hermes-backed coding agents using `claude_agent_v2.py --runtime hermes_sdk`
   with Codex/OpenAI models.
 - Claude Code sessions connected through `axctl channel` using agent-bound
@@ -60,22 +60,25 @@ Current useful modes:
   the hermes binary, and injects `AX_TOKEN` from the Gateway-owned token
   file at start so the raw PAT never lives in the workspace. The `hermes`
   template defaults to this runtime.
-- `hermes_sentinel` *(legacy)*: Gateway-supervised long-running Hermes
-  listener using the old `claude_agent_v2.py --runtime hermes_sdk`
-  behavior. Kept only so existing entries keep working; new agents should
-  use `hermes_plugin`. Migrate with
-  `ax gateway agents update <name> --type hermes_plugin`.
+- `sentinel_hermes_sdk`: Gateway-supervised sentinel running the in-process
+  Hermes AIAgent loop via `--runtime hermes_sdk`. Use for coding sentinels
+  that need Hermes session continuity, tool use, and repo access with
+  Bedrock, OpenRouter, or Anthropic API backends.
+- `sentinel_inference_sdk`: Gateway-supervised sentinel making direct vendor API
+  calls (`openai_sdk`, `groq_sdk`, `gemini_sdk`, `mistral_sdk`, `leapfrog_sdk`,
+  `xai_sdk`). Lightweight single-turn API path; no local Hermes framework
+  dependency. `sentinel_sdk_runtime` is required with no default.
 - `claude_code_channel`: attached Claude Code channel. Gateway registers the
   identity and token; `ax-channel` delivers live mentions into the Claude Code
   session.
 
-Use `hermes_sentinel` for coding sentinel QA. Avoid using a one-shot `exec`
+Use `sentinel_hermes_sdk` for coding sentinel QA. Avoid using a one-shot `exec`
 bridge as proof that `dev_sentinel` is fixed. It can prove Gateway dispatch,
 but not the session continuity that made the old sentinel setup useful.
 
 ## Preferred Runtime Patterns
 
-### Hermes Sentinel
+### Hermes Sentinel (`sentinel_hermes_sdk`)
 
 Use Hermes for coding sentinels that need tool use, repo access, session
 continuity, and rich activity. On this host, the preferred model family is the
@@ -84,8 +87,7 @@ Codex/OpenAI path, for example `codex:gpt-5.5` when available.
 The old working launcher shape is:
 
 ```bash
-/home/ax-agent/agents/start_hermes_sentinel.sh dev_sentinel \
-  --runtime hermes_sdk \
+ax gateway agents add dev_sentinel --type sentinel_hermes_sdk \
   --model codex:gpt-5.5
 ```
 
@@ -109,10 +111,9 @@ Runtime token files must contain an agent-bound credential for the managed
 agent. Gateway rejects user bootstrap PATs before sends or runtime launch so a
 copied user token cannot become an agent runtime identity.
 
-Do not treat the one-shot `examples/hermes_sentinel/hermes_bridge.py` demo as
-the production sentinel pattern. It is useful for proving that a Gateway command
-bridge can call Hermes, but it creates a fresh agent per message and does not
-match the old sentinel continuity model.
+Do not use a one-shot `ax listen --exec` bridge as the production sentinel
+pattern. It creates a fresh agent per message and does not provide session
+continuity or Gateway lifecycle management.
 
 ### Claude Code Channel
 
@@ -187,7 +188,7 @@ Minimum signals:
   without creating a normal chat reply.
 - `error`: the runtime failed or timed out and the operator should inspect logs.
 
-Hermes sentinels should preserve the old behavior from `claude_agent_v2.py`:
+`sentinel_hermes_sdk` agents should preserve the old behavior from `claude_agent_v2.py`:
 tool callbacks update the activity bubble with real work, such as reading a
 file, running a command, searching, or writing a note.
 
@@ -326,6 +327,7 @@ the correct command for incident recovery of attached agents.
 `agents attach` is the setup command — it writes MCP/channel config, sets
 `desired_state` to `running`, and prints the attach command, but does not force
 `effective_state`. Use `mark-attached` when:
+
 - The reconcile loop hasn't caught up yet
 - The agent's runtime is managed externally (e.g., systemd) and Gateway just
   needs to know it's alive

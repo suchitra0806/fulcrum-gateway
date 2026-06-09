@@ -293,14 +293,15 @@ def _secure_hermes_tools(workdir: str):
     Agents can only write to their own worktrees/workspace/tmp.
     Agents cannot read token files or credential directories.
     """
-    from tools.registry import registry
+    import json as _json
+
     from tools import (
+        BLOCKED_READ_PATTERNS,
+        _check_bash_command,
         _check_read_path,
         _check_write_path,
-        _check_bash_command,
-        BLOCKED_READ_PATTERNS,
     )
-    import json as _json
+    from tools.registry import registry
 
     log.info("hermes_sdk: securing tools for workdir=%s", workdir)
 
@@ -592,7 +593,7 @@ class HermesSDKRuntime(BaseRuntime):
         # Profiles define tools, access, budget per agent type.
         agent_name = os.environ.get("AX_AGENT_NAME", "")
         try:
-            from profiles import get_profile_for_agent, get_disabled_toolsets, get_enabled_toolsets, get_max_iterations
+            from profiles import get_disabled_toolsets, get_enabled_toolsets, get_max_iterations, get_profile_for_agent
 
             profile = get_profile_for_agent(agent_name)
             disabled = extra.get("disabled_toolsets", get_disabled_toolsets(profile))

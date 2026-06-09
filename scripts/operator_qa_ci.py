@@ -103,11 +103,11 @@ def _write_user_login(config_dir: Path, target: dict[str, Any]) -> None:
     path.write_text(
         "\n".join(
             [
-                f'token = {_toml_string(str(target["token"]))}',
-                f'base_url = {_toml_string(str(target["base_url"]))}',
-                f'space_id = {_toml_string(str(target["space_id"]))}',
+                f"token = {_toml_string(str(target['token']))}",
+                f"base_url = {_toml_string(str(target['base_url']))}",
+                f"space_id = {_toml_string(str(target['space_id']))}",
                 'principal_type = "user"',
-                f'environment = {_toml_string(str(target["env"]))}',
+                f"environment = {_toml_string(str(target['env']))}",
                 "",
             ]
         )
@@ -196,14 +196,16 @@ def _run_doctor(target: dict[str, Any], *, artifact_dir: Path, config_dir: Path)
     return _run_json_command(command, artifact_path=artifact_path, config_dir=config_dir)
 
 
-def _run_matrix(targets: list[dict[str, Any]], *, qa_target: str, artifact_dir: Path, config_dir: Path) -> dict[str, Any]:
+def _run_matrix(
+    targets: list[dict[str, Any]], *, qa_target: str, artifact_dir: Path, config_dir: Path
+) -> dict[str, Any]:
     matrix_dir = artifact_dir / "matrix"
     stdout_path = artifact_dir / "matrix-stdout.json"
     command = ["axctl", "qa", "matrix", "--for", qa_target, "--artifact-dir", str(matrix_dir), "--json"]
     for target in targets:
         command.extend(["--env", target["env"]])
     for target in targets:
-        command.extend(["--space", f'{target["env"]}={target["space_id"]}'])
+        command.extend(["--space", f"{target['env']}={target['space_id']}"])
     return _run_json_command(command, artifact_path=stdout_path, config_dir=config_dir)
 
 

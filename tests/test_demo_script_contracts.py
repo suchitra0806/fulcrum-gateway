@@ -279,7 +279,7 @@ def test_demo_status_and_agents_list_agree_on_visible_agents(monkeypatch, tmp_pa
                 "name": "demo-hermes",
                 "agent_id": "agent-hermes",
                 "template_id": "hermes",
-                "runtime_type": "hermes_sentinel",
+                "runtime_type": "sentinel_inference_sdk",
                 "space_id": "space-1",
                 "effective_state": "running",
                 "desired_state": "running",

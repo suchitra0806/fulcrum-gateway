@@ -46,17 +46,11 @@ def test_hermes_plugin_runtime_in_catalog():
     assert hermes_template["defaults"]["runtime_type"] == "hermes_plugin"
 
 
-def test_hermes_sentinel_marked_deprecated_but_still_resolvable():
-    legacy = runtime_type_definition("hermes_sentinel")
-    assert legacy["id"] == "hermes_sentinel"
-    assert legacy.get("deprecated") is True
-
-
 def test_is_predicates():
     assert gateway_core._is_hermes_plugin_runtime("hermes_plugin")
-    assert not gateway_core._is_hermes_plugin_runtime("hermes_sentinel")
+    assert not gateway_core._is_hermes_plugin_runtime("sentinel_inference_sdk")
     assert gateway_core._is_supervised_subprocess_runtime("hermes_plugin")
-    assert gateway_core._is_supervised_subprocess_runtime("hermes_sentinel")
+    assert gateway_core._is_supervised_subprocess_runtime("sentinel_hermes_sdk")
     assert not gateway_core._is_supervised_subprocess_runtime("echo")
     assert not gateway_core._is_supervised_subprocess_runtime("exec")
 
@@ -320,8 +314,8 @@ def test_hermes_setup_status_does_not_gate_plugin_runtime(tmp_path, monkeypatch)
     status = gateway_core.hermes_setup_status(entry)
     assert status["ready"] is True, status
 
-    # Sanity: hermes_sentinel still requires the checkout.
-    sentinel_entry = dict(entry, runtime_type="hermes_sentinel")
+    # Sanity: sentinel_inference_sdk also requires the checkout.
+    sentinel_entry = dict(entry, runtime_type="sentinel_inference_sdk")
     sentinel_status = gateway_core.hermes_setup_status(sentinel_entry)
     assert sentinel_status["ready"] is False
 

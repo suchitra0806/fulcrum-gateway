@@ -113,9 +113,7 @@ def _run_probe(seconds: int) -> int:
 def main() -> int:
     prompt = _read_prompt()
     if not _is_probe_prompt(prompt):
-        print(
-            "PROBE_ERROR unsupported prompt. Use 'probe' optionally followed by a duration, for example 'probe 6'."
-        )
+        print("PROBE_ERROR unsupported prompt. Use 'probe' optionally followed by a duration, for example 'probe 6'.")
         return 1
     return _run_probe(_probe_seconds(prompt))
 

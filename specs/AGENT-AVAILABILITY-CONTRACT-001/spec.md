@@ -5,14 +5,14 @@
 **Source directive:** @ChatGPT 2026-04-24 23:27 (channel msg `284cd29f`)
 **Sprint:** Gateway Sprint 1 (Trifecta Parity), umbrella [`d21e60ea`](aX)
 **Date:** 2026-04-24 → 2026-04-25 (v4)
-**Related:** [GATEWAY-PRESENCE-DATA-MODEL-001](../../../ax-backend/specs/GATEWAY-PRESENCE-DATA-MODEL-001/spec.md) (backend data-model, **upstream truth for badge vocabulary**), [GATEWAY-CONNECTION-MODEL-001](../GATEWAY-CONNECTION-MODEL-001/rfc.md), [GATEWAY-CONNECTIVITY-001](../GATEWAY-CONNECTIVITY-001/spec.md), [GATEWAY-PLACEMENT-POLICY-001](../GATEWAY-PLACEMENT-POLICY-001/spec.md), backend tasks `781f5781` (data model + API contract), `0706d5fa` (telemetry ingestion), `0f236fed` (disable/quarantine). Canonical visual mock: `Agent Availability.html` (design-system project, cipher 2026-04-25).
+**Related:** [GATEWAY-PRESENCE-DATA-MODEL-001](../../../ax-backend/specs/GATEWAY-PRESENCE-DATA-MODEL-001/spec.md) (backend data-model, **upstream truth for badge vocabulary**), [GATEWAY-CONNECTION-MODEL-001](../GATEWAY-CONNECTION-MODEL-001/spec.md), [GATEWAY-CONNECTIVITY-001](../GATEWAY-CONNECTIVITY-001/spec.md), GATEWAY-PLACEMENT-POLICY-001 *(retired)*, backend tasks `781f5781` (data model + API contract), `0706d5fa` (telemetry ingestion), `0f236fed` (disable/quarantine). Canonical visual mock: `Agent Availability.html` (design-system project, cipher 2026-04-25).
 
 ## Scope boundary (what this spec is NOT)
 
 This spec covers **agent availability and routability** as a pre-/post-send presence contract. It does NOT define:
 
 - **Message/reply lifecycle SSE contract** (e.g. `reply.received` events, spinner→✓ swap on bubble-chrome). That belongs in a separate spec keyed by `message_id`/`thread_id`/`recipient_agent_id` — flagged by backend_sentinel + cipher 2026-04-25 as not in scope here.
-- **Placement state machine** (current/default/allowed spaces, ack tracking). That lives in [GATEWAY-PLACEMENT-POLICY-001](../GATEWAY-PLACEMENT-POLICY-001/spec.md). This spec consumes placement state via `placement_state_at_check` in the resolution algorithm.
+- **Placement state machine** (current/default/allowed spaces, ack tracking). GATEWAY-PLACEMENT-POLICY-001 was retired as superseded; placement model ownership is TBD. This spec consumes placement state via `placement_state_at_check` in the resolution algorithm.
 - **Heartbeat protocol cadence and transport.** Defined elsewhere; this spec only consumes "did the agent meet its declared cadence?" as the Responsive axis.
 
 Any reply-lifecycle requirement that surfaces during implementation gets routed to that separate spec, not folded here.
@@ -110,7 +110,7 @@ For each agent:
        source_of_truth = heartbeat
        presence_confidence = medium
        online_now = false
-       connection_mode = on_demand_warm if agent.runtime_type in {hermes_sentinel, exec, inbox}
+       connection_mode = on_demand_warm if agent.runtime_type in {sentinel_hermes_sdk, sentinel_inference_sdk, exec, inbox}
   4. Else:
        source_of_truth = last_message
        presence_confidence = low
@@ -391,7 +391,7 @@ Required widget capabilities:
 Five acceptance smokes from ChatGPT's directive, automated:
 
 1. **Gateway-connected agent reads correctly**: `dev_sentinel` (LIVE under Gateway) shows `online_now=true`, `presence_confidence=high`, `source_of_truth=gateway`, `messages_routable=true`. List + widget + CLI + MCP agree.
-2. **On-demand reads NOT online**: a freshly-quiet `hermes_sentinel` agent shows `online_now=false`, `connection_mode=on_demand_warm`, `messages_routable=true`. UI does NOT say "Online".
+2. **On-demand reads NOT online**: a freshly-quiet `sentinel_hermes_sdk` or `sentinel_inference_sdk` agent shows `online_now=false`, `connection_mode=on_demand_warm`, `messages_routable=true`. UI does NOT say "Online".
 3. **Disabled clearly unavailable**: a quarantined or disabled agent shows `messages_routable=false`, "Disabled" badge dominates, send is blocked or warned.
 4. **List ↔ widget agreement**: programmatic comparison — `axctl agents list --json` and `GET /api/v1/agents` payload have identical presence sub-objects for every agent.
 5. **Send-time presence stamp**: send a message; assert response message's `metadata.delivery_context.target_presence_at_send` is populated with the sender's presence record snapshot.
@@ -402,7 +402,7 @@ These gate the cluster — no sub-task graduates without its smoke green.
 
 ChatGPT 2026-04-25 directive established that placement (current/default space, allowed spaces, pinned, ack state) is a separate spec under task `36fd22ed`, but it intersects this contract: **availability is meaningless without effective placement**. An agent can only be meaningfully "available" if we know which space it's in and whether the runtime/Gateway has acknowledged that placement.
 
-This spec stays focused on presence/routability; the placement model lives in [GATEWAY-PLACEMENT-POLICY-001](../GATEWAY-PLACEMENT-POLICY-001/spec.md). The two interlock at:
+This spec stays focused on presence/routability; the placement model (GATEWAY-PLACEMENT-POLICY-001) was retired as superseded. The interlock points remain valid in principle:
 
 - The presence record's `connection_mode` and `online_now` describe the Gateway/runtime session state. Placement adds: which space that session is bound to right now.
 - A new derived field on the presence record: `placement_state_at_check` (mirrors the placement spec's `placement_state`). When `placement_state in {pending, runtime_unconfirmed, failed, timed_out}`, `expected_response` cannot be `immediate` — it's at most `unlikely` until placement clears, regardless of connection.

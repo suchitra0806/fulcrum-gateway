@@ -247,11 +247,9 @@ def main() -> int:
             out,
             timeout=args.timeout,
             label="channel notification",
-            predicate=lambda item: (parse_json_line(item.line) or {})
-            .get("params", {})
-            .get("meta", {})
-            .get("message_id")
-            == message_id,
+            predicate=lambda item: (
+                (parse_json_line(item.line) or {}).get("params", {}).get("meta", {}).get("message_id") == message_id
+            ),
         )
         working = wait_for_processing_event(
             events_out,

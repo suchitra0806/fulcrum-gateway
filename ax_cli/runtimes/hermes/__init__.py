@@ -16,5 +16,5 @@ Launching:
 
 Gateway integration:
     `ax gateway agents add … --template hermes` should resolve the sentinel
-    script via `_hermes_sentinel_script(entry)` to this package's `sentinel.py`.
+    script via `_sentinel_inference_sdk_script(entry)` to this package's `sentinel.py`.
 """

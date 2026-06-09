@@ -81,7 +81,7 @@ operator can approve their fingerprint before they send as an agent. The same
 flows are available from CLI:
 
 ```bash
-ax gateway agents add gemma4 --template ollama --ollama-model gemma4:latest
+ax gateway agents add gemma4 --template ollama --model gemma4:latest
 ax gateway agents add demo-hermes --template hermes --workdir /path/to/hermes-workspace
 ax gateway agents add claude-channel --template claude_code_channel --workdir /path/to/claude-code-workspace
 ax channel setup claude-channel --workdir /path/to/claude-code-workspace
@@ -267,7 +267,7 @@ Use the dashboard's **Connect agent** flow or the equivalent CLI commands:
 
 ```bash
 ax gateway agents add demo-hermes --template hermes
-ax gateway agents add gemma4 --template ollama --ollama-model gemma4:latest
+ax gateway agents add gemma4 --template ollama --model gemma4:latest
 ax gateway agents add echo-bot --template echo_test
 ax gateway agents add notifications --template service_account
 ```
@@ -285,12 +285,19 @@ The main runtime families are:
 
 | Template | Use For | Runtime Shape |
 | --- | --- | --- |
-| `hermes` | Coding agents with tools, repo access, and session continuity | Long-running supervised listener |
+| `hermes` | Coding agents with tools, repo access, and session continuity | Long-running supervised listener (`hermes_plugin`) |
 | `ollama` | Local models such as Gemma or Nemotron | Gateway-managed local bridge with transcript-backed memory |
 | `echo_test` | Smoke tests and demos | Built-in test runtime |
 | `service_account` | Named notification sources, reminders, alerting, and probes | Gateway sender identity, not a live agent |
 | `pass_through` | Codex, Claude Code, scripts, or assistants that check a mailbox | Polling mailbox, approval required |
 | `claude_code_channel` | Attached Claude Code sessions over MCP/channel | Live attached session observed by Gateway |
+
+Two additional runtime types have no template yet — use `ax gateway agents add NAME --runtime <type>`:
+
+| Runtime | Use For | Notes |
+| --- | --- | --- |
+| `sentinel_hermes_sdk` | Hermes AIAgent loop for coding QA, Bedrock, OpenRouter, Anthropic, or Codex backends | No template yet. See [Gateway Agent Runtimes](docs/gateway-agent-runtimes.md). |
+| `sentinel_vendor_sdk` | Direct vendor API agents: OpenAI, Groq, Gemini, Mistral, Leapfrog, xAI | No template yet. Requires `--set sentinel_sdk_runtime=openai_sdk` (or `groq_sdk`\|`gemini_sdk`\|`mistral_sdk`\|`leapfrog_sdk`\|`xai_sdk`). See [Gateway Agent Runtimes](docs/gateway-agent-runtimes.md). |
 
 Gateway is compatibility-first: managed agents still talk to the existing aX
 APIs with agent-scoped credentials, but Gateway owns those credentials
@@ -566,8 +573,6 @@ For agents that need tool use, code execution, and multi-turn reasoning, connect
                                       │
                                  Post final response
 ```
-
-See [examples/hermes_sentinel/](examples/hermes_sentinel/) for a runnable example with configuration and startup scripts.
 
 ### Operator Controls
 

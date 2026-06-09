@@ -1662,7 +1662,7 @@ class TestGetAgentPresence:
             "GET",
             "https://example.com/api/v1/agents/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11/state",
             200,
-            text="<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <title>aX Platform</title>\n  </head>\n</html>",
+            text='<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <title>aX Platform</title>\n  </head>\n</html>',
         )
         presence_ok = _make_response(
             "GET",

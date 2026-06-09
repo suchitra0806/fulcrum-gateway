@@ -366,9 +366,7 @@ def test_leapfrog_sdk_preserves_partial_text_on_mid_stream_error(monkeypatch):
 
     assert result.text == "Partial reply"
     assert result.exit_reason == "crashed"
-    assert any(
-        h.get("role") == "assistant" and h.get("content") == "Partial reply" for h in result.history
-    )
+    assert any(h.get("role") == "assistant" and h.get("content") == "Partial reply" for h in result.history)
     # Buffered streaming means no incremental deltas reach the callback.
     assert cb.deltas == []
 
@@ -545,9 +543,7 @@ def test_leapfrog_sdk_returns_timeout_on_APITimeoutError(monkeypatch):
     _set_credentials(monkeypatch)
 
     fake_client = MagicMock()
-    fake_client.chat.completions.create.side_effect = _FakeAPITimeoutError(
-        "read timeout after 30s"
-    )
+    fake_client.chat.completions.create.side_effect = _FakeAPITimeoutError("read timeout after 30s")
     _install_fake_openai(monkeypatch, fake_client)
 
     rt = get_runtime("leapfrog_sdk")
@@ -565,9 +561,7 @@ def test_leapfrog_sdk_returns_auth_error_on_AuthenticationError(monkeypatch):
     _set_credentials(monkeypatch)
 
     fake_client = MagicMock()
-    fake_client.chat.completions.create.side_effect = _FakeAuthenticationError(
-        "invalid api key"
-    )
+    fake_client.chat.completions.create.side_effect = _FakeAuthenticationError("invalid api key")
     _install_fake_openai(monkeypatch, fake_client)
 
     rt = get_runtime("leapfrog_sdk")
@@ -585,9 +579,7 @@ def test_leapfrog_sdk_returns_auth_error_on_PermissionDeniedError(monkeypatch):
     _set_credentials(monkeypatch)
 
     fake_client = MagicMock()
-    fake_client.chat.completions.create.side_effect = _FakePermissionDeniedError(
-        "deployment ACL denied request"
-    )
+    fake_client.chat.completions.create.side_effect = _FakePermissionDeniedError("deployment ACL denied request")
     _install_fake_openai(monkeypatch, fake_client)
 
     rt = get_runtime("leapfrog_sdk")
@@ -604,9 +596,7 @@ def test_leapfrog_sdk_returns_server_error_on_InternalServerError(monkeypatch):
     _set_credentials(monkeypatch)
 
     fake_client = MagicMock()
-    fake_client.chat.completions.create.side_effect = _FakeInternalServerError(
-        "backend unavailable"
-    )
+    fake_client.chat.completions.create.side_effect = _FakeInternalServerError("backend unavailable")
     _install_fake_openai(monkeypatch, fake_client)
 
     rt = get_runtime("leapfrog_sdk")
@@ -624,9 +614,7 @@ def test_leapfrog_sdk_returns_api_error_on_other_APIStatusError(monkeypatch):
     _set_credentials(monkeypatch)
 
     fake_client = MagicMock()
-    fake_client.chat.completions.create.side_effect = _FakeAPIStatusError(
-        "model not found", status_code=404
-    )
+    fake_client.chat.completions.create.side_effect = _FakeAPIStatusError("model not found", status_code=404)
     _install_fake_openai(monkeypatch, fake_client)
 
     rt = get_runtime("leapfrog_sdk")

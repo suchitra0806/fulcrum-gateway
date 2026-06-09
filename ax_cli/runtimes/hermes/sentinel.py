@@ -1,19 +1,17 @@
 # Vendored from ax-agents on 2026-04-25 — see ax_cli/runtimes/hermes/README.md
 #!/usr/bin/env python3
-"""CLI agent v2 for aX — SSE listener with session continuity,
+"""vendor_sdk sentinel — SSE listener with session continuity,
 message queuing, and processing signals.
 
-Improvements over v1:
-- Session continuity: tracks session IDs per conversation thread, uses --resume
-- Message queue: processes mentions in a background worker thread (no dropped SSE)
-- Processing signal: fires agent_processing SSE events so the frontend shows status
-- Codex support: --runtime codex uses `codex exec` instead of `claude -p`
+Dispatches to SDK-based vendor LLM runtime plugins (openai_sdk, groq_sdk,
+mistral_sdk, gemini_sdk, leapfrog_sdk, hermes_sdk). CLI subprocess support
+is not handled here — see sentinel_cli in gateway.py.
 
 Usage:
-    python3 claude_agent_v2.py                        # Live mode (Claude Code)
-    python3 claude_agent_v2.py --runtime codex        # Use Codex CLI
-    python3 claude_agent_v2.py --dry-run              # Watch only
-    python3 claude_agent_v2.py --agent relay           # Override agent name
+    python3 sentinel.py                        # Live mode (hermes_sdk default)
+    python3 sentinel.py --runtime openai_sdk   # Use OpenAI SDK
+    python3 sentinel.py --dry-run              # Watch only
+    python3 sentinel.py --agent relay          # Override agent name
 """
 
 import argparse
@@ -78,10 +76,6 @@ def parse_args():
     parser.add_argument(
         "--runtime",
         choices=[
-            "claude",
-            "codex",
-            "claude_cli",
-            "codex_cli",
             "openai_sdk",
             "hermes_sdk",
             "groq_sdk",
@@ -89,13 +83,8 @@ def parse_args():
             "gemini_sdk",
             "leapfrog_sdk",
         ],
-        default="claude",
-        help="Runtime plugin: claude/claude_cli (subprocess), "
-        "codex/codex_cli (subprocess), openai_sdk (SDK), "
-        "groq_sdk (SDK), mistral_sdk (SDK), gemini_sdk (SDK), leapfrog_sdk (SDK)",
-    )
-    parser.add_argument(
-        "--disable-codex-mcp", action="store_true", help="Disable inherited Codex MCP servers for listener runs"
+        default="hermes_sdk",
+        help="SDK runtime: openai_sdk, hermes_sdk, groq_sdk, mistral_sdk, gemini_sdk, leapfrog_sdk",
     )
     return parser.parse_args()
 
@@ -465,157 +454,6 @@ def iter_sse(response: httpx.Response):
 
 
 # ---------------------------------------------------------------------------
-# CLI Runners
-# ---------------------------------------------------------------------------
-
-
-def _build_claude_cmd(message: str, workdir: str, args, session_id: str | None = None) -> list[str]:
-    cmd = [
-        "claude",
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-        "--add-dir",
-        "/home/ax-agent/shared/repos",
-    ]
-    if session_id:
-        cmd.extend(["--resume", session_id])
-    if args.model:
-        cmd.extend(["--model", args.model])
-    if args.allowed_tools:
-        cmd.extend(["--allowedTools", args.allowed_tools])
-    if args.system_prompt:
-        cmd.extend(["--append-system-prompt", args.system_prompt])
-    return cmd
-
-
-def _build_codex_cmd(message: str, workdir: str, args, session_id: str | None = None) -> list[str]:
-    # Per-agent sandbox override. Default (unset) preserves legacy behavior
-    # (full bypass) for agents that legitimately need cross-repo access like
-    # sentinels. Set CODEX_SANDBOX=workspace-write in the agent launcher to
-    # opt into Codex's workspace-write sandbox: read anywhere, write only
-    # under workdir, autonomous execution without approvals.
-    sandbox_mode = os.environ.get("CODEX_SANDBOX", "").strip()
-    if sandbox_mode == "workspace-write":
-        sandbox_flags = [
-            "--sandbox",
-            "workspace-write",
-            "--ask-for-approval",
-            "never",
-        ]
-    else:
-        sandbox_flags = ["--dangerously-bypass-approvals-and-sandbox"]
-
-    cmd = [
-        "codex",
-        "exec",
-        "--json",
-        *sandbox_flags,
-        "--skip-git-repo-check",
-        "-C",
-        workdir,
-    ]
-    if session_id:
-        # Codex uses `codex exec resume --last` or by session ID
-        cmd = ["codex", "exec", "resume", session_id, "--json", *sandbox_flags]
-    if args.disable_codex_mcp:
-        cmd.extend(["-c", "mcp_servers.ax-platform.enabled=false"])
-    if args.model:
-        cmd.extend(["-m", args.model])
-    return cmd
-
-
-def _summarize_codex_command(command: str) -> str:
-    short = " ".join(command.split())
-    if len(short) > 90:
-        short = short[:87] + "..."
-
-    lowered = short.lower()
-    if "apply_patch" in lowered:
-        return "Applying patch..."
-    if any(token in lowered for token in (" rg ", "grep ", "find ", "fd ", "glob ")):
-        return "Searching codebase..."
-    if any(token in lowered for token in ("sed -n", "cat ", "head ", "tail ", "ls ", "pwd", "git status", "git diff")):
-        return "Reading files..."
-    if any(token in lowered for token in ("pytest", "npm test", "pnpm test", "uv run", "cargo test")):
-        return "Running tests..."
-    return f"Running: {short}..."
-
-
-def _parse_claude_stream(proc) -> tuple[str, str | None]:
-    """Parse Claude Code stream-json output. Returns (text, session_id)."""
-    accumulated = ""
-    session_id = None
-
-    for line in proc.stdout:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        etype = event.get("type", "")
-
-        if etype == "assistant":
-            for block in event.get("message", {}).get("content", []):
-                if block.get("type") == "text":
-                    accumulated = block["text"]
-
-        elif etype == "content_block_delta":
-            delta = event.get("delta", {})
-            if delta.get("type") == "text_delta":
-                accumulated += delta.get("text", "")
-
-        elif etype == "result":
-            result_text = event.get("result", "")
-            if result_text:
-                accumulated = result_text
-            sid = event.get("session_id", "")
-            if sid:
-                session_id = sid
-
-    return accumulated, session_id
-
-
-def _parse_codex_stream(proc) -> tuple[str, str | None]:
-    """Parse Codex JSONL output. Returns (text, session_id)."""
-    accumulated = ""
-    session_id = None
-
-    for line in proc.stdout:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        etype = event.get("type", "")
-
-        # Codex emits message events with content
-        if etype == "message" and event.get("role") == "assistant":
-            for block in event.get("content", []):
-                if block.get("type") == "output_text":
-                    accumulated += block.get("text", "")
-
-        elif etype == "response.completed":
-            # Final response
-            pass
-
-        # Capture session
-        sid = event.get("id", "")
-        if sid and sid.startswith("sess_"):
-            session_id = sid
-
-    return accumulated, session_id
-
-
-# ---------------------------------------------------------------------------
 # Runtime plugin bridge — connects agnostic runtimes to aX message plumbing
 # ---------------------------------------------------------------------------
 
@@ -831,8 +669,6 @@ def _run_via_runtime_plugin(
         "add_dir": "/home/ax-agent/shared/repos",
         "history": histories.get(history_thread_id),
     }
-    if hasattr(args, "disable_codex_mcp") and args.disable_codex_mcp:
-        extra["disable_mcp"] = True
     if hasattr(args, "allowed_tools") and args.allowed_tools:
         extra["allowed_tools"] = args.allowed_tools
 
@@ -981,350 +817,18 @@ def run_cli(
     the aX-specific message create/edit/signal logic.
     """
     # ── Plugin runtime dispatch ─────────────────────────────────────
-    # Normalize legacy names to plugin names
-    runtime_name = args.runtime
-    if runtime_name == "claude":
-        runtime_name = "claude_cli"
-    elif runtime_name == "codex":
-        runtime_name = "codex_cli"
-
-    # Check if this is a plugin runtime (not the legacy subprocess path)
-    if runtime_name in (
-        "claude_cli",
-        "codex_cli",
-        "openai_sdk",
-        "hermes_sdk",
-        "groq_sdk",
-        "mistral_sdk",
-        "gemini_sdk",
-        "leapfrog_sdk",
-    ):
-        return _run_via_runtime_plugin(
-            runtime_name,
-            message,
-            workdir,
-            args,
-            api,
-            parent_id,
-            space_id,
-            sessions,
-            histories,
-            thread_id=thread_id,
-        )
-
-    # ── Legacy subprocess path (fallback, should not be reached) ────
-    history_thread_id = thread_id or parent_id or "default"
-    existing_session = sessions.get(history_thread_id)
-
-    if args.runtime == "codex":
-        cmd = _build_codex_cmd(message, workdir, args, existing_session)
-    else:
-        cmd = _build_claude_cmd(message, workdir, args, existing_session)
-
-    log.info(
-        f"Running {args.runtime} in {workdir}"
-        + (f" (resuming session {existing_session[:12]})" if existing_session else " (new session)")
+    return _run_via_runtime_plugin(
+        args.runtime,
+        message,
+        workdir,
+        args,
+        api,
+        parent_id,
+        space_id,
+        sessions,
+        histories,
+        thread_id=thread_id,
     )
-
-    # Signal: we're processing
-    api.signal_processing(parent_id, "started", space_id=space_id)
-
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=workdir,
-        text=True,
-    )
-
-    proc.stdin.write(message)
-    proc.stdin.close()
-
-    # Streaming state
-    accumulated_text = ""
-    update_interval = args.update_interval
-    edit_lock = threading.Lock()
-    finished = threading.Event()
-
-    # Defer reply creation until real content arrives.
-    # Creating a placeholder message (e.g. "thinking...") triggers the backend's
-    # routing pipeline, which dispatches it to the concierge — wasting tokens.
-    # The signal_processing() call above fires an SSE-only event (no DB message,
-    # no dispatch) so the frontend can still show a status indicator.
-    reply_id = None
-    api.signal_processing(parent_id, "thinking", space_id=space_id)
-
-    def _create_reply_if_needed(content: str) -> str | None:
-        """Lazily create the reply message on first real content. Returns reply_id."""
-        nonlocal reply_id
-        if reply_id is not None:
-            return reply_id
-        msg = api.send_message(
-            space_id=space_id,
-            content=content,
-            parent_id=parent_id,
-        )
-        if msg:
-            reply_id = msg.get("id", "")
-            log.info(f"Reply created on first content: {reply_id[:12]}")
-        return reply_id
-
-    def periodic_updater():
-        """Updates the reply with either tool status or streaming text."""
-        last_sent = ""
-        while not finished.wait(timeout=update_interval):
-            with edit_lock:
-                current_text = accumulated_text
-                current_tool = last_tool_status
-
-            # If we have real text, show that
-            if current_text and current_text != last_sent:
-                display = current_text
-                if len(current_text) > 15000:
-                    display = "...(truncated)...\n\n" + current_text[-15000:]
-                _create_reply_if_needed(display)
-                if reply_id:
-                    api.edit_message(reply_id, display)
-                last_sent = current_text
-
-            # If no text yet but tools are running, show tool activity
-            elif not current_text and current_tool:
-                elapsed = int(time.time() - start_time)
-                status_display = f"▸ *{current_tool}*\n_{tool_count} steps · {elapsed}s_"
-                if status_display != last_sent:
-                    _create_reply_if_needed(status_display)
-                    if reply_id:
-                        api.edit_message(reply_id, status_display)
-                    last_sent = status_display
-
-    updater = threading.Thread(target=periodic_updater, daemon=True)
-    updater.start()
-
-    # Track tool use for status updates
-    last_tool_status = ""
-    tool_count = 0
-    files_written = []
-    start_time = time.time()
-    last_activity_time = time.time()  # Tracks last output/tool event
-    exit_reason = "done"  # done | crashed | timeout
-
-    # Activity-based timeout watchdog.
-    # No fixed wall-clock timeout. Only kills if output goes silent.
-    SILENCE_KILL_SECS = max(30, args.timeout)
-    SILENCE_WARN_SECS = max(10, min(120, SILENCE_KILL_SECS // 2))
-    silence_warned = False
-
-    def timeout_watchdog():
-        nonlocal exit_reason, silence_warned
-        while not finished.wait(timeout=10.0):
-            silence = time.time() - last_activity_time
-            if silence > SILENCE_KILL_SECS:
-                exit_reason = "timeout"
-                elapsed = int(time.time() - start_time)
-                log.warning(f"No activity for {int(silence)}s — killing CLI (total {elapsed}s)")
-                proc.kill()
-                return
-            elif silence > SILENCE_WARN_SECS and not silence_warned:
-                silence_warned = True
-                log.warning(f"No activity for {int(silence)}s — agent may be hung")
-
-    watchdog = threading.Thread(target=timeout_watchdog, daemon=True)
-    watchdog.start()
-
-    # Parse the stream — update accumulated_text in real time for the updater thread
-    new_session_id = None
-    try:
-        for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            etype = event.get("type", "")
-            last_activity_time = time.time()  # Any output = agent is alive
-            silence_warned = False  # Reset warning on activity
-
-            if args.runtime == "codex":
-                if etype == "thread.started":
-                    tid = event.get("thread_id", "")
-                    if tid:
-                        new_session_id = tid
-
-                elif etype == "item.started":
-                    item = event.get("item", {}) or {}
-                    if item.get("type") == "command_execution":
-                        tool_count += 1
-                        last_tool_status = _summarize_codex_command(item.get("command", ""))
-                        elapsed = int(time.time() - start_time)
-                        if reply_id and not accumulated_text:
-                            status_msg = f"▸ {last_tool_status}\n_{tool_count} tools used · {elapsed}s_"
-                            api.edit_message(reply_id, status_msg)
-                        api.signal_processing(
-                            parent_id,
-                            "tool_call",
-                            space_id=space_id,
-                            tool_name=last_tool_status,
-                        )
-
-                elif etype == "item.completed":
-                    item = event.get("item", {}) or {}
-                    item_type = item.get("type", "")
-                    if item_type == "agent_message":
-                        text = item.get("text", "")
-                        if text:
-                            with edit_lock:
-                                accumulated_text = text
-                    elif item_type == "command_execution":
-                        command = item.get("command", "")
-                        if command:
-                            last_tool_status = _summarize_codex_command(command)
-
-            else:
-                if etype == "assistant":
-                    for block in event.get("message", {}).get("content", []):
-                        if block.get("type") == "text":
-                            with edit_lock:
-                                accumulated_text = block["text"]
-                        # Detect tool use for status updates
-                        if block.get("type") == "tool_use":
-                            tool_name = block.get("name", "")
-                            tool_input = block.get("input", {})
-                            tool_count += 1
-
-                            # Build human-readable status
-                            if tool_name in ("Read", "read"):
-                                path = tool_input.get("file_path", "")
-                                short = path.split("/")[-1] if "/" in path else path
-                                last_tool_status = f"Reading {short}..."
-                            elif tool_name in ("Write", "write"):
-                                path = tool_input.get("file_path", "")
-                                short = path.split("/")[-1] if "/" in path else path
-                                last_tool_status = f"Writing {short}..."
-                                files_written.append(path)
-                            elif tool_name in ("Edit", "edit"):
-                                path = tool_input.get("file_path", "")
-                                short = path.split("/")[-1] if "/" in path else path
-                                last_tool_status = f"Editing {short}..."
-                            elif tool_name in ("Bash", "bash"):
-                                cmd = str(tool_input.get("command", ""))[:60]
-                                last_tool_status = f"Running: {cmd}..."
-                            elif tool_name in ("Grep", "grep"):
-                                pattern = tool_input.get("pattern", "")
-                                last_tool_status = f"Searching: {pattern}..."
-                            elif tool_name in ("Glob", "glob"):
-                                pattern = tool_input.get("pattern", "")
-                                last_tool_status = f"Finding files: {pattern}..."
-                            else:
-                                last_tool_status = f"Using {tool_name}..."
-
-                            # Update reply with tool status if no text yet
-                            elapsed = int(time.time() - start_time)
-                            if reply_id and not accumulated_text:
-                                status_msg = f"▸ {last_tool_status}\n_{tool_count} tools used · {elapsed}s_"
-                                api.edit_message(reply_id, status_msg)
-
-                            # Fire tool_call processing event
-                            api.signal_processing(
-                                parent_id,
-                                "tool_call",
-                                space_id=space_id,
-                                tool_name=tool_name,
-                            )
-
-                elif etype == "content_block_delta":
-                    delta = event.get("delta", {})
-                    if delta.get("type") == "text_delta":
-                        with edit_lock:
-                            accumulated_text += delta.get("text", "")
-
-                elif etype == "result":
-                    result_text = event.get("result", "")
-                    if result_text:
-                        with edit_lock:
-                            accumulated_text = result_text
-                    sid = event.get("session_id", "")
-                    if sid:
-                        new_session_id = sid
-
-    except Exception as e:
-        log.error(f"Error reading output: {e}")
-        exit_reason = "crashed"
-    finally:
-        finished.set()
-
-    # Wait for process
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-
-    # Detect crash from return code
-    stderr = proc.stderr.read()
-    if proc.returncode != 0 and exit_reason == "done":
-        exit_reason = "crashed"
-    if proc.returncode != 0 and not accumulated_text:
-        log.error(f"CLI failed (exit {proc.returncode}): {stderr[:500]}")
-
-    # Save session for thread continuity (even on crash — partial session is fine)
-    if new_session_id:
-        sessions.set(history_thread_id, new_session_id)
-        log.info(f"Session saved: {new_session_id[:12]} for thread {history_thread_id[:12]}")
-
-    # Build final message content based on exit reason
-    elapsed = int(time.time() - start_time)
-
-    # Append file artifacts if any were written
-    artifacts_line = ""
-    if files_written:
-        artifact_names = [p.split("/")[-1] for p in files_written]
-        artifacts_line = "\n\n📄 Wrote: " + ", ".join(artifact_names)
-
-    if exit_reason == "crashed":
-        suffix = f"\n\n---\n⚠️ Agent process ended unexpectedly ({elapsed}s)."
-        if accumulated_text:
-            final_content = accumulated_text + artifacts_line + suffix
-        else:
-            final_content = f"Hit an error processing that.{suffix}"
-        log.warning(f"CRASHED after {elapsed}s (exit {proc.returncode})")
-
-    elif exit_reason == "timeout":
-        suffix = f"\n\n---\n⏱️ Reached time limit ({args.timeout}s). Partial results above."
-        if accumulated_text:
-            final_content = accumulated_text + artifacts_line + suffix
-        else:
-            final_content = f"Timed out after {args.timeout}s with no output."
-        log.warning(f"TIMEOUT after {elapsed}s")
-
-    else:  # done
-        if accumulated_text:
-            final_content = accumulated_text + artifacts_line
-        elif files_written:
-            final_content = f"Done ({elapsed}s).{artifacts_line}"
-        else:
-            final_content = f"Completed ({elapsed}s) — no text output."
-
-    # Final update to reply
-    if reply_id:
-        api.edit_message(reply_id, final_content)
-    else:
-        api.send_message(space_id=space_id, content=final_content, parent_id=parent_id)
-
-    # Signal: done (with reason)
-    api.signal_processing(parent_id, "completed", space_id=space_id)
-
-    # Trigger re-summarization now that the message has real content
-    # (the initial "..." placeholder may have gotten a stale summary)
-    if reply_id and len(final_content) > 50:
-        api.request_summary(reply_id)
-
-    log.info(f"Response {exit_reason} ({len(final_content)} chars, {tool_count} tools, {elapsed}s)")
-    return final_content
-
 
 # ---------------------------------------------------------------------------
 # Mention detection

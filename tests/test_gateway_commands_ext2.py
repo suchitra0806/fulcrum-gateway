@@ -978,18 +978,6 @@ class TestRenderAgentDetail:
         rendered = _render_text(result)
         assert "Doctor Status" in rendered
 
-    def test_adapter_row_flags_deprecated_runtime_with_migration_hint(self):
-        """#90: ax-gateway upgrades don't migrate registry runtime_type, so a
-        legacy hermes_sentinel entry must surface its deprecation + the
-        copy-pasteable migration command instead of looking like a normal
-        adapter choice."""
-        entry = {"name": "nova", "runtime_type": "hermes_sentinel"}
-        rendered = _render_text(gw_cmd._render_agent_detail(entry, activity=[]))
-        assert "hermes_sentinel" in rendered
-        assert "deprecated" in rendered
-        assert "hermes_plugin" in rendered  # successor surfaced
-        assert "nova" in rendered  # migration command includes the agent name
-
     def test_adapter_row_quiet_for_current_runtime(self):
         entry = {"name": "current", "runtime_type": "hermes_plugin"}
         rendered = _render_text(gw_cmd._render_agent_detail(entry, activity=[]))

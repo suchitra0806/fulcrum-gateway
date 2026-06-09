@@ -56,6 +56,7 @@ def configure_pg_env():
 
     # Seed before the suite so query tests have data.
     from ax_cli.runtimes.mcp_servers.report_gen.postgres_seed import seed_postgres
+
     seed_postgres(OWNER_DSN)
 
     yield
@@ -76,6 +77,7 @@ def configure_pg_env():
 
 def test_seed_produces_expected_row_counts():
     from ax_cli.runtimes.mcp_servers.report_gen.postgres_seed import seed_postgres
+
     counts = seed_postgres(OWNER_DSN)
     assert counts == {
         "theater": 5,
@@ -88,6 +90,7 @@ def test_seed_produces_expected_row_counts():
 
 def test_backend_dialect_is_postgres():
     from ax_cli.runtimes.mcp_servers.report_gen.backend import select_backend
+
     backend = select_backend()
     assert backend.dialect == "postgres"
     assert backend.__class__.__name__ == "PostgresBackend"
@@ -95,6 +98,7 @@ def test_backend_dialect_is_postgres():
 
 def test_schema_includes_backend_field():
     from ax_cli.runtimes.mcp_servers.report_gen.tools import get_db_schema
+
     schema = get_db_schema()
     assert schema["backend"] == "postgres"
     assert schema["synthetic"] is True
@@ -103,11 +107,10 @@ def test_schema_includes_backend_field():
 
 def test_schema_returns_all_five_tables():
     from ax_cli.runtimes.mcp_servers.report_gen.tools import get_db_schema
+
     schema = get_db_schema()
     table_names = {t["name"] for t in schema["tables"]}
-    assert table_names == {
-        "theater", "unit", "ammo_stockpile", "personnel_readiness", "supply_route"
-    }
+    assert table_names == {"theater", "unit", "ammo_stockpile", "personnel_readiness", "supply_route"}
 
 
 def test_schema_returns_foreign_keys_via_pg_catalog():
@@ -115,6 +118,7 @@ def test_schema_returns_foreign_keys_via_pg_catalog():
     FKs because constraint_column_usage filters by privilege. Fixed by
     switching to pg_catalog views."""
     from ax_cli.runtimes.mcp_servers.report_gen.tools import get_db_schema
+
     schema = get_db_schema()
     by_name = {t["name"]: t for t in schema["tables"]}
     ammo_fks = by_name["ammo_stockpile"]["foreign_keys"]
@@ -126,6 +130,7 @@ def test_schema_returns_foreign_keys_via_pg_catalog():
 
 def test_query_centcom_ammo_returns_expected_rows():
     from ax_cli.runtimes.mcp_servers.report_gen.tools import run_query
+
     result = run_query(
         "SELECT t.name AS theater, a.ammo_type, a.quantity, a.units "
         "FROM ammo_stockpile a JOIN theater t ON a.theater_id = t.id "
@@ -136,23 +141,26 @@ def test_query_centcom_ammo_returns_expected_rows():
     assert result["rows"][0]["quantity"] == 120000
 
 
-@pytest.mark.parametrize("sql", [
-    "DELETE FROM theater",
-    "UPDATE theater SET name = 'X'",
-    "INSERT INTO theater (id, name) VALUES (99, 'TEST')",
-    "DROP TABLE theater",
-])
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM theater",
+        "UPDATE theater SET name = 'X'",
+        "INSERT INTO theater (id, name) VALUES (99, 'TEST')",
+        "DROP TABLE theater",
+    ],
+)
 def test_writes_rejected_by_ast_layer(sql):
     from ax_cli.runtimes.mcp_servers.report_gen.tools import run_query
+
     result = run_query(sql)
     assert result["code"] == "READONLY_VIOLATION"
 
 
 def test_cte_smuggled_delete_rejected_with_postgres_dialect():
     from ax_cli.runtimes.mcp_servers.report_gen.tools import run_query
-    result = run_query(
-        "WITH x AS (DELETE FROM theater WHERE id = 1 RETURNING *) SELECT * FROM x"
-    )
+
+    result = run_query("WITH x AS (DELETE FROM theater WHERE id = 1 RETURNING *) SELECT * FROM x")
     assert result["code"] == "READONLY_VIOLATION"
 
 
@@ -163,10 +171,7 @@ def test_reader_role_cannot_write_even_if_ast_bypassed():
         with conn.cursor() as cur:
             # SET TRANSACTION READ ONLY is layer 2a; this test verifies that
             # even without it, the role grants are sufficient.
-            with pytest.raises(
-                (psycopg.errors.InsufficientPrivilege,
-                 psycopg.errors.ReadOnlySqlTransaction)
-            ):
+            with pytest.raises((psycopg.errors.InsufficientPrivilege, psycopg.errors.ReadOnlySqlTransaction)):
                 cur.execute("DELETE FROM theater")
 
 
@@ -187,6 +192,7 @@ def test_query_timeout_aborts_long_running_select():
 
 def test_row_limit_truncates_postgres_results():
     from ax_cli.runtimes.mcp_servers.report_gen.tools import run_query
+
     result = run_query("SELECT * FROM ammo_stockpile ORDER BY id", row_limit=3)
     assert result["row_count"] == 3
     assert result["truncated"] is True
@@ -194,6 +200,7 @@ def test_row_limit_truncates_postgres_results():
 
 def test_handler_wraps_postgres_query_results_in_mcp_block():
     from ax_cli.runtimes.mcp_servers.report_gen.tools import _handle_db_query
+
     result = _handle_db_query({"sql": "SELECT COUNT(*) AS n FROM theater"})
     payload = json.loads(result["content"][0]["text"])
     assert payload["row_count"] == 1
