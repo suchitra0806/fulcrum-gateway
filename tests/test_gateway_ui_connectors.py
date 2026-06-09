@@ -211,8 +211,9 @@ class TestConnectorApiRoutes:
         monkeypatch.setattr(
             connector_api,
             "search_tools",
-            lambda row, query, auth_env, apps=None, limit=10, mode="auto": {
+            lambda row, query, auth_env, apps=None, limit=10, mode="auto", session_id=None: {
                 "items": [{"name": "GMAIL_SEND", "displayName": "Send Email"}],
+                "mode": mode,
             },
         )
         monkeypatch.setattr(

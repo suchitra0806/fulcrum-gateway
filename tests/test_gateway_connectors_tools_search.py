@@ -26,14 +26,16 @@ def _connector_double(monkeypatch):
     monkeypatch.setattr("ax_cli.connectors.read_auth", lambda *_a, **_k: {"COMPOSIO_API_KEY": "ak"})
     captured: dict = {}
 
-    def _search(_row, use_case, _auth_env, *, limit, mode):
+    def _search(_row, use_case, _auth_env, *, limit, mode, session_id=None):
         captured["use_case"] = use_case
         captured["mode"] = mode
         captured["limit"] = limit
+        captured["session_id"] = session_id
         return {
             "items": [
                 {"name": "GITHUB_LIST_PRS", "displayName": "List PRs", "description": "List PRs"},
-            ]
+            ],
+            "mode": mode,
         }
 
     monkeypatch.setattr("ax_cli.connectors.search_tools", _search)
