@@ -114,10 +114,7 @@ def _parse_search_tools_response(data: Any) -> tuple[list[dict[str, Any]], str |
         if isinstance(tool_schemas, dict):
             for key in tool_schemas:
                 _add_slug(str(key), slugs)
-    items = [
-        {"name": slug, "displayName": slug, "description": ""}
-        for slug in sorted(slugs)
-    ]
+    items = [{"name": slug, "displayName": slug, "description": ""} for slug in sorted(slugs)]
     return items, session_id
 
 
