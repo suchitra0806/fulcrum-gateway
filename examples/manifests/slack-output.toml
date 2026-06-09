@@ -2,6 +2,7 @@ name = "slack-output"
 type = "sentinel_inference_sdk"
 client = "openai_sdk"
 model = "gpt-4o-mini"
+workdir = "."
 connector_ref = "composio-main"
 allow_all_users = true
 description = "Sends Slack messages via Composio connector"
