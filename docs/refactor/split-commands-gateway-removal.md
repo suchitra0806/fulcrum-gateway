@@ -30,6 +30,19 @@ Per the agreed policy we did **not** delete any test. Tests fall into two bucket
 
 To find them: `grep -rn "pytestmark = pytest.mark.skip" tests/ | grep gateway`.
 
+### Rewrite progress
+
+A representative slice has been rewritten per-module to demonstrate the pattern and recover
+coverage (the rule: patch the **command's owning module**, which holds a binding for every helper
+it calls — defined locally, top-imported, or bottom-imported):
+
+- `tests/test_gateway_daemon_commands.py` — `start`/`stop`/`run` (patches `gateway_daemon_cmd`; `gateway_core` patches unchanged).
+- `tests/test_gateway_local_commands.py` — `local init` + `_ensure_workdir` (patches `gateway_local`).
+- `tests/test_gateway_agents_commands.py` — `agents add` (patches `gateway_agents`).
+
+As more skipped tests are ported this way, remove the corresponding originals (and their skip
+markers) from the files above.
+
 ## Re-pointed files (kept, passing)
 
 These were salvaged with a mechanical change only (import path, module alias, or patch-target
