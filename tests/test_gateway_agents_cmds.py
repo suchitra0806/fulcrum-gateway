@@ -39,12 +39,6 @@ from tests.gateway_cmd_testlib import (
 runner = CliRunner()
 
 
-@pytest.mark.skip(
-    reason="Rewrite candidate after the #28 Phase 1 split: threads a single client mock "
-    "through session->hydrate->spaces; the pre-split single ax_cli.commands.gateway.AxClient "
-    "patch covered the whole call graph, which now spans gateway_session/gateway_agents/"
-    "gateway_spaces. Needs per-module client mocks. See docs/refactor/split-commands-gateway-removal.md."
-)
 def test_local_session_send_hydrates_space_from_database(monkeypatch, tmp_path):
     config_dir = tmp_path / "config"
     monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
@@ -124,7 +118,10 @@ def test_local_session_send_hydrates_space_from_database(monkeypatch, tmp_path):
             )
             return {"message": {"id": "msg-1", "space_id": space_id}}
 
-    monkeypatch.setattr(_gw_agents, "AxClient", FakeUserClient)
+    # DB hydration happens in gateway_spaces._hydrate_entry_space_from_database, which builds the
+    # lookup client via gateway_spaces._load_gateway_user_client; the managed send client is built
+    # in gateway_session. Patch each at its resolving module.
+    monkeypatch.setattr(_gw_spaces, "_load_gateway_user_client", lambda: FakeUserClient())
     monkeypatch.setattr(_gw_session, "_load_managed_agent_client", lambda entry: FakeManagedClient())
 
     payload = _gw_session._send_local_session_message(

@@ -22,6 +22,8 @@ from typer.testing import CliRunner
 from ax_cli import gateway as gateway_core
 from ax_cli.commands import gateway_agents as _gw_agents
 from ax_cli.commands import gateway_auth as _gw_auth
+from ax_cli.commands import gateway_diagnostics as _gw_diagnostics
+from ax_cli.commands import gateway_messaging as _gw_messaging
 from ax_cli.commands import gateway_ui as _gw_ui
 from ax_cli.main import app
 from tests.gateway_cmd_testlib import (
@@ -230,12 +232,6 @@ def test_gateway_ui_handler_serves_status_and_agent_detail(monkeypatch, tmp_path
         thread.join(timeout=2.0)
 
 
-@pytest.mark.skip(
-    reason="Rewrite candidate after the #28 Phase 1 split: drives agent registration through the "
-    "UI handler, whose client construction now spans gateway_ui/gateway_agents/gateway_messaging; "
-    "the pre-split single ax_cli.commands.gateway.AxClient patch covered all of it. Needs per-module "
-    "client mocks. See docs/refactor/split-commands-gateway-removal.md."
-)
 def test_gateway_ui_handler_supports_agent_mutations(monkeypatch, tmp_path):
     config_dir = tmp_path / "config"
     monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
@@ -253,6 +249,12 @@ def test_gateway_ui_handler_supports_agent_mutations(monkeypatch, tmp_path):
     monkeypatch.setattr(_gw_agents, "_polish_metadata", lambda *args, **kwargs: None)
     monkeypatch.setattr(_gw_agents, "_mint_agent_pat", lambda *args, **kwargs: ("axp_a_agent.secret", "mgmt"))
     monkeypatch.setattr(_gw_agents, "AxClient", _FakeManagedSendClient)
+    # The handler delegates /send + /test to gateway_messaging and /doctor to gateway_diagnostics;
+    # those functions resolve their clients in their own module namespaces, so mirror the agent
+    # client seams there too (the pre-split test patched a single ax_cli.commands.gateway namespace).
+    for _mod in (_gw_messaging, _gw_diagnostics):
+        monkeypatch.setattr(_mod, "_load_gateway_user_client", lambda: _FakeUserClient(), raising=False)
+        monkeypatch.setattr(_mod, "AxClient", _FakeManagedSendClient, raising=False)
 
     handler = _gw_ui._build_gateway_ui_handler(activity_limit=5, refresh_ms=1500)
     with closing(socket.socket()) as probe:

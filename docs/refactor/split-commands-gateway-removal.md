@@ -43,17 +43,21 @@ to the module its callers exercise). The ported tests live in:
 `test_gateway_commands_ext2.py`, `test_offline_mode.py`, `test_gateway_offline_visibility.py`.
 `test_gateway_ui_connectors.py` now imports the shared HTTP-handler helpers from the testlib.
 
-### Remaining rewrite candidates (2 tests, individually `@pytest.mark.skip`)
+### All command tests ported (no remaining gateway skips)
 
-Two tests in the monolith relied on a **single** `ax_cli.commands.gateway.AxClient` patch covering
-client construction across the *entire* call graph. Under the split that graph spans several modules,
-each with its own `AxClient` binding, so faithfully porting them requires per-module client mocks
-(a structural rewrite, not a re-point). They are skipped with an inline reason:
+The two deep cross-module cases that initially needed restructuring were also ported by mocking the
+client seam **in each module that resolves it** (rather than a single namespace):
 
-- `tests/test_gateway_agents_cmds.py::test_local_session_send_hydrates_space_from_database`
-- `tests/test_gateway_ui_cmds.py::test_gateway_ui_handler_supports_agent_mutations`
+- `test_local_session_send_hydrates_space_from_database` — DB hydration runs in
+  `gateway_spaces._hydrate_entry_space_from_database` (patch `gateway_spaces._load_gateway_user_client`),
+  the managed send in `gateway_session` (patch `gateway_session._load_managed_agent_client`).
+- `test_gateway_ui_handler_supports_agent_mutations` — the UI handler delegates `/send`+`/test` to
+  `gateway_messaging` and `/doctor` to `gateway_diagnostics`; the agent-client seams are mirrored on
+  those modules in addition to `gateway_agents`.
 
-To find them: `grep -rn "pytest.mark.skip" tests/test_gateway_*_cmds.py`.
+All 643 previously-skipped command tests are restored. The full suite returns to the original
+`main` baseline of **3597 passed, 7 skipped** (the 7 skips are pre-existing and unrelated to the
+gateway split).
 
 ## Re-pointed files (kept, passing)
 
