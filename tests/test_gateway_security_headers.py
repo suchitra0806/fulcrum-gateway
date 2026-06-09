@@ -1,6 +1,6 @@
 import io
 
-from ax_cli.commands import gateway as gateway_cmd
+from ax_cli.commands import gateway_ui as gateway_cmd
 
 EXPECTED_HEADERS = {
     "X-Content-Type-Options": "nosniff",

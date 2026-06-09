@@ -429,7 +429,7 @@ def test_cli_audit_export_to_stdout(tmp_path: Path, monkeypatch):
             {"ts": "2026-05-25T00:00:01+00:00", "event": "runtime_started", "agent_name": "demo"},
         ],
     )
-    monkeypatch.setattr("ax_cli.commands.gateway.activity_log_path", lambda: log)
+    monkeypatch.setattr("ax_cli.commands.gateway_audit.activity_log_path", lambda: log)
 
     result = runner.invoke(app, ["gateway", "audit", "export", "--format", "jsonl"])
     assert result.exit_code == 0, result.output
@@ -442,7 +442,7 @@ def test_cli_audit_export_to_stdout(tmp_path: Path, monkeypatch):
 
 def test_cli_audit_export_to_file(tmp_path: Path, monkeypatch):
     log = _write_log(tmp_path, [{"ts": "2026-05-25T00:00:00+00:00", "event": "x", "token": "secret"}])
-    monkeypatch.setattr("ax_cli.commands.gateway.activity_log_path", lambda: log)
+    monkeypatch.setattr("ax_cli.commands.gateway_audit.activity_log_path", lambda: log)
     out_path = tmp_path / "audit.out"
 
     result = runner.invoke(
@@ -464,7 +464,7 @@ def test_cli_audit_export_filter_flags_parse(tmp_path: Path, monkeypatch):
             {"ts": "2026-05-25T00:00:02+00:00", "event": "runtime_started", "agent_name": "alice"},
         ],
     )
-    monkeypatch.setattr("ax_cli.commands.gateway.activity_log_path", lambda: log)
+    monkeypatch.setattr("ax_cli.commands.gateway_audit.activity_log_path", lambda: log)
 
     result = runner.invoke(
         app,
@@ -480,7 +480,7 @@ def test_cli_audit_export_filter_flags_parse(tmp_path: Path, monkeypatch):
 
 def test_cli_audit_export_invalid_since_exits_cleanly(tmp_path: Path, monkeypatch):
     log = _write_log(tmp_path, [{"ts": "2026-05-25T00:00:00+00:00", "event": "x"}])
-    monkeypatch.setattr("ax_cli.commands.gateway.activity_log_path", lambda: log)
+    monkeypatch.setattr("ax_cli.commands.gateway_audit.activity_log_path", lambda: log)
 
     result = runner.invoke(app, ["gateway", "audit", "export", "--since", "not-a-date"])
     assert result.exit_code == 1
@@ -489,7 +489,7 @@ def test_cli_audit_export_invalid_since_exits_cleanly(tmp_path: Path, monkeypatc
 
 def test_cli_audit_export_unknown_format_exits_with_code_2(tmp_path: Path, monkeypatch):
     log = _write_log(tmp_path, [{"ts": "2026-05-25T00:00:00+00:00", "event": "x"}])
-    monkeypatch.setattr("ax_cli.commands.gateway.activity_log_path", lambda: log)
+    monkeypatch.setattr("ax_cli.commands.gateway_audit.activity_log_path", lambda: log)
 
     result = runner.invoke(app, ["gateway", "audit", "export", "--format", "protobuf"])
     assert result.exit_code == 2
@@ -505,7 +505,7 @@ def test_cli_audit_export_redact_is_default_on(tmp_path: Path, monkeypatch):
     """Default behaviour (no --redact / --no-redact flag) must mask credentials —
     silent unredacted export is the bug Andrew flagged (#62 finding #1)."""
     log = _write_log(tmp_path, [{"ts": "2026-05-25T00:00:00+00:00", "event": "x", "token": "axp_u_secret"}])
-    monkeypatch.setattr("ax_cli.commands.gateway.activity_log_path", lambda: log)
+    monkeypatch.setattr("ax_cli.commands.gateway_audit.activity_log_path", lambda: log)
 
     result = runner.invoke(app, ["gateway", "audit", "export"])
     assert result.exit_code == 0, result.output
@@ -521,7 +521,7 @@ def test_cli_audit_export_file_output_chmods_to_0o600(tmp_path: Path, monkeypatc
     import stat
 
     log = _write_log(tmp_path, [{"ts": "2026-05-25T00:00:00+00:00", "event": "x"}])
-    monkeypatch.setattr("ax_cli.commands.gateway.activity_log_path", lambda: log)
+    monkeypatch.setattr("ax_cli.commands.gateway_audit.activity_log_path", lambda: log)
     out_path = tmp_path / "audit.out"
 
     result = runner.invoke(app, ["gateway", "audit", "export", "-o", str(out_path)])
@@ -534,7 +534,7 @@ def test_cli_audit_export_refuses_no_redact_file_without_ack(tmp_path: Path, mon
     """--no-redact + --output without --i-understand-credentials-in-file is
     refused — the file would silently widen the credential boundary."""
     log = _write_log(tmp_path, [{"ts": "2026-05-25T00:00:00+00:00", "event": "x"}])
-    monkeypatch.setattr("ax_cli.commands.gateway.activity_log_path", lambda: log)
+    monkeypatch.setattr("ax_cli.commands.gateway_audit.activity_log_path", lambda: log)
     out_path = tmp_path / "audit.out"
 
     result = runner.invoke(app, ["gateway", "audit", "export", "--no-redact", "-o", str(out_path)])
@@ -548,7 +548,7 @@ def test_cli_audit_export_allows_no_redact_file_with_ack(tmp_path: Path, monkeyp
     """The explicit --i-understand-credentials-in-file ack lets the operator
     bypass the refusal when they really need raw values (e.g. legal hold)."""
     log = _write_log(tmp_path, [{"ts": "2026-05-25T00:00:00+00:00", "event": "x", "token": "axp_u_raw"}])
-    monkeypatch.setattr("ax_cli.commands.gateway.activity_log_path", lambda: log)
+    monkeypatch.setattr("ax_cli.commands.gateway_audit.activity_log_path", lambda: log)
     out_path = tmp_path / "audit.out"
 
     result = runner.invoke(
@@ -578,7 +578,7 @@ def test_cli_audit_export_emits_skipped_count(tmp_path: Path, monkeypatch):
         '{"ts": "2026-05-25T00:00:01+00:00", "event": "good"}\n'
         "another bad line\n"
     )
-    monkeypatch.setattr("ax_cli.commands.gateway.activity_log_path", lambda: log)
+    monkeypatch.setattr("ax_cli.commands.gateway_audit.activity_log_path", lambda: log)
 
     result = runner.invoke(app, ["gateway", "audit", "export"])
     assert result.exit_code == 0, result.output

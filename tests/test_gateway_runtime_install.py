@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from ax_cli.commands.gateway import (
+from ax_cli.commands.gateway_runtime_cmd import (
     _RUNTIME_INSTALL_RECIPES,
     _install_runtime_payload,
     _proc_error_msg,
@@ -85,7 +85,7 @@ def test_install_clone_failure_triggers_cleanup(tmp_path, monkeypatch):
             raise subprocess.CalledProcessError(1, args, stderr="fatal: simulated network error")
         raise AssertionError(f"unexpected subprocess: {args}")
 
-    with patch("ax_cli.commands.gateway.subprocess.run", side_effect=_fake_run):
+    with patch("ax_cli.commands.gateway_runtime_cmd.subprocess.run", side_effect=_fake_run):
         result = _install_runtime_payload("hermes", operator_session={"user": "test"})
 
     assert result["ready"] is False
@@ -110,7 +110,7 @@ def test_install_clone_skipped_when_target_exists(tmp_path, monkeypatch):
 
     # Mock hermes_setup_status to return ready
     with (
-        patch("ax_cli.commands.gateway.subprocess.run", side_effect=_fake_run),
+        patch("ax_cli.commands.gateway_runtime_cmd.subprocess.run", side_effect=_fake_run),
         patch("ax_cli.gateway.hermes_setup_status", return_value={"ready": True, "summary": "found"}),
     ):
         result = _install_runtime_payload("hermes", operator_session={"user": "test"})
@@ -138,7 +138,7 @@ def test_install_full_path_succeeds(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
     with (
-        patch("ax_cli.commands.gateway.subprocess.run", side_effect=_fake_run),
+        patch("ax_cli.commands.gateway_runtime_cmd.subprocess.run", side_effect=_fake_run),
         patch("ax_cli.gateway.hermes_setup_status", return_value={"ready": True, "summary": "ok"}),
     ):
         result = _install_runtime_payload("hermes", operator_session={"user": "test"})
@@ -183,7 +183,7 @@ def test_install_pip_failure_is_non_fatal(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
     with (
-        patch("ax_cli.commands.gateway.subprocess.run", side_effect=_fake_run),
+        patch("ax_cli.commands.gateway_runtime_cmd.subprocess.run", side_effect=_fake_run),
         patch("ax_cli.gateway.hermes_setup_status", return_value={"ready": True, "summary": "found"}),
     ):
         result = _install_runtime_payload("hermes", operator_session={"user": "test"})
@@ -200,7 +200,7 @@ def test_install_pip_failure_is_non_fatal(tmp_path, monkeypatch):
 
 def test_cli_install_requires_session(monkeypatch):
     """`ax gateway runtime install` exits 1 with clear error when no session."""
-    monkeypatch.setattr("ax_cli.commands.gateway.load_gateway_session", lambda: {})
+    monkeypatch.setattr("ax_cli.commands.gateway_runtime_cmd.load_gateway_session", lambda: {})
     result = runner.invoke(app, ["gateway", "runtime", "install", "hermes"])
     assert result.exit_code != 0
     assert "ax gateway login" in result.output
@@ -208,7 +208,7 @@ def test_cli_install_requires_session(monkeypatch):
 
 def test_cli_install_unknown_template(monkeypatch):
     """`ax gateway runtime install evil` exits 1 with allowlist error."""
-    monkeypatch.setattr("ax_cli.commands.gateway.load_gateway_session", lambda: {"user": "test"})
+    monkeypatch.setattr("ax_cli.commands.gateway_runtime_cmd.load_gateway_session", lambda: {"user": "test"})
     result = runner.invoke(app, ["gateway", "runtime", "install", "evil"])
     assert result.exit_code != 0
     assert "unknown runtime template" in result.output
@@ -217,7 +217,7 @@ def test_cli_install_unknown_template(monkeypatch):
 def test_cli_install_json_output(monkeypatch, tmp_path):
     """`--json` returns the structured install payload."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr("ax_cli.commands.gateway.load_gateway_session", lambda: {"user": "test"})
+    monkeypatch.setattr("ax_cli.commands.gateway_runtime_cmd.load_gateway_session", lambda: {"user": "test"})
 
     def _fake_run(args, **_kw):
         if args[0] == "git" and args[1] == "clone":
@@ -232,7 +232,7 @@ def test_cli_install_json_output(monkeypatch, tmp_path):
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
     with (
-        patch("ax_cli.commands.gateway.subprocess.run", side_effect=_fake_run),
+        patch("ax_cli.commands.gateway_runtime_cmd.subprocess.run", side_effect=_fake_run),
         patch("ax_cli.gateway.hermes_setup_status", return_value={"ready": True, "summary": "ok"}),
     ):
         result = runner.invoke(app, ["gateway", "runtime", "install", "hermes", "--json"])
@@ -310,7 +310,7 @@ def test_venv_preflight_fails_fast_when_ensurepip_missing(tmp_path, monkeypatch)
             return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         return real_run(args, **kwargs)
 
-    with patch("ax_cli.commands.gateway.subprocess.run", side_effect=_fake_run):
+    with patch("ax_cli.commands.gateway_runtime_cmd.subprocess.run", side_effect=_fake_run):
         result = _install_runtime_payload("hermes", operator_session={"user": "test"})
 
     assert result["ready"] is False

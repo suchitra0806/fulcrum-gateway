@@ -19,7 +19,7 @@ Three rules pinned here:
 import pytest
 
 from ax_cli import gateway as gateway_core
-from ax_cli.commands import gateway as gateway_cmd
+from ax_cli.commands import gateway_messaging as gateway_cmd
 
 
 def _make_registry_agent(*, name, agent_id, token_file, space_id="space-1"):

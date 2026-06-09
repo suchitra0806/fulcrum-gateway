@@ -1038,7 +1038,7 @@ def test_channel_setup_writes_persona_into_claude_md(monkeypatch, tmp_path):
 def test_marker_section_preserves_user_content_in_claude_md(tmp_path):
     """If a workdir already has CLAUDE.md, the marker writer prepends the
     auto-generated section without clobbering user content."""
-    from ax_cli.commands.gateway import _render_agent_persona_markdown, _write_marker_section
+    from ax_cli.commands.gateway_agents import _render_agent_persona_markdown, _write_marker_section
 
     workdir = tmp_path / "work"
     workdir.mkdir()
@@ -1064,7 +1064,7 @@ def test_marker_section_preserves_user_content_in_claude_md(tmp_path):
 def test_marker_section_replaces_in_place_on_rerun(tmp_path):
     """Re-running setup with an updated system_prompt must replace just the
     section between markers, not append a duplicate."""
-    from ax_cli.commands.gateway import _render_agent_persona_markdown, _write_marker_section
+    from ax_cli.commands.gateway_agents import _render_agent_persona_markdown, _write_marker_section
 
     workdir = tmp_path / "work"
     workdir.mkdir()

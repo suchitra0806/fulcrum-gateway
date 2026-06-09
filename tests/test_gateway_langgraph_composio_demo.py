@@ -230,7 +230,7 @@ def test_bridge_main_emits_lifecycle_with_mocked_round(monkeypatch, capsys) -> N
 
 
 def test_register_langgraph_composio_requires_connector_ref(tmp_path, monkeypatch) -> None:
-    from ax_cli.commands import gateway as gateway_cmd
+    from ax_cli.commands import gateway_agents as gateway_cmd
 
     monkeypatch.setenv("AX_GATEWAY_DIR", str(tmp_path))
     with pytest.raises(ValueError, match="connector-ref"):
