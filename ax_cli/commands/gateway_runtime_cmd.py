@@ -171,6 +171,14 @@ _RUNTIME_INSTALL_RECIPES: dict[str, dict] = {
         "verify_template_id": "hermes",
         "install_steps": ("clone", "venv", "pip_install", "verify"),
     },
+    "sentinel_inference_sdk": {
+        # No clone — creates a dedicated venv and installs the openai package.
+        # Target matches the default python path resolved by
+        # _sentinel_inference_sdk_python() so agents pick it up automatically.
+        "target_relative": "hermes-agent",
+        "packages": ["openai"],
+        "install_steps": ("venv", "pip_install_packages", "pip_verify_packages"),
+    },
 }
 
 
@@ -353,6 +361,51 @@ def _install_runtime_payload(
                 # Don't cleanup — the clone is valuable even if pip failed
                 _log("pip_install", "warn", f"pip install -e failed (non-fatal): {_proc_error_msg(exc)}")
 
+    # Step: pip install named packages (no local clone needed — e.g. openai)
+    if "pip_install_packages" in recipe["install_steps"]:
+        packages = list(recipe.get("packages") or [])
+        venv_pip = venv_dir / "bin" / "pip"
+        if not venv_pip.exists():
+            _log("pip_install_packages", "skipped", f"no pip at {venv_pip}")
+        elif not packages:
+            _log("pip_install_packages", "skipped", "no packages specified in recipe")
+        else:
+            pkg_str = " ".join(packages)
+            _log("pip_install_packages", "running", f"installing {pkg_str} into venv")
+            try:
+                subprocess.run(
+                    [str(venv_pip), "install", *packages],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                _log("pip_install_packages", "ok", f"installed {pkg_str}")
+            except subprocess.CalledProcessError as exc:
+                _log("pip_install_packages", "error", f"pip install {pkg_str} failed: {_proc_error_msg(exc)}")
+                return {"ready": False, "summary": f"pip install {pkg_str} failed", "target": str(target), "steps": steps}
+
+    # Step: verify named packages are importable from the venv python
+    if "pip_verify_packages" in recipe["install_steps"]:
+        packages = list(recipe.get("packages") or [])
+        venv_python = venv_dir / "bin" / "python3"
+        for pkg in packages:
+            try:
+                result = subprocess.run(
+                    [str(venv_python), "-c", f"import importlib; importlib.import_module('{pkg}')"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if result.returncode == 0:
+                    _log("verify", "ok", f"{pkg} importable from {venv_python}")
+                else:
+                    _log("verify", "error", f"{pkg} not importable: {result.stderr.strip()[:200]}")
+                    return {"ready": False, "summary": f"{pkg} not importable after install", "target": str(target), "steps": steps}
+            except Exception as exc:  # noqa: BLE001
+                _log("verify", "error", f"verify failed: {exc}")
+                return {"ready": False, "summary": "verify failed", "target": str(target), "steps": steps}
+
     # Step: verify (re-run setup_status check)
     if "verify" in recipe["install_steps"]:
         verify_template = recipe.get("verify_template_id", template_id)
@@ -370,7 +423,48 @@ def _install_runtime_payload(
         "ready": True,
         "summary": f"{template_id} installed at {target}",
         "target": str(target),
+        "python_path": str(venv_dir / "bin" / "python3"),
         "steps": steps,
+    }
+
+
+def _sentinel_inference_sdk_venv_status() -> dict:
+    """Check whether the sentinel_inference_sdk venv exists and openai is importable."""
+    recipe = _RUNTIME_INSTALL_RECIPES["sentinel_inference_sdk"]
+    target = Path.home() / recipe["target_relative"]
+    venv_python = target / ".venv" / "bin" / "python3"
+    if not venv_python.exists():
+        return {
+            "ready": False,
+            "template_id": "sentinel_inference_sdk",
+            "resolved_path": None,
+            "expected_path": str(target / ".venv"),
+            "summary": f"venv not found at {target / '.venv'}. Run `ax gateway runtime install sentinel_inference_sdk`.",
+        }
+    packages = list(recipe.get("packages") or [])
+    for pkg in packages:
+        try:
+            result = subprocess.run(
+                [str(venv_python), "-c", f"import importlib; importlib.import_module('{pkg}')"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if result.returncode != 0:
+                return {
+                    "ready": False,
+                    "template_id": "sentinel_inference_sdk",
+                    "resolved_path": str(venv_python),
+                    "summary": f"{pkg} not importable from {venv_python}. Run `ax gateway runtime install sentinel_inference_sdk`.",
+                }
+        except Exception as exc:  # noqa: BLE001
+            return {"ready": False, "template_id": "sentinel_inference_sdk", "summary": f"verify failed: {exc}"}
+    return {
+        "ready": True,
+        "template_id": "sentinel_inference_sdk",
+        "resolved_path": str(venv_python),
+        "summary": f"openai importable from {venv_python}.",
+        "python_path": str(venv_python),
     }
 
 
@@ -411,14 +505,22 @@ def runtime_install(
 ):
     """Install a runtime template's prerequisites (clone + venv + pip install + verify).
 
-    Today only ``hermes`` is on the install allowlist (clones from
-    https://github.com/NousResearch/hermes-agent into ~/hermes-agent and
-    installs into a venv at ~/hermes-agent/.venv). Other templates require
-    a code-reviewable PR to extend the allowlist per AUTOSETUP-001 §Security.
+    Supported templates:
+
+    - ``hermes`` — clones https://github.com/NousResearch/hermes-agent into
+      ~/hermes-agent and installs into a venv at ~/hermes-agent/.venv.
+    - ``sentinel_inference_sdk`` — creates a venv at ~/hermes-agent/.venv
+      (or reuses an existing one) and installs the ``openai`` package into it.
+      Prints the resolved ``python_path`` so you can wire it to an agent with
+      ``ax gateway agents update <name> --python <path>``.
+
+    Other templates require a code-reviewable PR to extend the allowlist per
+    AUTOSETUP-001 §Security.
 
     Requires an active gateway operator session — run ``ax gateway login`` first.
 
         ax gateway runtime install hermes
+        ax gateway runtime install sentinel_inference_sdk
         ax gateway runtime install hermes --target /opt/work/hermes-agent
     """
     operator_session = load_gateway_session()
@@ -447,27 +549,37 @@ def runtime_install(
         err_console.print(f"  {marker} {step.get('step')}: {detail}")
     state = "[green]ready[/green]" if payload.get("ready") else "[red]not ready[/red]"
     err_console.print(f"  state = {state}")
+    if payload.get("python_path"):
+        err_console.print(f"  python_path = {payload['python_path']}")
+        err_console.print(
+            f"  [dim]Wire it up with: ax gateway agents update <name> --python {payload['python_path']}[/dim]"
+        )
     if not payload.get("ready"):
         raise typer.Exit(1)
 
 
 @runtime_app.command("status")
 def runtime_status(
-    template_id: str = typer.Argument(..., help="Runtime template id (today: only 'hermes')"),
+    template_id: str = typer.Argument(..., help="Runtime template id (e.g. 'hermes', 'sentinel_inference_sdk')"),
     as_json: bool = JSON_OPTION,
 ):
     """Report whether a runtime template is ready (preflight check).
 
-    Calls the same preflight backing the wizard's ``hermes_ready`` flag.
-    Useful as an automation gate: ``ax gateway runtime status hermes`` exits
-    non-zero when not ready.
+    Useful as an automation gate: exits non-zero when not ready.
+
+        ax gateway runtime status hermes
+        ax gateway runtime status sentinel_inference_sdk
     """
-    if template_id.strip().lower() not in _RUNTIME_INSTALL_RECIPES:
+    tid = template_id.strip().lower()
+    if tid not in _RUNTIME_INSTALL_RECIPES:
         err_console.print(f"[red]unknown runtime template:[/red] {template_id!r}")
         raise typer.Exit(1)
-    from ..gateway import hermes_setup_status
+    if tid == "sentinel_inference_sdk":
+        status = _sentinel_inference_sdk_venv_status()
+    else:
+        from ..gateway import hermes_setup_status
 
-    status = hermes_setup_status({"template_id": template_id.strip().lower()})
+        status = hermes_setup_status({"template_id": tid})
     if as_json:
         print_json(status)
         return
@@ -477,6 +589,8 @@ def runtime_status(
         err_console.print(f"  resolved_path = {status['resolved_path']}")
     if status.get("expected_path"):
         err_console.print(f"  expected_path = {status['expected_path']}")
+    if status.get("python_path"):
+        err_console.print(f"  python_path = {status['python_path']}")
     if status.get("summary"):
         err_console.print(f"  summary = {status['summary']}")
     if not status.get("ready"):
