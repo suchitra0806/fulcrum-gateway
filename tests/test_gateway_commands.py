@@ -3634,7 +3634,7 @@ def test_sanitize_exec_env_sets_ollama_model_override():
             "agent_id": "agent-ember-1",
             "name": "ember",
             "runtime_type": "exec",
-            "ollama_model": "gemma4:latest",
+            "model": "gemma4:latest",
         },
     )
 
@@ -3928,7 +3928,7 @@ def test_gateway_templates_command_json_includes_ollama_catalog(monkeypatch):
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     ollama = next(item for item in payload["templates"] if item["id"] == "ollama")
-    assert ollama["defaults"]["ollama_model"] == "gemma4:latest"
+    assert ollama["defaults"]["model"] == "gemma4:latest"
     assert ollama["ollama_recommended_model"] == "gemma4:latest"
     assert ollama["ollama_available_models"] == ["gemma4:latest", "nemotron-3-nano:latest"]
 
@@ -4647,7 +4647,7 @@ def test_gateway_agents_add_ollama_persists_model_override(monkeypatch, tmp_path
             "ember",
             "--template",
             "ollama",
-            "--ollama-model",
+            "--model",
             "gemma4:latest",
             "--json",
         ],
@@ -4656,9 +4656,9 @@ def test_gateway_agents_add_ollama_persists_model_override(monkeypatch, tmp_path
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["template_id"] == "ollama"
-    assert payload["ollama_model"] == "gemma4:latest"
+    assert payload["model"] == "gemma4:latest"
     stored = gateway_core.load_gateway_registry()["agents"][0]
-    assert stored["ollama_model"] == "gemma4:latest"
+    assert stored["model"] == "gemma4:latest"
 
 
 def test_gateway_agents_add_ollama_uses_recommended_model_when_unspecified(monkeypatch, tmp_path):
@@ -4705,9 +4705,9 @@ def test_gateway_agents_add_ollama_uses_recommended_model_when_unspecified(monke
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["template_id"] == "ollama"
-    assert payload["ollama_model"] == "gemma4:latest"
+    assert payload["model"] == "gemma4:latest"
     stored = gateway_core.load_gateway_registry()["agents"][0]
-    assert stored["ollama_model"] == "gemma4:latest"
+    assert stored["model"] == "gemma4:latest"
 
 
 def test_gateway_agents_show_json_filters_activity(monkeypatch, tmp_path):

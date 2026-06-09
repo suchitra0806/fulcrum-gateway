@@ -1555,7 +1555,6 @@ def _register_managed_agent(
     template_id: str | None = None,
     exec_cmd: str | None = None,
     workdir: str | None = None,
-    ollama_model: str | None = None,
     provider: str | None = None,
     space_id: str | None = None,
     audience: str = "both",
@@ -1566,7 +1565,7 @@ def _register_managed_agent(
     allow_all_users: bool = False,
     allowed_users: str | None = None,
     connector_ref: str | None = None,
-    client: str | None = None,
+    agent_client: str | None = None,
     start: bool = True,
 ) -> dict:
     name = name.strip()
@@ -1590,12 +1589,9 @@ def _register_managed_agent(
             start = bool(defaults.get("start"))
     runtime_type = runtime_type or "echo"
     runtime_type = _normalize_runtime_type(runtime_type)
-    normalized_ollama_model = str(ollama_model or "").strip() or None
     template_effective_id = str(template.get("id") if template else "").strip().lower()
-    if normalized_ollama_model and template_effective_id != "ollama":
-        raise ValueError("--ollama-model is only supported with the Ollama template.")
-    if template_effective_id == "ollama" and not normalized_ollama_model:
-        normalized_ollama_model = str(ollama_setup_status().get("recommended_model") or "").strip() or None
+    if template_effective_id == "ollama" and not str(model or "").strip():
+        model = str(ollama_setup_status().get("recommended_model") or "").strip() or None
     if template_effective_id in {"hermes", "sentinel_cli", "claude_code_channel"} and not explicit_workdir:
         raise ValueError(
             f"Template {template['label']} requires --workdir so Gateway can bind the agent to its runtime folder."
@@ -1622,6 +1618,7 @@ def _register_managed_agent(
 
     if not model and runtime_type == "hermes_plugin":
         model = _resolve_hermes_model(workdir or explicit_workdir)
+    normalized_model = str(model or "").strip() or None
 
     client = _load_gateway_user_client()
     session = _load_gateway_session_or_exit()
@@ -1691,7 +1688,7 @@ def _register_managed_agent(
         "runtime_type": runtime_type,
         "exec_command": exec_cmd,
         "workdir": workdir,
-        "ollama_model": normalized_ollama_model,
+        "model": normalized_model,
         "timeout_seconds": timeout_effective,
         # Stored relative to gateway_dir() so the registry stays portable across
         # hosts/containers; resolved via resolve_agent_token_file() at read (#89).
@@ -1718,8 +1715,8 @@ def _register_managed_agent(
         entry_payload["connector_ref"] = normalized_connector_ref
     if normalized_provider:
         entry_payload["provider"] = normalized_provider
-    if client and str(client).strip():
-        entry_payload["client"] = str(client).strip()
+    if agent_client and str(agent_client).strip():
+        entry_payload["client"] = str(agent_client).strip()
     if requires_approval:
         entry_payload["install_id"] = str(uuid.uuid4())
     entry = upsert_agent_entry(registry, entry_payload)
@@ -1995,16 +1992,15 @@ def _update_managed_agent(
     runtime_type: str | None = None,
     exec_cmd: str | object = _UNSET,
     workdir: str | object = _UNSET,
-    ollama_model: str | object = _UNSET,
     provider: str | None = None,
     description: str | None = None,
-    model: str | None = None,
+    model: str | object = _UNSET,
     system_prompt: str | object = _UNSET,
     timeout_seconds: int | object = _UNSET,
     allow_all_users: bool | object = _UNSET,
     allowed_users: str | object = _UNSET,
     connector_ref: str | object = _UNSET,
-    client: str | object = _UNSET,
+    agent_client: str | object = _UNSET,
     desired_state: str | None = None,
 ) -> dict:
     name = name.strip()
@@ -2054,14 +2050,12 @@ def _update_managed_agent(
             str(entry.get("workdir") or "").strip() or None if workdir is _UNSET else (str(workdir).strip() or None)
         )
 
-    if ollama_model is _UNSET:
-        ollama_model_effective = str(entry.get("ollama_model") or "").strip() or None
+    if model is _UNSET:
+        model_effective = str(entry.get("model") or "").strip() or None
     else:
-        ollama_model_effective = str(ollama_model).strip() or None
-    if ollama_model_effective and template_effective_id != "ollama":
-        raise ValueError("--ollama-model is only supported with the Ollama template.")
-    if template_effective_id == "ollama" and ollama_model is _UNSET and not ollama_model_effective:
-        ollama_model_effective = str(ollama_setup_status().get("recommended_model") or "").strip() or None
+        model_effective = str(model).strip() or None
+    if template_effective_id == "ollama" and model is _UNSET and not model_effective:
+        model_effective = str(ollama_setup_status().get("recommended_model") or "").strip() or None
 
     if connector_ref is not _UNSET:
         connector_clean = str(connector_ref or "").strip()
@@ -2070,8 +2064,8 @@ def _update_managed_agent(
         else:
             entry.pop("connector_ref", None)
 
-    if client is not _UNSET:
-        sdk_clean = str(client or "").strip()
+    if agent_client is not _UNSET:
+        sdk_clean = str(agent_client or "").strip()
         if sdk_clean:
             entry["client"] = sdk_clean
         else:
@@ -2099,15 +2093,15 @@ def _update_managed_agent(
     if timeout_seconds is not _UNSET:
         entry["timeout_seconds"] = _normalize_timeout_seconds(timeout_seconds)  # type: ignore[arg-type]
 
-    if not model and runtime_effective == "hermes_plugin":
-        model = _resolve_hermes_model(workdir_effective or str(entry.get("workdir") or ""))
+    if model is _UNSET and runtime_effective == "hermes_plugin":
+        model_effective = _resolve_hermes_model(workdir_effective or str(entry.get("workdir") or "")) or model_effective
 
     session = _load_gateway_session_or_exit()
     upstream_fields: dict = {}
     if description:
         upstream_fields["description"] = description
-    if model:
-        upstream_fields["model"] = model
+    if model_effective:
+        upstream_fields["model"] = model_effective
     if system_prompt is not _UNSET:
         sp_value = str(system_prompt).strip() if system_prompt else ""  # type: ignore[arg-type]
         upstream_fields["system_prompt"] = sp_value or None
@@ -2138,10 +2132,11 @@ def _update_managed_agent(
             entry["allowed_users"] = allowed_clean
         else:
             entry.pop("allowed_users", None)
-    if template_effective_id == "ollama":
-        entry["ollama_model"] = ollama_model_effective
-    else:
-        entry.pop("ollama_model", None)
+    entry.pop("ollama_model", None)  # hard cut: old field removed
+    if model_effective:
+        entry["model"] = model_effective
+    elif model is not _UNSET:
+        entry.pop("model", None)
     entry["updated_at"] = datetime.now(timezone.utc).isoformat()
     entry.setdefault("transport", "gateway")
     entry.setdefault("credential_source", "gateway")
@@ -3574,8 +3569,8 @@ def _agent_templates_payload() -> dict:
         if template_id == "ollama":
             defaults = dict(item.get("defaults") or {})
             recommended_model = str(ollama_status.get("recommended_model") or "").strip() or None
-            if recommended_model and not str(defaults.get("ollama_model") or "").strip():
-                defaults["ollama_model"] = recommended_model
+            if recommended_model and not str(defaults.get("model") or "").strip():
+                defaults["model"] = recommended_model
             item["defaults"] = defaults
             item["ollama_server_reachable"] = bool(ollama_status.get("server_reachable"))
             item["ollama_available_models"] = list(ollama_status.get("available_models") or [])
@@ -3996,7 +3991,7 @@ def _run_gateway_doctor(name: str, *, send_test: bool = False) -> dict:
         else:
             add_check("hermes_repo", "failed", str(hermes_status.get("summary") or "Hermes checkout not found."))
     elif template_id == "ollama":
-        ollama_model = str(entry.get("ollama_model") or "").strip()
+        ollama_model = str(entry.get("model") or "").strip()
         ollama_status = ollama_setup_status(preferred_model=ollama_model or None)
         if bool(ollama_status.get("server_reachable")):
             add_check("ollama_server", "passed", str(ollama_status.get("summary") or "Ollama server is reachable."))
@@ -5427,7 +5422,7 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
                 </div>
                 <div class="control-group" id="ollama-model-group" style="display:none;">
                   <label for="agent-ollama-model">Ollama Model</label>
-                  <input id="agent-ollama-model" name="ollama_model" list="ollama-model-options" placeholder="gemma4:latest" />
+                  <input id="agent-ollama-model" name="model" list="ollama-model-options" placeholder="gemma4:latest" />
                   <datalist id="ollama-model-options"></datalist>
                   <div id="ollama-model-caption" class="caption"></div>
                 </div>
@@ -5660,7 +5655,7 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
       }
       execInput.value = agent.exec_command || "";
       workdirInput.value = agent.workdir || "";
-      ollamaModelInput.value = agent.ollama_model || "";
+      ollamaModelInput.value = agent.model || "";
       applySetupMode();
       setFlash("add-agent-flash", `Editing @${setupTarget}`, "success");
       document.getElementById("add-agent-form").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -5749,7 +5744,7 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
       const supportsOverride = Boolean(advanced.supports_command_override);
       const supportsOllamaModel = definition.id === "ollama";
       const availableOllamaModels = Array.isArray(definition.ollama_available_models) ? definition.ollama_available_models : [];
-      const recommendedOllamaModel = definition.ollama_recommended_model || defaults.ollama_model || "";
+      const recommendedOllamaModel = definition.ollama_recommended_model || defaults.model || "";
       advancedLaunch.style.display = supportsOverride ? "grid" : "none";
       execGroup.style.display = supportsOverride ? "grid" : "none";
       workdirGroup.style.display = supportsOverride ? "grid" : "none";
@@ -6116,7 +6111,7 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
             <div><dt>Trigger</dt><dd>${escapeHtml((agent.trigger_sources || [])[0] || "-")}</dd></div>
             <div><dt>Return</dt><dd>${escapeHtml((agent.return_paths || [])[0] || "-")}</dd></div>
             <div><dt>Telemetry</dt><dd>${escapeHtml(agent.telemetry_shape || "-")}</dd></div>
-            <div><dt>Runtime Model</dt><dd>${escapeHtml(agent.ollama_model || "-")}</dd></div>
+            <div><dt>Runtime Model</dt><dd>${escapeHtml(agent.model || "-")}</dd></div>
             <div><dt>Attestation</dt><dd>${escapeHtml(agent.attestation_state || "-")}</dd></div>
             <div><dt>Approval</dt><dd>${escapeHtml(agent.approval_state || "-")}</dd></div>
             <div><dt>Acting As</dt><dd>${escapeHtml(agent.acting_agent_name || "-")}</dd></div>
@@ -6412,7 +6407,7 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
         template_id: String(data.get("template_id") || "echo_test"),
         exec_command: String(data.get("exec_command") || "").trim(),
         workdir: String(data.get("workdir") || "").trim(),
-        ollama_model: String(data.get("ollama_model") || "").trim(),
+        model: String(data.get("model") || "").trim(),
         start: true,
       };
       try {
@@ -7071,7 +7066,6 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
                             runtime_type=str(body.get("runtime_type") or "").strip() or None,
                             exec_cmd=str(body.get("exec_command") or "").strip() or None,
                             workdir=str(body.get("workdir") or "").strip() or None,
-                            ollama_model=str(body.get("ollama_model") or "").strip() or None,
                             space_id=str(body.get("space_id") or "").strip() or None,
                             audience=str(body.get("audience") or "both"),
                             description=str(body.get("description") or "").strip() or None,
@@ -7403,9 +7397,8 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
                         runtime_type=str(body.get("runtime_type") or "").strip() or None,
                         exec_cmd=str(body.get("exec_command") or "") if "exec_command" in body else _UNSET,
                         workdir=str(body.get("workdir") or "") if "workdir" in body else _UNSET,
-                        ollama_model=str(body.get("ollama_model") or "") if "ollama_model" in body else _UNSET,
+                        model=str(body.get("model") or "") if "model" in body else _UNSET,
                         description=str(body.get("description") or "").strip() or None,
-                        model=str(body.get("model") or "").strip() or None,
                         timeout_seconds=body.get("timeout_seconds", body.get("timeout"))
                         if "timeout_seconds" in body or "timeout" in body
                         else _UNSET,
@@ -9441,7 +9434,6 @@ def add_agent(
     ),
     exec_cmd: str = typer.Option(None, "--exec", help="Advanced override for exec-based templates"),
     workdir: str = typer.Option(None, "--workdir", help="Advanced working directory override"),
-    ollama_model: str = typer.Option(None, "--ollama-model", help="Ollama model override for the Ollama template"),
     provider: str = typer.Option(
         None,
         "--provider",
@@ -9535,7 +9527,6 @@ def add_agent(
             runtime_type=runtime_type,
             exec_cmd=exec_cmd,
             workdir=workdir,
-            ollama_model=ollama_model,
             provider=provider,
             space_id=space_id,
             audience=audience,
@@ -9546,7 +9537,7 @@ def add_agent(
             allow_all_users=allow_all_users,
             allowed_users=allowed_users,
             connector_ref=connector_ref,
-            client=client,
+            agent_client=client,
             start=start,
         )
     except (ValueError, LookupError) as exc:
@@ -9586,7 +9577,6 @@ def update_agent(
     ),
     exec_cmd: str = typer.Option(None, "--exec", help="Advanced override for exec-based templates"),
     workdir: str = typer.Option(None, "--workdir", help="Advanced working directory override"),
-    ollama_model: str = typer.Option(None, "--ollama-model", help="Ollama model override for the Ollama template"),
     provider: str = typer.Option(
         None,
         "--provider",
@@ -9597,7 +9587,9 @@ def update_agent(
         ),
     ),
     description: str = typer.Option(None, "--description", help="Update platform agent description"),
-    model: str = typer.Option(None, "--model", help="Update platform agent model"),
+    model: str = typer.Option(
+        None, "--model", help="Model name for this agent (e.g. gemini-2.0-flash, gpt-4o, gemma4:latest for Ollama)"
+    ),
     system_prompt: str = typer.Option(
         None,
         "--system-prompt",
@@ -9660,16 +9652,15 @@ def update_agent(
             runtime_type=runtime_type,
             exec_cmd=exec_cmd if exec_cmd is not None else _UNSET,
             workdir=workdir if workdir is not None else _UNSET,
-            ollama_model=ollama_model if ollama_model is not None else _UNSET,
             provider=provider,
             description=description,
-            model=model,
+            model=model if model is not None else _UNSET,
             system_prompt=resolved_prompt,
             timeout_seconds=timeout_seconds if timeout_seconds is not None else _UNSET,
             allow_all_users=allow_all_users if allow_all_users is not None else _UNSET,
             allowed_users=allowed_users if allowed_users is not None else _UNSET,
             connector_ref=connector_ref if connector_ref is not None else _UNSET,
-            client=client if client is not None else _UNSET,
+            agent_client=client if client is not None else _UNSET,
             desired_state=desired_state,
         )
     except (LookupError, ValueError) as exc:

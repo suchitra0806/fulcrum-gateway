@@ -1502,7 +1502,7 @@ def _launch_spec_for_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "template_id": str(entry.get("template_id") or "").strip() or None,
         "command": str(entry.get("exec_command") or "").strip() or None,
         "workdir": str(entry.get("workdir") or "").strip() or None,
-        "ollama_model": str(entry.get("ollama_model") or "").strip() or None,
+        "model": str(entry.get("model") or "").strip() or None,
         "transport": str(entry.get("transport") or "").strip() or None,
     }
     model = str(
@@ -4117,7 +4117,7 @@ def sanitize_exec_env(prompt: str, entry: dict[str, Any]) -> dict[str, str]:
     space_id = str(entry.get("space_id") or "").strip()
     if space_id:
         env["AX_SPACE_ID"] = space_id
-    ollama_model = str(entry.get("ollama_model") or "").strip()
+    ollama_model = str(entry.get("model") or "").strip()
     if ollama_model:
         env["OLLAMA_MODEL"] = ollama_model
     hermes_repo_path = str(entry.get("hermes_repo_path") or "").strip()
@@ -6874,7 +6874,7 @@ class GatewayDaemon:
                     "runtime_type",
                     "exec_command",
                     "workdir",
-                    "ollama_model",
+                    "model",
                 )
                 changed_fields = [
                     field

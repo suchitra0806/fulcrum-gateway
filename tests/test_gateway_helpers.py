@@ -1641,14 +1641,14 @@ class TestLaunchSpecForEntry:
             "template_id": "echo_test",
             "exec_command": "python3 handler.py",
             "workdir": "/home/user/project",
-            "ollama_model": "llama3",
+            "model": "llama3",
         }
         spec = _launch_spec_for_entry(entry)
         assert spec["runtime_type"] == "exec"
         assert spec["template_id"] == "echo_test"
         assert spec["command"] == "python3 handler.py"
         assert spec["workdir"] == "/home/user/project"
-        assert spec["ollama_model"] == "llama3"
+        assert spec["model"] == "llama3"
 
     def test_empty_entry(self):
         from ax_cli.gateway import _launch_spec_for_entry

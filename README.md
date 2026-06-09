@@ -81,7 +81,7 @@ operator can approve their fingerprint before they send as an agent. The same
 flows are available from CLI:
 
 ```bash
-ax gateway agents add gemma4 --template ollama --ollama-model gemma4:latest
+ax gateway agents add gemma4 --template ollama --model gemma4:latest
 ax gateway agents add demo-hermes --template hermes --workdir /path/to/hermes-workspace
 ax gateway agents add claude-channel --template claude_code_channel --workdir /path/to/claude-code-workspace
 ax channel setup claude-channel --workdir /path/to/claude-code-workspace
@@ -267,7 +267,7 @@ Use the dashboard's **Connect agent** flow or the equivalent CLI commands:
 
 ```bash
 ax gateway agents add demo-hermes --template hermes
-ax gateway agents add gemma4 --template ollama --ollama-model gemma4:latest
+ax gateway agents add gemma4 --template ollama --model gemma4:latest
 ax gateway agents add echo-bot --template echo_test
 ax gateway agents add notifications --template service_account
 ```

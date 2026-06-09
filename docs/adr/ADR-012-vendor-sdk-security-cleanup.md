@@ -100,8 +100,8 @@ Removing `sentinel_inference_sdk` would break all existing deployments using non
 
 Consequences:
 
-- `hermes_sdk` is removed from `_HERMES_SENTINEL_SDK_RUNTIMES` and is no longer a valid `sentinel_sdk_runtime` choice within `sentinel_inference_sdk`.
-- `sentinel_sdk_runtime` becomes a required field for `sentinel_inference_sdk` agents — there is no default. An agent missing it will record a setup error rather than silently picking a backend.
+- `hermes_sdk` is removed from `_HERMES_SENTINEL_SDK_RUNTIMES` and is no longer a valid `client` choice within `sentinel_inference_sdk`.
+- The `client` field (see ADR-014) is required for `sentinel_inference_sdk` agents — there is no default. An agent missing it will record a setup error rather than silently picking a backend. The old field name `sentinel_sdk_runtime` is removed as a breaking change; operators must use `client` (via `ax gateway agents update <name> --client <value>`).
 - `sentinel_hermes_sdk` gets its own catalog entry, dispatch predicate, and resolved runtime in the dispatch layer (`gateway.py`). Both runtime types share the same command and environment builder; the resolved runtime is passed as a parameter.
 - Bedrock IAM auth (`bedrock:claude-*` model prefix, `AWS_REGION`, instance profile) is supported exclusively via `sentinel_hermes_sdk`.
 
@@ -115,15 +115,15 @@ Consequences:
 | `sentinel_cli` Claude agents lose unrestricted tool access | Agents without `settings.local.json` become text-only | Apply a profile: `ax agents profiles apply <name> --runtime claude --profile base` |
 | Codex CLI runtime removed | Any agent using `runtime_type: sentinel_cli` with `sentinel_runtime: codex` | No path within Gateway; use `openai_sdk` under `sentinel_inference_sdk` for OpenAI models |
 | `--runtime codex/codex_cli` removed from `sentinel_inference_sdk` argparse | Agent configs passing `--runtime codex` to `sentinel.py` | Switch to `--runtime openai_sdk` |
-| `sentinel_sdk_runtime: hermes_sdk` no longer valid within `sentinel_inference_sdk` | Any `sentinel_inference_sdk` agent relying on the `hermes_sdk` default or explicit setting | Change `runtime_type` to `sentinel_hermes_sdk`; remove `sentinel_sdk_runtime` field |
-| `sentinel_sdk_runtime` is now required for `sentinel_inference_sdk` | Any `sentinel_inference_sdk` agent without `sentinel_sdk_runtime` set | Add `sentinel_sdk_runtime: openai_sdk` (or `groq_sdk`, `gemini_sdk`, etc.) |
+| `client: hermes_sdk` no longer valid within `sentinel_inference_sdk` | Any `sentinel_inference_sdk` agent relying on the `hermes_sdk` default or explicit setting | Change `runtime_type` to `sentinel_hermes_sdk`; remove `client` / `sentinel_sdk_runtime` field |
+| `client` field is now required for `sentinel_inference_sdk` (was `sentinel_sdk_runtime`) | Any `sentinel_inference_sdk` agent without a client configured | Set via CLI: `ax gateway agents update <name> --client openai_sdk` (or `groq_sdk`, `gemini_sdk`, etc.) |
 
 ---
 
 ## Non-breaking
 
 - `sentinel_inference_sdk` SDK runtime agents (`openai_sdk`, `groq_sdk`, `mistral_sdk`, `gemini_sdk`, `leapfrog_sdk`) are unaffected. The supervisor and plugin dispatch logic are unchanged.
-- `sentinel_hermes_sdk` is a new runtime type; existing `sentinel_inference_sdk` agents that already set `sentinel_sdk_runtime` are unaffected.
+- `sentinel_hermes_sdk` is a new runtime type introduced in this PR alongside the rename; there are no existing `sentinel_inference_sdk` agents in production to migrate.
 - `hermes_plugin` agents are unaffected.
 - `claude_code_channel` agents are unaffected.
 - Connector policy enforcement is unaffected.

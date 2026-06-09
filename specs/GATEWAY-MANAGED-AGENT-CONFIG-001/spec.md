@@ -59,8 +59,7 @@ are treated as unset. Fields explicitly set to an empty string are treated as
 
 | Field | Type | CLI flag | Description |
 |-------|------|----------|-------------|
-| `model` | string | `--model` | Inference model identifier passed to the runtime (e.g. `gemini-2.0-flash`, `gpt-4o`). Format is runtime-specific. |
-| `ollama_model` | string | `--ollama-model` | Ollama-specific model name. Only valid with the `ollama` template. Exists separately from `model` for historical reasons; the two may be unified in a future version. |
+| `model` | string | `--model` | Model identifier passed to the runtime. Format is runtime-specific: inference API model names (e.g. `gemini-2.0-flash`, `gpt-4o`) for `sentinel_inference_sdk`; local Ollama model names (e.g. `gemma4:latest`) for the `ollama` template. Previously `ollama_model` for Ollama agents — that field is removed as a breaking change. |
 
 ### Access control
 
@@ -228,9 +227,6 @@ description = "Sends Slack output via Composio connector"
 
 ## Open questions
 
-- Should `ollama_model` be unified with `model` under a single field? The
-  separate field exists for historical reasons and creates an inconsistency in
-  the schema.
 - Should `runtime_type` changes be supported via `agents update` with an
   explicit `--force` flag, or always require re-registration? Current behavior
   is re-registration required.
