@@ -27,6 +27,33 @@ def fake_list_adapter(monkeypatch):
     return _install
 
 
+@pytest.fixture
+def fake_catalog_adapter(monkeypatch):
+    """Install a fake adapter that only exposes paginated search_tools."""
+
+    def _install(pages):
+        calls: list[str | None] = []
+
+        def search_tools(
+            query,
+            auth_env,
+            config,
+            name,
+            *,
+            limit=10,
+            cursor=None,
+            apps=None,
+        ):
+            calls.append(cursor)
+            return pages[len(calls) - 1]
+
+        adapter = SimpleNamespace(search_tools=search_tools)
+        monkeypatch.setitem(dispatch._ADAPTERS, "fake", adapter)
+        return calls
+
+    return _install
+
+
 class TestListToolsSemantics:
     def test_reports_matched_when_clipped(self, fake_list_adapter):
         fake_list_adapter(100)
@@ -67,3 +94,50 @@ class TestListToolsSemantics:
         finally:
             del dispatch._ADAPTERS["fake"]
         assert [t["name"] for t in result["items"]] == ["GITHUB_T_000", "GITHUB_T_001", "GITHUB_T_002"]
+
+
+class TestCatalogPagination:
+    def test_drains_all_catalog_pages(self, fake_catalog_adapter):
+        pages = [
+            {
+                "items": [{"name": "TOOL_A", "appName": "github"}],
+                "next_cursor": "page-2",
+                "total_items": 2,
+            },
+            {
+                "items": [{"name": "TOOL_B", "appName": "github"}],
+                "next_cursor": None,
+                "total_items": 2,
+            },
+        ]
+        calls = fake_catalog_adapter(pages)
+        result = dispatch.list_tools(_row({"tools_limit": 50}), {})
+        assert calls == [None, "page-2"]
+        assert result["total"] == 2
+        assert result["matched"] == 2
+        assert [t["name"] for t in result["items"]] == ["TOOL_A", "TOOL_B"]
+
+    def test_total_uses_provider_inventory_when_reported(self, fake_catalog_adapter):
+        pages = [
+            {
+                "items": [{"name": f"TOOL_{i:03d}", "appName": "github"} for i in range(200)],
+                "next_cursor": "page-2",
+                "total_items": 450,
+            },
+            {
+                "items": [{"name": f"TOOL_{i:03d}", "appName": "github"} for i in range(200, 400)],
+                "next_cursor": "page-3",
+                "total_items": 450,
+            },
+            {
+                "items": [{"name": f"TOOL_{i:03d}", "appName": "github"} for i in range(400, 450)],
+                "next_cursor": None,
+                "total_items": 450,
+            },
+        ]
+        fake_catalog_adapter(pages)
+        result = dispatch.list_tools(_row({"tools_limit": 200}), {})
+        assert result["total"] == 450
+        assert result["matched"] == 450
+        assert result["filtered"] == 200
+        assert result["clipped"] is True
