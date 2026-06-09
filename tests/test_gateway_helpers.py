@@ -2323,7 +2323,7 @@ class TestHermesSetupStatus:
         # Force candidates to only contain paths that definitely don't exist.
         fake_path = tmp_path / "definitely-not-here" / "hermes-agent"
         monkeypatch.setattr(
-            "ax_cli.gateway._hermes_repo_candidates",
+            "ax_cli.gateway_assets._hermes_repo_candidates",
             lambda entry=None: [fake_path],
         )
         entry = {
@@ -3225,7 +3225,7 @@ class TestApplySpaceToGatewaySession:
 
     def test_updates_session_space(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
-        monkeypatch.setattr(gw, "active_gateway_pid", lambda: None)
+        monkeypatch.setattr("ax_cli.gateway_storage.active_gateway_pid", lambda: None)
         gw.save_gateway_session({"token": "axp_u_x", "space_id": "space-a", "space_name": "Ay"})
 
         out = gw.apply_space_to_gateway_session("space-b", space_name="Bee")
@@ -3241,11 +3241,11 @@ class TestApplySpaceToGatewaySession:
 
     def test_noop_when_already_aligned(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
-        monkeypatch.setattr(gw, "active_gateway_pid", lambda: None)
+        monkeypatch.setattr("ax_cli.gateway_storage.active_gateway_pid", lambda: None)
         gw.save_gateway_session({"token": "axp_u_x", "space_id": "space-a", "space_name": "Ay"})
         # Spy: a no-op must not emit a redundant audit event.
         calls = []
-        monkeypatch.setattr(gw, "record_gateway_activity", lambda *a, **k: calls.append((a, k)))
+        monkeypatch.setattr("ax_cli.gateway_storage.record_gateway_activity", lambda *a, **k: calls.append((a, k)))
 
         out = gw.apply_space_to_gateway_session("space-a", space_name="Ay")
 
@@ -3255,7 +3255,7 @@ class TestApplySpaceToGatewaySession:
 
     def test_reports_daemon_running(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
-        monkeypatch.setattr(gw, "active_gateway_pid", lambda: 4321)
+        monkeypatch.setattr("ax_cli.gateway_storage.active_gateway_pid", lambda: 4321)
         gw.save_gateway_session({"token": "axp_u_x", "space_id": "space-a"})
 
         out = gw.apply_space_to_gateway_session("space-b", space_name="Bee")

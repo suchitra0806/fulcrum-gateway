@@ -70,7 +70,7 @@ def test_clear_gateway_pid_keeps_newer_owner(monkeypatch, tmp_path):
 def test_scan_gateway_process_pids_ignores_current_parent_wrapper(monkeypatch):
     monkeypatch.setattr(gateway_core.os, "getpid", lambda: 22179)
     monkeypatch.setattr(gateway_core.os, "getppid", lambda: 22178)
-    monkeypatch.setattr(gateway_core, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr("ax_cli.gateway_storage._pid_alive", lambda pid: True)
     monkeypatch.setattr(
         gateway_core.subprocess,
         "check_output",
@@ -123,7 +123,7 @@ def test_gateway_daemon_does_not_launch_claude_code_channel(monkeypatch, tmp_pat
         def stop(self, timeout=None):
             return None
 
-    monkeypatch.setattr(gateway_core, "ManagedAgentRuntime", FakeRuntime)
+    monkeypatch.setattr("ax_cli.gateway_daemon.ManagedAgentRuntime", FakeRuntime)
     daemon = gateway_core.GatewayDaemon(client_factory=lambda **kwargs: _SharedRuntimeClient({}))
     entry = {
         "name": "orion",
@@ -444,7 +444,7 @@ def test_gateway_daemon_rebinds_running_runtime_when_space_changes(monkeypatch, 
                 "backlog_depth": 0,
             }
 
-    monkeypatch.setattr(gateway_core, "ManagedAgentRuntime", FakeRuntime)
+    monkeypatch.setattr("ax_cli.gateway_daemon.ManagedAgentRuntime", FakeRuntime)
     entry = {
         "name": "space-bot",
         "agent_id": "agent-space-1",
@@ -1322,7 +1322,7 @@ def test_annotate_runtime_health_marks_stale_after_missed_heartbeat():
 def test_annotate_runtime_health_treats_managed_attached_session_as_connected(monkeypatch, tmp_path):
     log_path = tmp_path / "attached-session.log"
     log_path.write_text("Listening for channel messages from: server:ax-channel\n")
-    monkeypatch.setattr(gateway_core, "_pid_is_alive", lambda pid: int(pid) == 1234)
+    monkeypatch.setattr("ax_cli.gateway_health._pid_is_alive", lambda pid: int(pid) == 1234)
 
     snapshot = gateway_core.annotate_runtime_health(
         {
@@ -1350,7 +1350,7 @@ def test_channel_agent_shows_degraded_when_sse_broken_despite_process_running(mo
     """A claude-channel agent must show LOW confidence when the SSE subscription
     is down, even if Claude Code is running and sending MCP pings.  This was a
     production bug where the agent appeared ready but could not receive messages."""
-    monkeypatch.setattr(gateway_core, "_pid_is_alive", lambda pid: int(pid) == 1234)
+    monkeypatch.setattr("ax_cli.gateway_health._pid_is_alive", lambda pid: int(pid) == 1234)
 
     snapshot = gateway_core.annotate_runtime_health(
         {
@@ -3699,8 +3699,8 @@ def test_hermes_plugin_env_uses_gateway_url_offline(monkeypatch, tmp_path):
         "space_id": "space-1",
         "base_url": "https://paxai.app",
     }
-    with patch.object(gateway_core, "load_gateway_managed_agent_token", return_value="axp_a_test.token"):
-        with patch.object(gateway_core, "_hermes_plugin_home", return_value=tmp_path / "home"):
+    with patch("ax_cli.gateway_hermes.load_gateway_managed_agent_token", return_value="axp_a_test.token"):
+        with patch("ax_cli.gateway_hermes._hermes_plugin_home", return_value=tmp_path / "home"):
             env = gateway_core._build_hermes_plugin_env(entry)
     assert env["AX_BASE_URL"] == "http://localhost:8765"
     assert env["AX_OFFLINE"] == "1"
@@ -3709,8 +3709,8 @@ def test_hermes_plugin_env_uses_gateway_url_offline(monkeypatch, tmp_path):
 def test_hermes_plugin_env_uses_paxai_when_not_offline(monkeypatch, tmp_path):
     monkeypatch.delenv("AX_OFFLINE", raising=False)
     entry = {"name": "my-hermes", "agent_id": "agent-1", "space_id": "space-1", "base_url": "https://paxai.app"}
-    with patch.object(gateway_core, "load_gateway_managed_agent_token", return_value="axp_a_tok"):
-        with patch.object(gateway_core, "_hermes_plugin_home", return_value=tmp_path / "home"):
+    with patch("ax_cli.gateway_hermes.load_gateway_managed_agent_token", return_value="axp_a_tok"):
+        with patch("ax_cli.gateway_hermes._hermes_plugin_home", return_value=tmp_path / "home"):
             env = gateway_core._build_hermes_plugin_env(entry)
     assert env["AX_BASE_URL"] == "https://paxai.app"
     assert "AX_OFFLINE" not in env
