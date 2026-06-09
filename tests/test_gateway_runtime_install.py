@@ -247,6 +247,24 @@ def test_cli_install_json_output(monkeypatch, tmp_path):
     assert "steps" in payload
 
 
+def test_cli_sentinel_install_requires_client(monkeypatch):
+    """`runtime install sentinel_inference_sdk` without --client exits 1."""
+    monkeypatch.setattr("ax_cli.commands.gateway_runtime_cmd.load_gateway_session", lambda: {"user": "test"})
+    result = runner.invoke(app, ["gateway", "runtime", "install", "sentinel_inference_sdk"])
+    assert result.exit_code != 0
+    assert "--client" in result.output
+    assert "openai" in result.output
+
+
+def test_cli_sentinel_install_rejects_unsupported_client(monkeypatch):
+    """`runtime install sentinel_inference_sdk --client foo` exits 1."""
+    monkeypatch.setattr("ax_cli.commands.gateway_runtime_cmd.load_gateway_session", lambda: {"user": "test"})
+    result = runner.invoke(app, ["gateway", "runtime", "install", "sentinel_inference_sdk", "--client", "foo"])
+    assert result.exit_code != 0
+    assert "Unsupported client" in result.output
+    assert "openai" in result.output
+
+
 # ── sentinel_inference_sdk ────────────────────────────────────────────────
 
 

@@ -507,10 +507,18 @@ def _agent_templates_payload() -> dict:
     return {"templates": templates, "count": len(templates)}
 
 
+_SENTINEL_INFERENCE_SDK_SUPPORTED_CLIENTS = {"openai"}
+
+
 @runtime_app.command("install")
 def runtime_install(
-    template_id: str = typer.Argument(..., help="Runtime template id (today: only 'hermes')"),
+    template_id: str = typer.Argument(..., help="Runtime template id (e.g. 'hermes', 'sentinel_inference_sdk')"),
     target: str = typer.Option(None, "--target", help="Override install target (must resolve under your home tree)"),
+    client: str = typer.Option(
+        None,
+        "--client",
+        help="Client library to install. Required for sentinel_inference_sdk. Supported: openai.",
+    ),
     as_json: bool = JSON_OPTION,
 ):
     """Install a runtime template's prerequisites (clone + venv + pip install + verify).
@@ -520,7 +528,9 @@ def runtime_install(
     - ``hermes`` — clones https://github.com/NousResearch/hermes-agent into
       ~/hermes-agent and installs into a venv at ~/hermes-agent/.venv.
     - ``sentinel_inference_sdk`` — creates a venv at ~/hermes-agent/.venv
-      (or reuses an existing one) and installs the ``openai`` package into it.
+      (or reuses an existing one) and installs the specified client package.
+      Requires ``--client``. Only ``openai`` is supported today; other clients
+      are unsupported and must be added via a separate PR.
       Prints the resolved ``python_path`` so you can wire it to an agent with
       ``ax gateway agents update <name> --python <path>``.
 
@@ -530,13 +540,28 @@ def runtime_install(
     Requires an active gateway operator session — run ``ax gateway login`` first.
 
         ax gateway runtime install hermes
-        ax gateway runtime install sentinel_inference_sdk
+        ax gateway runtime install sentinel_inference_sdk --client openai
         ax gateway runtime install hermes --target /opt/work/hermes-agent
     """
     operator_session = load_gateway_session()
     if not operator_session:
         err_console.print("[red]No active gateway session.[/red] Run `ax gateway login` first.")
         raise typer.Exit(1)
+    tid = str(template_id or "").strip().lower()
+    if tid == "sentinel_inference_sdk":
+        if not client:
+            err_console.print(
+                "[red]--client is required for sentinel_inference_sdk.[/red] "
+                "Supported clients: openai. "
+                "Example: ax gateway runtime install sentinel_inference_sdk --client openai"
+            )
+            raise typer.Exit(1)
+        if client not in _SENTINEL_INFERENCE_SDK_SUPPORTED_CLIENTS:
+            err_console.print(
+                f"[red]Unsupported client: {client!r}.[/red] "
+                f"Only {sorted(_SENTINEL_INFERENCE_SDK_SUPPORTED_CLIENTS)} is supported for sentinel_inference_sdk today."
+            )
+            raise typer.Exit(1)
     try:
         payload = _install_runtime_payload(template_id, target_override=target, operator_session=operator_session)
     except (ValueError, PermissionError) as exc:
