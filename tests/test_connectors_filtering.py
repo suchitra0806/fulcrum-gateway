@@ -47,9 +47,18 @@ class TestFromConfig:
         policy = from_config({"tools_limit": 999})
         assert policy.tools_limit == 200
 
-    def test_limit_clamped_to_min(self):
+    def test_limit_zero_means_unbounded(self):
+        # 0 is the "no limit" sentinel (was previously floored to 1). #166
         policy = from_config({"tools_limit": 0})
-        assert policy.tools_limit == 1
+        assert policy.tools_limit is None
+
+    def test_limit_negative_means_unbounded(self):
+        policy = from_config({"tools_limit": -5})
+        assert policy.tools_limit is None
+
+    def test_limit_zero_string_means_unbounded(self):
+        policy = from_config({"tools_limit": "0"})
+        assert policy.tools_limit is None
 
     def test_limit_string(self):
         policy = from_config({"tools_limit": "75"})
@@ -153,6 +162,12 @@ class TestFilterTools:
         unlimited = filter_tools(items, policy, apply_limit=False)
         assert len(limited) == 2
         assert len(unlimited) == 10
+
+    def test_tools_limit_none_is_unbounded(self):
+        # No cap: every tool that passes the other filters is returned. #166
+        policy = ToolFilterPolicy(tools_limit=None)
+        result = filter_tools(SAMPLE_TOOLS, policy)
+        assert len(result) == len(SAMPLE_TOOLS)
 
     def test_combined_policy(self):
         policy = ToolFilterPolicy(
