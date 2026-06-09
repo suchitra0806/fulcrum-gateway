@@ -11,8 +11,7 @@ from typing import Any
 
 from .auth import read_auth
 from .errors import ConnectorProviderError
-from .providers.dispatch import execute_tool, search_tools
-from .providers.registry import has_capability
+from .providers.dispatch import execute_tool, resolve_search_mode, search_tools
 from .storage import find_connector
 
 
@@ -66,15 +65,6 @@ def _resolve_row_and_auth(connector_ref: str):
     return row, auth_env
 
 
-def _effective_search_mode(provider: str, mode: str) -> str:
-    normalized = str(mode or "auto").strip().lower()
-    if normalized in {"catalog", "intent"}:
-        return normalized
-    if has_capability(provider, "intent_search"):
-        return "intent"
-    return "catalog"
-
-
 def search_connector_tools(
     connector_ref: str,
     use_case: str,
@@ -86,7 +76,7 @@ def search_connector_tools(
 ) -> ConnectorToolSearchResult:
     """Search tools for a connector by natural-language use case."""
     row, auth_env = _resolve_row_and_auth(connector_ref)
-    effective_mode = _effective_search_mode(row.provider, mode)
+    effective_mode = resolve_search_mode(row.provider, mode)
     try:
         raw = search_tools(
             row,

@@ -63,7 +63,11 @@ ax gateway connectors providers
 Intent search is preferred for natural-language use cases ("send an email to my team").
 Catalog search is useful when you already know part of a tool name or want deterministic keyword matching.
 
+For Composio connectors, **`auto` mode now runs the billable `COMPOSIO_SEARCH_TOOLS` meta-tool** (LLM-backed discovery) instead of a cheap catalog keyword search. Use `--mode catalog` when you want the previous `GET /tools?query=...` behavior. Intent search executes outside the connector `allowed_tools` policy (discovery infra only; execution is still policy-gated).
+
 Pass `--session-id` on follow-up intent searches to continue a Composio search session.
+
+Providers without intent search (for example `http_mcp`) filter locally over `tools list` results in `auto` and `catalog` modes.
 
 ## Configuration keys
 

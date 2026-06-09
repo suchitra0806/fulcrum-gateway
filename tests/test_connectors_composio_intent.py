@@ -9,7 +9,6 @@ import pytest
 
 from ax_cli.connectors.errors import ConnectorProviderError
 from ax_cli.connectors.providers.composio_intent import (
-    _collect_slugs,
     _extract_session_id,
     _parse_search_tools_response,
     search_tools_intent,
@@ -43,18 +42,30 @@ class TestParseSearchToolsResponse:
         items, _ = _parse_search_tools_response(data)
         assert items == []
 
+    def test_ignores_status_and_error_strings(self):
+        data = {
+            "results": [
+                {
+                    "primary_tool_slugs": ["GITHUB_LIST_PRS"],
+                    "connection_status": "NOT_CONNECTED",
+                    "auth_state": "AUTHENTICATION_REQUIRED",
+                    "diagnostics": ["RATE_LIMIT_EXCEEDED", "INTERNAL_SERVER_ERROR"],
+                }
+            ],
+            "tool_schemas": {"GITHUB_LIST_PRS": {"parameters": {}}},
+        }
+        items, _ = _parse_search_tools_response(data)
+        assert [item["name"] for item in items] == ["GITHUB_LIST_PRS"]
 
-class TestCollectSlugs:
-    def test_nested_structures(self):
-        slugs: set[str] = set()
-        _collect_slugs(
-            {
-                "related_tool_slugs": ["GMAIL_SEND_EMAIL"],
-                "nested": {"slug": "SLACK_POST_MESSAGE"},
-            },
-            slugs,
-        )
-        assert slugs == {"GMAIL_SEND_EMAIL", "SLACK_POST_MESSAGE"}
+    def test_collects_tool_schema_keys(self):
+        data = {
+            "tool_schemas": {
+                "GMAIL_SEND_EMAIL": {},
+                "SLACK_POST_MESSAGE": {},
+            }
+        }
+        items, _ = _parse_search_tools_response(data)
+        assert [item["name"] for item in items] == ["GMAIL_SEND_EMAIL", "SLACK_POST_MESSAGE"]
 
 
 class TestExtractSessionId:
@@ -76,7 +87,7 @@ class TestSearchToolsIntent:
                 "successful": True,
                 "data": {
                     "session": {"id": "sess-new"},
-                    "primary_tool_slugs": ["GITHUB_LIST_PRS"],
+                    "results": [{"primary_tool_slugs": ["GITHUB_LIST_PRS"]}],
                 },
             }
 
@@ -106,7 +117,7 @@ class TestSearchToolsIntent:
             captured["args"] = args
             return {
                 "successful": True,
-                "data": {"primary_tool_slugs": ["GITHUB_LIST_PRS"]},
+                "data": {"results": [{"primary_tool_slugs": ["GITHUB_LIST_PRS"]}]},
             }
 
         with patch(
@@ -128,7 +139,7 @@ class TestSearchToolsIntent:
             return {
                 "successful": True,
                 "data": {
-                    "primary_tool_slugs": ["GITHUB_LIST_PRS", "GMAIL_SEND_EMAIL"],
+                    "results": [{"primary_tool_slugs": ["GITHUB_LIST_PRS", "GMAIL_SEND_EMAIL"]}],
                 },
             }
 

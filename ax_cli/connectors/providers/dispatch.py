@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from types import ModuleType
 from typing import Any
@@ -19,6 +20,8 @@ from ..filtering import assert_tool_allowed, filter_tools, from_config, tool_sor
 from ..types import ConnectorRow
 from . import composio_adapter, http_mcp_adapter
 from .registry import has_capability
+
+log = logging.getLogger("connectors.dispatch")
 
 _ADAPTERS: dict[str, ModuleType] = {
     "composio": composio_adapter,
@@ -107,7 +110,7 @@ def _drain_catalog_tools(
     cursor: str | None = None
     provider_total: int | None = None
 
-    for _ in range(MAX_CATALOG_PAGES):
+    for page_idx in range(MAX_CATALOG_PAGES):
         result = adapter.search_tools(
             "",
             auth_env,
@@ -124,6 +127,12 @@ def _drain_catalog_tools(
         if not next_cursor:
             break
         cursor = str(next_cursor)
+    else:
+        log.warning(
+            "Catalog drain for %r hit MAX_CATALOG_PAGES (%s); inventory may be truncated",
+            connector_name,
+            MAX_CATALOG_PAGES,
+        )
 
     return items, provider_total
 
@@ -162,13 +171,34 @@ def list_tools(
     }
 
 
-def _resolve_search_mode(provider: str, mode: str) -> str:
+def resolve_search_mode(provider: str, mode: str) -> str:
     normalized = str(mode or "auto").strip().lower()
     if normalized in {"catalog", "intent"}:
         return normalized
     if has_capability(provider, "intent_search"):
         return "intent"
     return "catalog"
+
+
+def _filter_listed_tools(
+    connector: ConnectorRow,
+    query: str,
+    auth_env: dict[str, str],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Keyword filter over list_tools results (http_mcp and similar providers)."""
+    list_result = list_tools(connector, auth_env)
+    query_lower = query.lower()
+    items = [
+        item
+        for item in list_result["items"]
+        if query_lower in str(item.get("name", "")).lower()
+        or query_lower in str(item.get("displayName", "")).lower()
+        or query_lower in str(item.get("description", "")).lower()
+    ]
+    if limit > 0:
+        items = items[: max(1, int(limit))]
+    return items
 
 
 def search_tools(
@@ -181,7 +211,7 @@ def search_tools(
     mode: str = "auto",
     session_id: str | None = None,
 ) -> dict[str, Any]:
-    resolved_mode = _resolve_search_mode(connector.provider, mode)
+    resolved_mode = resolve_search_mode(connector.provider, mode)
     session_out: str | None = None
 
     if resolved_mode == "intent":
@@ -207,33 +237,20 @@ def search_tools(
         )
         items = result.get("items", [])
         session_out = result.get("session_id")
-    elif mode == "catalog" or resolved_mode == "catalog":
-        adapter = _get_adapter(connector.provider)
-        if not hasattr(adapter, "search_tools"):
-            raise ConnectorProviderError(
-                connector.provider,
-                f"Provider {connector.provider!r} does not support catalog search.",
-            )
-        result = adapter.search_tools(
-            query,
-            auth_env,
-            connector.config,
-            connector.name,
-            apps=apps,
-            limit=limit,
-        )
-        items = result.get("items", [])
     else:
-        list_result = list_tools(connector, auth_env)
-        query_lower = query.lower()
-        items = [
-            item
-            for item in list_result["items"]
-            if query_lower in str(item.get("name", "")).lower()
-            or query_lower in str(item.get("displayName", "")).lower()
-            or query_lower in str(item.get("description", "")).lower()
-        ]
-        items = items[:limit]
+        adapter = _get_adapter(connector.provider)
+        if hasattr(adapter, "search_tools"):
+            result = adapter.search_tools(
+                query,
+                auth_env,
+                connector.config,
+                connector.name,
+                apps=apps,
+                limit=limit,
+            )
+            items = result.get("items", [])
+        else:
+            items = _filter_listed_tools(connector, query, auth_env, limit)
 
     policy = from_config(connector.config)
     filtered = filter_tools(items, policy, apply_limit=False)

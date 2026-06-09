@@ -20,22 +20,16 @@ def search_tools_intent(
     apps: str | None = None,
     limit: int = 10,
     session_id: str | None = None,
-    known_fields: str | None = None,
 ) -> dict[str, Any]:
     """Run Composio intent search and return catalog-shaped tool items."""
     needle = str(query or "").strip()
     if not needle:
         raise ConnectorProviderError("composio", "query is required for intent search")
 
-    query_payload: dict[str, Any] = {"use_case": needle}
-    if known_fields:
-        query_payload["known_fields"] = str(known_fields).strip()
-
-    arguments: dict[str, Any] = {"queries": [query_payload]}
-    if session_id:
-        arguments["session"] = {"id": str(session_id).strip()}
-    else:
-        arguments["session"] = {"generate_id": True}
+    arguments: dict[str, Any] = {
+        "queries": [{"use_case": needle}],
+        "session": {"id": str(session_id).strip()} if session_id else {"generate_id": True},
+    }
 
     # Lazy import avoids composio_adapter ↔ composio_intent circular load.
     from . import composio_adapter
@@ -79,36 +73,52 @@ def search_tools_intent(
     return payload
 
 
+def _is_tool_slug(value: str) -> bool:
+    slug = value.strip()
+    return bool(_SLUG_RE.match(slug)) and slug != _COMPOSIO_SEARCH_TOOL
+
+
+def _add_slug(value: object, out: set[str]) -> None:
+    if isinstance(value, str) and _is_tool_slug(value):
+        out.add(value.strip())
+
+
+def _add_slug_list(values: object, out: set[str]) -> None:
+    if not isinstance(values, list):
+        return
+    for item in values:
+        _add_slug(item, out)
+
+
+def _collect_slugs_from_results(results: object, out: set[str]) -> None:
+    if not isinstance(results, list):
+        return
+    for entry in results:
+        if not isinstance(entry, dict):
+            continue
+        _add_slug_list(entry.get("primary_tool_slugs"), out)
+        _add_slug_list(entry.get("related_tool_slugs"), out)
+        _add_slug(entry.get("tool_slug"), out)
+        _add_slug(entry.get("slug"), out)
+
+
 def _parse_search_tools_response(data: Any) -> tuple[list[dict[str, Any]], str | None]:
-    """Best-effort extraction of tool slugs from COMPOSIO_SEARCH_TOOLS output."""
+    """Extract tool slugs from documented COMPOSIO_SEARCH_TOOLS response fields."""
     session_id = _extract_session_id(data) if isinstance(data, dict) else None
     slugs: set[str] = set()
-    _collect_slugs(data, slugs)
+    if isinstance(data, dict):
+        _collect_slugs_from_results(data.get("results"), slugs)
+        _add_slug_list(data.get("primary_tool_slugs"), slugs)
+        _add_slug_list(data.get("related_tool_slugs"), slugs)
+        tool_schemas = data.get("tool_schemas")
+        if isinstance(tool_schemas, dict):
+            for key in tool_schemas:
+                _add_slug(str(key), slugs)
     items = [
         {"name": slug, "displayName": slug, "description": ""}
         for slug in sorted(slugs)
-        if _SLUG_RE.match(slug) and slug != _COMPOSIO_SEARCH_TOOL
     ]
     return items, session_id
-
-
-def _collect_slugs(node: Any, out: set[str]) -> None:
-    if isinstance(node, dict):
-        for key in ("tool_slug", "slug", "primary_tool_slugs", "related_tool_slugs"):
-            val = node.get(key)
-            if isinstance(val, str) and _SLUG_RE.match(val.strip()):
-                out.add(val.strip())
-            elif isinstance(val, list):
-                for item in val:
-                    if isinstance(item, str) and _SLUG_RE.match(item.strip()):
-                        out.add(item.strip())
-        for value in node.values():
-            _collect_slugs(value, out)
-    elif isinstance(node, list):
-        for item in node:
-            _collect_slugs(item, out)
-    elif isinstance(node, str) and _SLUG_RE.match(node.strip()) and len(node.strip()) > 8:
-        out.add(node.strip())
 
 
 def _extract_session_id(data: Any) -> str | None:

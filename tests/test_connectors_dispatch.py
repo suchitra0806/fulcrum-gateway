@@ -105,7 +105,7 @@ class TestSearchToolsIntent:
             lambda provider, capability: capability == "intent_search",
         )
 
-        def _intent(query, auth_env, config, name, *, apps=None, limit=10, session_id=None, known_fields=None):
+        def _intent(query, auth_env, config, name, *, apps=None, limit=10, session_id=None):
             calls["query"] = query
             calls["limit"] = str(limit)
             return {
@@ -145,6 +145,30 @@ class TestSearchToolsIntent:
         assert calls["query"] == "list prs"
         assert result["mode"] == "catalog"
         assert "session_id" not in result
+
+
+class TestSearchToolsLocalFallback:
+    def test_provider_without_catalog_search_filters_list_tools(self, monkeypatch):
+        tools = [
+            {"name": "get_weather", "displayName": "Get Weather", "description": "weather data"},
+            {"name": "send_email", "displayName": "Send Email", "description": "send mail"},
+        ]
+        adapter = SimpleNamespace(list_tools=lambda auth_env, config, name: {"tools": tools})
+        monkeypatch.setitem(dispatch._ADAPTERS, "http_mcp", adapter)
+        monkeypatch.setattr(
+            "ax_cli.connectors.providers.dispatch.has_capability",
+            lambda provider, capability: False,
+        )
+        row = ConnectorRow(
+            id="00000000-0000-0000-0000-000000000001",
+            name="mcp-local",
+            provider="http_mcp",
+            config={},
+        )
+        result = dispatch.search_tools(row, "weather", {}, mode="auto")
+        assert result["mode"] == "catalog"
+        assert len(result["items"]) == 1
+        assert result["items"][0]["name"] == "get_weather"
 
 
 class TestCatalogPagination:
