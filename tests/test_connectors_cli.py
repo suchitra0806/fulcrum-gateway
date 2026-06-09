@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ax_cli.commands.gateway import connectors_app
+from ax_cli.commands.gateway_app import connectors_app
 from ax_cli.connectors.storage import add_connector
 from ax_cli.connectors.types import ConnectorRow
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ax_cli.commands import gateway as gw_cmd
+from ax_cli.commands import gateway_ui as gw_cmd
 from ax_cli.connectors.storage import add_connector
 from ax_cli.connectors.types import ConnectorRow
 from tests.test_gateway_commands_ext2 import _invoke_handler, _json_response

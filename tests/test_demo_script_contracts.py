@@ -33,7 +33,7 @@ import json
 from typer.testing import CliRunner
 
 from ax_cli import gateway as gateway_core
-from ax_cli.commands import gateway as gateway_cmd
+from ax_cli.commands import gateway_local as gateway_cmd
 from ax_cli.main import app
 
 runner = CliRunner()

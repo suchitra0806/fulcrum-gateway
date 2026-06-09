@@ -14,7 +14,8 @@ from ..config import get_client, resolve_agent_name, resolve_gateway_config, res
 from ..context_keys import build_upload_context_key
 from ..mentions import merge_explicit_mentions_metadata
 from ..output import JSON_OPTION, console, handle_error, print_json, print_kv, print_table
-from .gateway import _approval_required_guidance, _local_process_fingerprint, _local_route_failure_guidance
+from .gateway_local import _approval_required_guidance, _local_route_failure_guidance
+from .gateway_session import _local_process_fingerprint
 from .watch import _iter_sse
 
 app = typer.Typer(name="messages", help="Message operations", no_args_is_help=True)

@@ -135,7 +135,7 @@ def _gateway_local_task_create(
     if not session_token:
         status = str(connect_payload.get("status") or "pending")
         if status == "pending":
-            from .gateway import _approval_required_guidance
+            from .gateway_local import _approval_required_guidance
 
             raise typer.BadParameter(
                 _approval_required_guidance(

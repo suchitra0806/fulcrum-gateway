@@ -80,7 +80,7 @@ def test_emit_daemon_log_writes_timestamped_line_to_console():
     """`_emit_daemon_log(msg)` is what GatewayDaemon's logger callable invokes.
     Confirm the rendered output (no Rich markup, no color, daemon-style) is
     a single line `<iso-ts> <msg>` so a tail of gateway.log gives clean text."""
-    from ax_cli.commands.gateway import _emit_daemon_log
+    from ax_cli.commands.gateway_daemon_cmd import _emit_daemon_log
 
     buf = StringIO()
     capture = Console(
@@ -90,7 +90,7 @@ def test_emit_daemon_log_writes_timestamped_line_to_console():
         soft_wrap=True,
         width=240,
     )
-    import ax_cli.commands.gateway as gateway_cmd
+    import ax_cli.commands.gateway_daemon_cmd as gateway_cmd
 
     original_console = gateway_cmd.err_console
     gateway_cmd.err_console = capture
