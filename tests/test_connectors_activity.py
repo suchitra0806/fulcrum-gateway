@@ -187,9 +187,7 @@ class TestInvocationCorrelation:
         record = record_connector_tool_started(connector, "TOOL", invocation_id=iid)
         assert record["invocation_id"] == iid
 
-    def test_execute_tool_correlates_success_lifecycle(
-        self, connector: ConnectorRow, tmp_activity: Path
-    ):
+    def test_execute_tool_correlates_success_lifecycle(self, connector: ConnectorRow, tmp_activity: Path):
         with patch("ax_cli.connectors.providers.dispatch._get_adapter") as mock_get:
             mock_adapter = MagicMock()
             mock_adapter.execute_tool.return_value = {"ok": True}
@@ -203,9 +201,7 @@ class TestInvocationCorrelation:
         assert events[1]["event"] == "connector_tool_completed"
         assert events[0]["invocation_id"] == events[1]["invocation_id"]
 
-    def test_execute_tool_correlates_failed_lifecycle(
-        self, connector: ConnectorRow, tmp_activity: Path
-    ):
+    def test_execute_tool_correlates_failed_lifecycle(self, connector: ConnectorRow, tmp_activity: Path):
         err = "Provider failure: " + ("x" * 5000)
         with patch("ax_cli.connectors.providers.dispatch._get_adapter") as mock_get:
             mock_adapter = MagicMock()
@@ -223,9 +219,7 @@ class TestInvocationCorrelation:
         assert events[1]["error"].endswith("...(truncated)")
         assert len(events[1]["error"]) == MAX_ACTIVITY_ERROR_LEN
 
-    def test_execute_tool_correlates_denied_lifecycle(
-        self, connector: ConnectorRow, tmp_activity: Path
-    ):
+    def test_execute_tool_correlates_denied_lifecycle(self, connector: ConnectorRow, tmp_activity: Path):
         connector = ConnectorRow.create(
             "test-conn",
             "composio",

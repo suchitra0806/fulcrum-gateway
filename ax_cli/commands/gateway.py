@@ -1212,7 +1212,7 @@ def _normalize_runtime_type(runtime_type: str) -> str:
         return str(runtime_type_definition(runtime_type)["id"])
     except KeyError as exc:
         raise ValueError(
-            "Unsupported runtime type. Use echo, exec, hermes_plugin, sentinel_vendor_sdk, sentinel_cli, claude_code_channel, or inbox."
+            "Unsupported runtime type. Use echo, exec, hermes_plugin, sentinel_inference_sdk, sentinel_cli, claude_code_channel, or inbox."
         ) from exc
 
 
@@ -1566,6 +1566,7 @@ def _register_managed_agent(
     allow_all_users: bool = False,
     allowed_users: str | None = None,
     connector_ref: str | None = None,
+    client: str | None = None,
     start: bool = True,
 ) -> dict:
     name = name.strip()
@@ -1717,6 +1718,8 @@ def _register_managed_agent(
         entry_payload["connector_ref"] = normalized_connector_ref
     if normalized_provider:
         entry_payload["provider"] = normalized_provider
+    if client and str(client).strip():
+        entry_payload["client"] = str(client).strip()
     if requires_approval:
         entry_payload["install_id"] = str(uuid.uuid4())
     entry = upsert_agent_entry(registry, entry_payload)
@@ -1948,7 +1951,7 @@ def _agent_runtime_context_target(entry: dict, *, workdir: Path) -> Path | None:
     runtime = str(entry.get("runtime_type") or "").strip().lower()
     if template == "claude_code_channel" or runtime == "claude_code_channel":
         return workdir / "CLAUDE.md"
-    if template in {"hermes", "sentinel_cli"} or runtime in {"sentinel_vendor_sdk", "sentinel_cli"}:
+    if template in {"hermes", "sentinel_cli"} or runtime in {"sentinel_inference_sdk", "sentinel_cli"}:
         return workdir / "AGENTS.md"
     return None
 
@@ -1957,7 +1960,7 @@ def _write_agent_workspace_config(entry: dict) -> None:
     template = str(entry.get("template_id") or "").strip().lower()
     runtime = str(entry.get("runtime_type") or "").strip().lower()
     if template not in {"hermes", "sentinel_cli", "claude_code_channel"} and runtime not in {
-        "sentinel_vendor_sdk",
+        "sentinel_inference_sdk",
         "sentinel_cli",
         "claude_code_channel",
     }:
@@ -2001,6 +2004,7 @@ def _update_managed_agent(
     allow_all_users: bool | object = _UNSET,
     allowed_users: str | object = _UNSET,
     connector_ref: str | object = _UNSET,
+    client: str | object = _UNSET,
     desired_state: str | None = None,
 ) -> dict:
     name = name.strip()
@@ -2065,6 +2069,13 @@ def _update_managed_agent(
             entry["connector_ref"] = _normalize_connector_ref(connector_clean)
         else:
             entry.pop("connector_ref", None)
+
+    if client is not _UNSET:
+        sdk_clean = str(client or "").strip()
+        if sdk_clean:
+            entry["client"] = sdk_clean
+        else:
+            entry.pop("client", None)
 
     if template_effective_id == "langgraph_composio" and not str(entry.get("connector_ref") or "").strip():
         raise ValueError(
@@ -2543,7 +2554,7 @@ def _recover_managed_agents_from_evidence(names: list[str]) -> dict:
         if rt == "claude_code_channel":
             entry["template_id"] = "claude_code_channel"
             entry["template_label"] = "Claude Code Channel"
-        elif rt == "sentinel_vendor_sdk":
+        elif rt == "sentinel_inference_sdk":
             entry["template_id"] = "hermes"
             entry["template_label"] = "Hermes"
         elif rt == "inbox":
@@ -5408,7 +5419,7 @@ def _render_gateway_ui_page(*, refresh_ms: int) -> str:
               <div class="form-grid">
                 <div class="control-group" id="exec-command-group">
                   <label for="agent-exec">Command Override</label>
-                  <input id="agent-exec" name="exec_command" placeholder="python3 examples/sentinel_vendor_sdk/hermes_bridge.py" />
+                  <input id="agent-exec" name="exec_command" placeholder="python3 examples/sentinel_inference_sdk/hermes_bridge.py" />
                 </div>
                 <div class="control-group" id="workdir-group">
                   <label for="agent-workdir">Working Directory Override</label>
@@ -9426,7 +9437,7 @@ def add_agent(
     runtime_type: str = typer.Option(
         None,
         "--type",
-        help="Advanced/internal runtime backend: echo | exec | hermes_plugin | sentinel_vendor_sdk | sentinel_cli | claude_code_channel | inbox",
+        help="Advanced/internal runtime backend: echo | exec | hermes_plugin | sentinel_inference_sdk | sentinel_cli | claude_code_channel | inbox",
     ),
     exec_cmd: str = typer.Option(None, "--exec", help="Advanced override for exec-based templates"),
     workdir: str = typer.Option(None, "--workdir", help="Advanced working directory override"),
@@ -9484,6 +9495,11 @@ def add_agent(
         "--connector-ref",
         help="Outbound connector name (required for langgraph_composio; sets AX_GATEWAY_CONNECTOR_REF).",
     ),
+    client: str = typer.Option(
+        None,
+        "--client",
+        help="MCP host or inference SDK client (claude_cli for sentinel_cli/claude_code_channel; openai_sdk | gemini_sdk | groq_sdk | mistral_sdk | leapfrog_sdk | xai_sdk for sentinel_inference_sdk).",
+    ),
     start: bool = typer.Option(True, "--start/--no-start", help="Desired running state after registration"),
     as_json: bool = JSON_OPTION,
 ):
@@ -9530,6 +9546,7 @@ def add_agent(
             allow_all_users=allow_all_users,
             allowed_users=allowed_users,
             connector_ref=connector_ref,
+            client=client,
             start=start,
         )
     except (ValueError, LookupError) as exc:
@@ -9565,7 +9582,7 @@ def update_agent(
     runtime_type: str = typer.Option(
         None,
         "--type",
-        help="Advanced/internal runtime backend override: echo | exec | hermes_plugin | sentinel_vendor_sdk | sentinel_cli | claude_code_channel | inbox",
+        help="Advanced/internal runtime backend override: echo | exec | hermes_plugin | sentinel_inference_sdk | sentinel_cli | claude_code_channel | inbox",
     ),
     exec_cmd: str = typer.Option(None, "--exec", help="Advanced override for exec-based templates"),
     workdir: str = typer.Option(None, "--workdir", help="Advanced working directory override"),
@@ -9616,6 +9633,11 @@ def update_agent(
         "--connector-ref",
         help="Outbound connector name for langgraph_composio (clears when passed as empty).",
     ),
+    client: str = typer.Option(
+        None,
+        "--client",
+        help="MCP host or inference SDK client (claude_cli for sentinel_cli/claude_code_channel; openai_sdk | gemini_sdk | groq_sdk | mistral_sdk | leapfrog_sdk | xai_sdk for sentinel_inference_sdk).",
+    ),
     desired_state: str = typer.Option(None, "--desired-state", help="running | stopped"),
     as_json: bool = JSON_OPTION,
 ):
@@ -9647,6 +9669,7 @@ def update_agent(
             allow_all_users=allow_all_users if allow_all_users is not None else _UNSET,
             allowed_users=allowed_users if allowed_users is not None else _UNSET,
             connector_ref=connector_ref if connector_ref is not None else _UNSET,
+            client=client if client is not None else _UNSET,
             desired_state=desired_state,
         )
     except (LookupError, ValueError) as exc:
@@ -9957,7 +9980,7 @@ def smoke_agent(
     runtime_type = str(entry.get("runtime_type") or "echo").lower()
     prompt = (message or "").strip() or _recommended_test_message(entry) or "ping"
 
-    _channel_runtimes = {"claude_code_channel", "hermes_plugin", "sentinel_vendor_sdk", "hermes"}
+    _channel_runtimes = {"claude_code_channel", "hermes_plugin", "sentinel_inference_sdk", "hermes"}
 
     try:
         if runtime_type == "echo":
@@ -10033,7 +10056,7 @@ def smoke_agent(
             }
         else:
             err_console.print(f"[yellow]smoke not supported for runtime_type={runtime_type!r}[/yellow]")
-            err_console.print("  Supported: echo, exec, claude_code_channel, hermes_plugin, sentinel_vendor_sdk")
+            err_console.print("  Supported: echo, exec, claude_code_channel, hermes_plugin, sentinel_inference_sdk")
             raise typer.Exit(1)
     except typer.Exit:
         raise

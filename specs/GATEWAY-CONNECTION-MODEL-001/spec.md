@@ -36,7 +36,7 @@
 The Gateway daemon (`ax gateway run`) is a local process supervisor that:
 
 - Owns a registry (`~/.ax/gateway/registry.json`) of agents the user has bound.
-- For each agent, spawns and supervises a runtime subprocess: `echo`, `exec`, `hermes_plugin`, `sentinel_hermes_sdk`, `sentinel_vendor_sdk`, `sentinel_cli`, `inbox`, etc. Runtime types live in [`ax_cli/gateway_runtime_types.py`](../../ax_cli/gateway_runtime_types.py).
+- For each agent, spawns and supervises a runtime subprocess: `echo`, `exec`, `hermes_plugin`, `sentinel_hermes_sdk`, `sentinel_inference_sdk`, `sentinel_cli`, `inbox`, etc. Runtime types live in [`ax_cli/gateway_runtime_types.py`](../../ax_cli/gateway_runtime_types.py).
 - Each live runtime may keep its own per-agent SSE connection to aX, using the agent's own token. Gateway-mediated local/pass-through sends use the Gateway-managed credential for that same agent identity.
 - The Gateway emits `AX_GATEWAY_EVENT` activity events on stdout from each managed runtime. These flow into `~/.ax/gateway/activity.jsonl` and back to aX as enrichment for the Activity Stream.
 - The Gateway restarts crashed runtimes, reports `live_pid`, `last_state`, `backlog_depth`, and other liveness signals to the registry, and surfaces them through `ax gateway status` / the local UI / aX SSE.
@@ -59,7 +59,7 @@ It's already working (§6) and it does not require any backend contract changes 
 | ax-cli (Gateway) | Status profile fix, stale-process guard, runtime ack format | ~3 PRs, 1 week |
 | ax-backend | Accept and persist runtime ack as message-receipt + agent-presence; LISTENER-001-shaped contract | ~2 PRs, 1 week (gated on `781f5781`) |
 | ax-frontend | Surface presence/confidence chips on agent cards from new fields | ~1 PR, 3 days (gated on backend) |
-| ax-agents / hermes | None this phase — runtime is already Gateway-spawnable via `sentinel_hermes_sdk` / `sentinel_vendor_sdk` runtime types | 0 |
+| ax-agents / hermes | None this phase — runtime is already Gateway-spawnable via `sentinel_hermes_sdk` / `sentinel_inference_sdk` runtime types | 0 |
 
 **Phase-1 graduation gate**: status reads correctly, runtime acks are persisted in aX, dev smoke (§6) is green and re-runnable as a CI smoke.
 
@@ -76,7 +76,7 @@ It's already working (§6) and it does not require any backend contract changes 
 ### What's there today
 
 - Per-agent CLI: `axctl channel` runs in each Claude Code session, holds its own PAT, connects SSE to aX. (Bridge for human-driven agents.)
-- Per-agent runtime: `sentinel_hermes_sdk` / `sentinel_vendor_sdk` sentinels run as systemd services with per-agent PATs.
+- Per-agent runtime: `sentinel_hermes_sdk` / `sentinel_inference_sdk` sentinels run as systemd services with per-agent PATs.
 - Direct MCP: ax-mcp-server's tools call the aX REST API per request, agent-bound or user-PAT.
 
 ### Migration order

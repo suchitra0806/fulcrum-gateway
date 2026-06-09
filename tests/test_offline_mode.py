@@ -104,6 +104,7 @@ def test_get_client_returns_offline_client_when_flag_set(monkeypatch, tmp_path):
     monkeypatch.setenv("AX_OFFLINE", "1")
     monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path))
     from ax_cli.config import get_client
+
     client = get_client()
     assert isinstance(client, OfflineAxClient)
     assert client.base_url == "http://localhost:8765"
@@ -111,9 +112,11 @@ def test_get_client_returns_offline_client_when_flag_set(monkeypatch, tmp_path):
 
 def test_get_client_not_offline_without_flag(monkeypatch, tmp_path):
     import typer
+
     monkeypatch.delenv("AX_OFFLINE", raising=False)
     monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path))
     from ax_cli.config import get_client
+
     # Without a token, should raise typer.Exit(1) — not return OfflineAxClient
     with pytest.raises(typer.Exit):
         get_client()
@@ -189,22 +192,26 @@ def _seed_offline_gateway(tmp_path, monkeypatch):
     """Write a minimal offline gateway session and agent token for channel setup."""
     monkeypatch.setenv("AX_OFFLINE", "1")
     monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "ax_config"))
-    gateway_core.save_gateway_session({
-        "token": "offline",
-        "base_url": "http://localhost:8765",
-        "space_id": "00000000-0000-0000-0000-000000000001",
-    })
+    gateway_core.save_gateway_session(
+        {
+            "token": "offline",
+            "base_url": "http://localhost:8765",
+            "space_id": "00000000-0000-0000-0000-000000000001",
+        }
+    )
     agent_dir = tmp_path / "ax_config" / "gateway" / "agents" / "my-agent"
     agent_dir.mkdir(parents=True)
     (agent_dir / "token").write_text("axp_a_offline_abc123")
     registry = {
-        "agents": [{
-            "name": "my-agent",
-            "agent_id": "agent-offline-1",
-            "space_id": "00000000-0000-0000-0000-000000000001",
-            "base_url": "http://localhost:8765",
-            "token_file": str(agent_dir / "token"),
-        }]
+        "agents": [
+            {
+                "name": "my-agent",
+                "agent_id": "agent-offline-1",
+                "space_id": "00000000-0000-0000-0000-000000000001",
+                "base_url": "http://localhost:8765",
+                "token_file": str(agent_dir / "token"),
+            }
+        ]
     }
     gateway_core.save_gateway_registry(registry)
 
@@ -215,6 +222,7 @@ def test_channel_setup_writes_ax_offline_to_env_file(monkeypatch, tmp_path):
     workdir.mkdir()
     env_path = tmp_path / "claude-channel.env"
     from ax_cli.commands.channel import write_channel_setup
+
     write_channel_setup(
         agent_name="my-agent",
         workdir=workdir,
@@ -228,22 +236,34 @@ def test_channel_setup_writes_ax_offline_to_env_file(monkeypatch, tmp_path):
 def test_channel_setup_no_ax_offline_without_flag(monkeypatch, tmp_path):
     monkeypatch.delenv("AX_OFFLINE", raising=False)
     monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "ax_config"))
-    gateway_core.save_gateway_session({
-        "token": "axp_u_real.token",
-        "base_url": "https://paxai.app",
-        "space_id": "space-1",
-    })
+    gateway_core.save_gateway_session(
+        {
+            "token": "axp_u_real.token",
+            "base_url": "https://paxai.app",
+            "space_id": "space-1",
+        }
+    )
     agent_dir = tmp_path / "ax_config" / "gateway" / "agents" / "my-agent"
     agent_dir.mkdir(parents=True)
     (agent_dir / "token").write_text("axp_a_real.token")
-    gateway_core.save_gateway_registry({"agents": [{
-        "name": "my-agent", "agent_id": "aid", "space_id": "space-1",
-        "base_url": "https://paxai.app", "token_file": str(agent_dir / "token"),
-    }]})
+    gateway_core.save_gateway_registry(
+        {
+            "agents": [
+                {
+                    "name": "my-agent",
+                    "agent_id": "aid",
+                    "space_id": "space-1",
+                    "base_url": "https://paxai.app",
+                    "token_file": str(agent_dir / "token"),
+                }
+            ]
+        }
+    )
     workdir = tmp_path / "workspace"
     workdir.mkdir()
     env_path = tmp_path / "claude-channel.env"
     from ax_cli.commands.channel import write_channel_setup
+
     write_channel_setup(agent_name="my-agent", workdir=workdir, env_path=env_path)
     env_text = env_path.read_text()
     assert "AX_OFFLINE" not in env_text
@@ -281,6 +301,7 @@ def test_smoke_echo_returns_echo_response(monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
     from ax_cli.main import app
+
     runner = CliRunner()
     result = runner.invoke(app, ["gateway", "agents", "smoke", "echo-bot", "--message", "hello"])
     assert result.exit_code == 0
@@ -320,6 +341,7 @@ def test_smoke_channel_not_connected_when_no_subscriber(monkeypatch, tmp_path):
 
     # Gateway returns empty delivered_to — agent not subscribed
     import httpx
+
     fake_resp = MagicMock(spec=httpx.Response)
     fake_resp.status_code = 201
     fake_resp.json.return_value = {"id": "msg-1", "delivered_to": [], "message": {}}
@@ -328,6 +350,7 @@ def test_smoke_channel_not_connected_when_no_subscriber(monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
     from ax_cli.main import app
+
     runner = CliRunner()
     with patch("httpx.post", return_value=fake_resp):
         result = runner.invoke(app, ["gateway", "agents", "smoke", "my-channel"])
@@ -343,6 +366,7 @@ def test_smoke_channel_shows_reply_from_log(monkeypatch, tmp_path):
     gateway_core.save_gateway_session({"token": "offline", "base_url": "http://localhost:8765", "space_id": "s1"})
 
     import httpx
+
     fake_resp = MagicMock(spec=httpx.Response)
     fake_resp.status_code = 201
     fake_resp.json.return_value = {"id": "sent-msg-1", "delivered_to": ["my-channel"], "message": {"id": "sent-msg-1"}}
@@ -355,6 +379,7 @@ def test_smoke_channel_shows_reply_from_log(monkeypatch, tmp_path):
     # AFTER the smoke command records start_pos (which happens post-send).
     def _write_reply():
         import time
+
         time.sleep(0.2)
         with replies_path.open("a") as f:
             f.write(json.dumps({"id": "reply-1", "content": "pong", "author": "my-channel"}) + "\n")
@@ -364,6 +389,7 @@ def test_smoke_channel_shows_reply_from_log(monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
     from ax_cli.main import app
+
     runner = CliRunner()
 
     def start_reply_thread(*args, **kwargs):

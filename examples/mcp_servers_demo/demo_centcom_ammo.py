@@ -32,7 +32,11 @@ def _stockpile_to_status(quantity: int, ammo_type: str) -> str:
     want the demo card to show all three pill colors.
     """
     if ammo_type.lower().endswith(("missiles", "missile")) or ammo_type in {
-        "Javelin", "Stinger", "Hellfire", "SM-6", "Harpoon"
+        "Javelin",
+        "Stinger",
+        "Hellfire",
+        "SM-6",
+        "Harpoon",
     }:
         if quantity < 300:
             return "alert"

@@ -1,6 +1,5 @@
 """Tests for A2A (Agent2Agent Protocol) client."""
 
-
 import httpx
 import pytest
 

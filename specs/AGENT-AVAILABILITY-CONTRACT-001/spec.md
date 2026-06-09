@@ -110,7 +110,7 @@ For each agent:
        source_of_truth = heartbeat
        presence_confidence = medium
        online_now = false
-       connection_mode = on_demand_warm if agent.runtime_type in {sentinel_hermes_sdk, sentinel_vendor_sdk, exec, inbox}
+       connection_mode = on_demand_warm if agent.runtime_type in {sentinel_hermes_sdk, sentinel_inference_sdk, exec, inbox}
   4. Else:
        source_of_truth = last_message
        presence_confidence = low
@@ -391,7 +391,7 @@ Required widget capabilities:
 Five acceptance smokes from ChatGPT's directive, automated:
 
 1. **Gateway-connected agent reads correctly**: `dev_sentinel` (LIVE under Gateway) shows `online_now=true`, `presence_confidence=high`, `source_of_truth=gateway`, `messages_routable=true`. List + widget + CLI + MCP agree.
-2. **On-demand reads NOT online**: a freshly-quiet `sentinel_hermes_sdk` or `sentinel_vendor_sdk` agent shows `online_now=false`, `connection_mode=on_demand_warm`, `messages_routable=true`. UI does NOT say "Online".
+2. **On-demand reads NOT online**: a freshly-quiet `sentinel_hermes_sdk` or `sentinel_inference_sdk` agent shows `online_now=false`, `connection_mode=on_demand_warm`, `messages_routable=true`. UI does NOT say "Online".
 3. **Disabled clearly unavailable**: a quarantined or disabled agent shows `messages_routable=false`, "Disabled" badge dominates, send is blocked or warned.
 4. **List ↔ widget agreement**: programmatic comparison — `axctl agents list --json` and `GET /api/v1/agents` payload have identical presence sub-objects for every agent.
 5. **Send-time presence stamp**: send a message; assert response message's `metadata.delivery_context.target_presence_at_send` is populated with the sender's presence record snapshot.

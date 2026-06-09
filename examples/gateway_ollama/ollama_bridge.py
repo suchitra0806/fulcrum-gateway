@@ -77,7 +77,9 @@ def _build_client():
         emit_event({"kind": "activity", "activity": "no agent token; running without history context"})
         return None
     agent_id = os.environ.get("AX_GATEWAY_AGENT_ID", "").strip() or os.environ.get("AX_AGENT_ID", "").strip() or None
-    agent_name = os.environ.get("AX_GATEWAY_AGENT_NAME", "").strip() or os.environ.get("AX_AGENT_NAME", "").strip() or None
+    agent_name = (
+        os.environ.get("AX_GATEWAY_AGENT_NAME", "").strip() or os.environ.get("AX_AGENT_NAME", "").strip() or None
+    )
     try:
         from ax_cli.client import AxClient
     except Exception as exc:  # noqa: BLE001
@@ -276,7 +278,9 @@ def _chat(messages: list[dict[str, str]]) -> str:
                     now = time.monotonic()
                     if not first_token_seen:
                         first_token_seen = True
-                        emit_event({"kind": "status", "status": "processing", "message": f"Ollama is responding ({model})"})
+                        emit_event(
+                            {"kind": "status", "status": "processing", "message": f"Ollama is responding ({model})"}
+                        )
                     if now - last_activity_at >= 1.0:
                         preview = "".join(chunks).strip().replace("\n", " ")
                         if len(preview) > 180:

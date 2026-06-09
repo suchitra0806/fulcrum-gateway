@@ -466,7 +466,7 @@ def _template_operator_defaults(template_id: str | None, runtime_type: object) -
             "reply_mode": "interactive",
             "telemetry_level": "basic",
         },
-        "sentinel_vendor_sdk": {
+        "sentinel_inference_sdk": {
             "placement": "hosted",
             "activation": "persistent",
             "reply_mode": "interactive",
@@ -680,7 +680,7 @@ def _template_asset_defaults(template_id: str | None, runtime_type: object) -> d
             "capabilities": ["reply"],
             "constraints": [],
         },
-        "sentinel_vendor_sdk": defaults_by_template["hermes"],
+        "sentinel_inference_sdk": defaults_by_template["hermes"],
         "hermes_plugin": defaults_by_template["hermes"],
         "sentinel_cli": defaults_by_template["sentinel_cli"],
         "inbox": defaults_by_template["inbox"],
@@ -899,9 +899,9 @@ def hermes_setup_status(entry: dict[str, Any]) -> dict[str, Any]:
     # is "hermes" (the plugin is now the default template runtime).
     if runtime_type == "hermes_plugin":
         return {"ready": True, "template_id": template_id}
-    # sentinel_vendor_sdk and bare hermes-template entries still run from the
+    # sentinel_inference_sdk and bare hermes-template entries still run from the
     # in-tree sentinel and need a hermes-agent checkout resolvable below.
-    if template_id != "hermes" and runtime_type != "sentinel_vendor_sdk":
+    if template_id != "hermes" and runtime_type != "sentinel_inference_sdk":
         return {"ready": True, "template_id": template_id}
 
     candidates = _hermes_repo_candidates(entry)
@@ -1591,11 +1591,13 @@ def _runtime_origin_fingerprint(entry: dict[str, Any]) -> dict[str, Any]:
             "executable_path": executable_path,
             "executable_sha256": _safe_file_sha256(Path(executable_path)) if executable_path else None,
             "hermes_repo_path": str(entry.get("hermes_repo_path") or "").strip() or None,
-            "hermes_python": _sentinel_vendor_sdk_python(entry) if runtime_type == "sentinel_vendor_sdk" else None,
-            "gateway_repo_root": str(_gateway_repo_root()) if runtime_type == "sentinel_vendor_sdk" else None,
-            "hermes_tools_shim": str(hermes_tools_shim) if runtime_type == "sentinel_vendor_sdk" else None,
+            "hermes_python": _sentinel_inference_sdk_python(entry)
+            if runtime_type == "sentinel_inference_sdk"
+            else None,
+            "gateway_repo_root": str(_gateway_repo_root()) if runtime_type == "sentinel_inference_sdk" else None,
+            "hermes_tools_shim": str(hermes_tools_shim) if runtime_type == "sentinel_inference_sdk" else None,
             "hermes_tools_shim_sha256": _safe_file_sha256(hermes_tools_shim)
-            if runtime_type == "sentinel_vendor_sdk"
+            if runtime_type == "sentinel_inference_sdk"
             else None,
         }
     )
@@ -4180,7 +4182,7 @@ def _run_exec_handler(
     # context) so exec-runtime bridges (Ollama, custom python bridges, etc.)
     # can read it via env. Hermes / Claude / Sentinel pass the prompt as a
     # CLI flag instead — this env var is for runtimes that aren't built by
-    # _build_sentinel_vendor_sdk_cmd / _build_sentinel_claude_cmd.
+    # _build_sentinel_inference_sdk_cmd / _build_sentinel_claude_cmd.
     composed_prompt = _compose_agent_system_prompt(entry)
     if composed_prompt:
         env["AX_AGENT_SYSTEM_PROMPT"] = composed_prompt
@@ -4289,8 +4291,8 @@ def _is_sentinel_cli_runtime(runtime_type: object) -> bool:
     return str(runtime_type or "").strip().lower() in {"sentinel_cli", "claude_cli"}
 
 
-def _is_sentinel_vendor_sdk_runtime(runtime_type: object) -> bool:
-    return str(runtime_type or "").strip().lower() in {"sentinel_vendor_sdk", "hermes_sentinel"}
+def _is_sentinel_inference_sdk_runtime(runtime_type: object) -> bool:
+    return str(runtime_type or "").strip().lower() in {"sentinel_inference_sdk", "hermes_sentinel"}
 
 
 def _is_sentinel_hermes_sdk_runtime(runtime_type: object) -> bool:
@@ -4311,7 +4313,7 @@ def _is_supervised_subprocess_runtime(runtime_type: object) -> bool:
     the shared start/stop scaffolding treat both the same.
     """
     return (
-        _is_sentinel_vendor_sdk_runtime(runtime_type)
+        _is_sentinel_inference_sdk_runtime(runtime_type)
         or _is_sentinel_hermes_sdk_runtime(runtime_type)
         or _is_hermes_plugin_runtime(runtime_type)
     )
@@ -4328,19 +4330,19 @@ def _agents_dir_for_entry(entry: dict[str, Any]) -> Path:
     return Path("/home/ax-agent/agents")
 
 
-def _sentinel_vendor_sdk_script(entry: dict[str, Any]) -> Path:
+def _sentinel_inference_sdk_script(entry: dict[str, Any]) -> Path:
     """Resolve the Hermes sentinel script path.
 
     Order:
         1. Explicit operator override on the agent entry (`sentinel_script` /
-           `sentinel_vendor_sdk_script`).
+           `sentinel_inference_sdk_script`).
         2. Live-host operator copy at `_agents_dir_for_entry(entry) /
            "claude_agent_v2.py"` if it exists (preserves the EC2 dev-fleet
            workflow without requiring ax-cli reinstalls).
         3. Bundled vendored sentinel that ships with ax-cli (`pip install`
            users get this automatically — no external clone required).
     """
-    configured = str(entry.get("sentinel_script") or entry.get("sentinel_vendor_sdk_script") or "").strip()
+    configured = str(entry.get("sentinel_script") or entry.get("sentinel_inference_sdk_script") or "").strip()
     if configured:
         return Path(configured).expanduser()
     operator_copy = _agents_dir_for_entry(entry) / "claude_agent_v2.py"
@@ -4350,7 +4352,7 @@ def _sentinel_vendor_sdk_script(entry: dict[str, Any]) -> Path:
     return bundled
 
 
-def _sentinel_vendor_sdk_python(entry: dict[str, Any]) -> str:
+def _sentinel_inference_sdk_python(entry: dict[str, Any]) -> str:
     configured = str(entry.get("hermes_python") or entry.get("python") or "").strip()
     if configured:
         return configured
@@ -4365,7 +4367,7 @@ def _sentinel_vendor_sdk_python(entry: dict[str, Any]) -> str:
     return "python3"
 
 
-def _sentinel_vendor_sdk_model(entry: dict[str, Any]) -> str:
+def _sentinel_inference_sdk_model(entry: dict[str, Any]) -> str:
     for key in ("hermes_model", "sentinel_model", "runtime_model", "model"):
         value = str(entry.get(key) or "").strip()
         if value:
@@ -4373,7 +4375,7 @@ def _sentinel_vendor_sdk_model(entry: dict[str, Any]) -> str:
     return str(os.environ.get("AX_GATEWAY_HERMES_MODEL") or "codex:gpt-5.5")
 
 
-def _sentinel_vendor_sdk_workdir(entry: dict[str, Any]) -> Path:
+def _sentinel_inference_sdk_workdir(entry: dict[str, Any]) -> Path:
     raw = str(entry.get("workdir") or "").strip()
     if raw:
         return Path(raw).expanduser()
@@ -4460,11 +4462,10 @@ def _compose_agent_system_prompt(entry: dict[str, Any]) -> str | None:
     return "\n\n".join(parts) if parts else None
 
 
-# SDK runtimes that sentinel_vendor_sdk can drive via `--runtime`.
-# Operators can set this on a managed-agent entry as `sentinel_sdk_runtime`,
-# `hermes_runtime`, or `sdk_runtime`. Default is `openai_sdk`.
+# SDK runtimes that sentinel_inference_sdk can drive via `--runtime`.
+# Valid inference SDK clients for sentinel_inference_sdk (per ADR-012 / ADR-014).
 # hermes_sdk is intentionally excluded: use sentinel_hermes_sdk runtime type.
-_HERMES_SENTINEL_SDK_RUNTIMES = {
+_INFERENCE_SDK_CLIENTS = {
     "openai_sdk",
     "groq_sdk",
     "gemini_sdk",
@@ -4474,36 +4475,32 @@ _HERMES_SENTINEL_SDK_RUNTIMES = {
 }
 
 
-def _sentinel_vendor_sdk_sdk_runtime(entry: dict[str, Any]) -> str | None:
-    """Resolve which SDK runtime a sentinel_vendor_sdk agent should use.
+def _resolve_inference_client(entry: dict[str, Any]) -> str | None:
+    """Resolve the inference SDK client for a sentinel_inference_sdk agent.
 
-    Reads (in priority order) `sentinel_sdk_runtime`, `hermes_runtime`,
-    `sdk_runtime`. Returns None if nothing is configured or the value is not a
-    recognised runtime — the caller must treat None as a setup error. There is
-    no default. Do not call for sentinel_hermes_sdk agents; their runtime is
-    always hermes_sdk and is hardcoded in the dispatch layer.
+    Reads the `client` field (ADR-014). Returns None if absent or not a
+    recognised client — the caller must treat None as a setup error.
+
+    Do not call for sentinel_hermes_sdk agents; their client is always
+    hermes_sdk and is hardcoded in the dispatch layer.
     """
-    configured = (
-        str(entry.get("sentinel_sdk_runtime") or entry.get("hermes_runtime") or entry.get("sdk_runtime") or "")
-        .strip()
-        .lower()
-    )
-    if configured in _HERMES_SENTINEL_SDK_RUNTIMES:
+    configured = str(entry.get("client") or "").strip().lower()
+    if configured in _INFERENCE_SDK_CLIENTS:
         return configured
     return None
 
 
-def _build_sentinel_vendor_sdk_cmd(entry: dict[str, Any], *, sdk_runtime: str) -> list[str]:
+def _build_sentinel_inference_sdk_cmd(entry: dict[str, Any], *, sdk_runtime: str) -> list[str]:
     timeout = str(entry.get("timeout_seconds") or entry.get("timeout") or 600)
     update_interval = str(entry.get("update_interval") or 2.0)
     cmd = [
-        _sentinel_vendor_sdk_python(entry),
+        _sentinel_inference_sdk_python(entry),
         "-u",
-        str(_sentinel_vendor_sdk_script(entry)),
+        str(_sentinel_inference_sdk_script(entry)),
         "--agent",
         str(entry.get("name") or ""),
         "--workdir",
-        str(_sentinel_vendor_sdk_workdir(entry)),
+        str(_sentinel_inference_sdk_workdir(entry)),
         "--timeout",
         timeout,
         "--update-interval",
@@ -4511,7 +4508,7 @@ def _build_sentinel_vendor_sdk_cmd(entry: dict[str, Any], *, sdk_runtime: str) -
         "--runtime",
         sdk_runtime,
         "--model",
-        _sentinel_vendor_sdk_model(entry),
+        _sentinel_inference_sdk_model(entry),
     ]
     allowed_tools = str(entry.get("allowed_tools") or "").strip()
     if allowed_tools:
@@ -4522,10 +4519,10 @@ def _build_sentinel_vendor_sdk_cmd(entry: dict[str, Any], *, sdk_runtime: str) -
     return cmd
 
 
-def _build_sentinel_vendor_sdk_env(entry: dict[str, Any]) -> dict[str, str]:
+def _build_sentinel_inference_sdk_env(entry: dict[str, Any]) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k not in ENV_DENYLIST}
     token = load_gateway_managed_agent_token(entry)
-    workdir = _sentinel_vendor_sdk_workdir(entry)
+    workdir = _sentinel_inference_sdk_workdir(entry)
     agents_dir = _agents_dir_for_entry(entry)
     hermes_repo = str(entry.get("hermes_repo_path") or "").strip() or "/home/ax-agent/shared/repos/hermes-agent"
     repo_root = str(_gateway_repo_root())
@@ -4545,7 +4542,7 @@ def _build_sentinel_vendor_sdk_env(entry: dict[str, Any]) -> dict[str, str]:
             "AX_AGENT_ID": str(entry.get("agent_id") or ""),
             "AX_SPACE_ID": str(entry.get("space_id") or ""),
             "AX_CONFIG_DIR": str(workdir / ".ax"),
-            "AX_PYTHON": _sentinel_vendor_sdk_python(entry),
+            "AX_PYTHON": _sentinel_inference_sdk_python(entry),
             "HERMES_MAX_ITERATIONS": str(
                 entry.get("hermes_max_iterations") or os.environ.get("HERMES_MAX_ITERATIONS") or 60
             ),
@@ -5333,8 +5330,8 @@ class ManagedAgentRuntime:
             last_started_at=_now_iso(),
             reconnect_backoff_seconds=0,
         )
-        if _is_sentinel_vendor_sdk_runtime(runtime_type) or _is_sentinel_hermes_sdk_runtime(runtime_type):
-            self._start_sentinel_vendor_sdk_process(runtime_instance_id=runtime_instance_id)
+        if _is_sentinel_inference_sdk_runtime(runtime_type) or _is_sentinel_hermes_sdk_runtime(runtime_type):
+            self._start_sentinel_inference_sdk_process(runtime_instance_id=runtime_instance_id)
             return
         if _is_hermes_plugin_runtime(runtime_type):
             self._start_hermes_plugin_process(runtime_instance_id=runtime_instance_id)
@@ -5368,7 +5365,7 @@ class ManagedAgentRuntime:
                 self._stream_response.close()
             except Exception:
                 pass
-        self._stop_sentinel_vendor_sdk_process(timeout=timeout)
+        self._stop_sentinel_inference_sdk_process(timeout=timeout)
         for thread in (self._listener_thread, self._worker_thread, self._supervised_thread):
             if thread and thread.is_alive():
                 thread.join(timeout=timeout)
@@ -5395,15 +5392,15 @@ class ManagedAgentRuntime:
         record_gateway_activity("runtime_stopped", entry=self.entry)
         self._log("stopped")
 
-    def _sentinel_vendor_sdk_log_path(self) -> Path:
+    def _sentinel_inference_sdk_log_path(self) -> Path:
         configured = str(self.entry.get("log_path") or "").strip()
         if configured:
             return Path(configured).expanduser()
-        return _sentinel_vendor_sdk_workdir(self.entry) / "gateway-hermes-sentinel.log"
+        return _sentinel_inference_sdk_workdir(self.entry) / "gateway-hermes-sentinel.log"
 
-    def _start_sentinel_vendor_sdk_process(self, *, runtime_instance_id: str) -> None:
-        workdir = _sentinel_vendor_sdk_workdir(self.entry)
-        script = _sentinel_vendor_sdk_script(self.entry)
+    def _start_sentinel_inference_sdk_process(self, *, runtime_instance_id: str) -> None:
+        workdir = _sentinel_inference_sdk_workdir(self.entry)
+        script = _sentinel_inference_sdk_script(self.entry)
         if not script.exists():
             self._record_setup_error(f"Sentinel script not found: {script}")
             return
@@ -5412,7 +5409,7 @@ class ManagedAgentRuntime:
         except ValueError as exc:
             self._record_setup_error(str(exc))
             return
-        python_binary = _sentinel_vendor_sdk_python(self.entry)
+        python_binary = _sentinel_inference_sdk_python(self.entry)
         python_path = Path(python_binary)
         if python_path.is_absolute() and not python_path.exists():
             self._record_setup_error(
@@ -5423,20 +5420,20 @@ class ManagedAgentRuntime:
         if _is_sentinel_hermes_sdk_runtime(self.entry.get("runtime_type")):
             resolved_sdk_runtime = "hermes_sdk"
         else:
-            resolved_sdk_runtime = _sentinel_vendor_sdk_sdk_runtime(self.entry)
+            resolved_sdk_runtime = _resolve_inference_client(self.entry)
             if resolved_sdk_runtime is None:
                 self._record_setup_error(
-                    "sentinel_vendor_sdk requires sentinel_sdk_runtime to be configured — "
+                    "sentinel_inference_sdk requires a client to be configured — "
                     "no default. Set it: ax gateway agents update <name> "
-                    "--set sentinel_sdk_runtime=openai_sdk  (or groq_sdk|gemini_sdk|...)"
+                    "--client openai_sdk  (or gemini_sdk|groq_sdk|mistral_sdk|...)"
                 )
                 return
 
         workdir.mkdir(parents=True, exist_ok=True)
-        log_path = self._sentinel_vendor_sdk_log_path()
+        log_path = self._sentinel_inference_sdk_log_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        cmd = _build_sentinel_vendor_sdk_cmd(self.entry, sdk_runtime=resolved_sdk_runtime)
-        env = _build_sentinel_vendor_sdk_env(self.entry)
+        cmd = _build_sentinel_inference_sdk_cmd(self.entry, sdk_runtime=resolved_sdk_runtime)
+        env = _build_sentinel_inference_sdk_env(self.entry)
         try:
             log_handle = log_path.open("a", encoding="utf-8")
             log_handle.write(
@@ -5486,15 +5483,15 @@ class ManagedAgentRuntime:
             runtime_instance_id=runtime_instance_id,
             pid=process.pid,
             log_path=str(log_path),
-            supervised_runtime="sentinel_vendor_sdk",
+            supervised_runtime="sentinel_inference_sdk",
         )
         self._supervised_thread = threading.Thread(
-            target=self._monitor_sentinel_vendor_sdk_process,
+            target=self._monitor_sentinel_inference_sdk_process,
             daemon=True,
             name=f"gw-hermes-sentinel-{self.name}",
         )
         self._supervised_thread.start()
-        self._log(f"started sentinel_vendor_sdk pid={process.pid}")
+        self._log(f"started sentinel_inference_sdk pid={process.pid}")
 
     def _consume_sentinel_stdout(self, process: subprocess.Popen, log_handle) -> None:
         """Read sentinel stdout line-by-line, parse AX_GATEWAY_EVENT lines and
@@ -5619,7 +5616,7 @@ class ManagedAgentRuntime:
             except Exception:
                 pass
 
-    def _monitor_sentinel_vendor_sdk_process(self) -> None:
+    def _monitor_sentinel_inference_sdk_process(self) -> None:
         process = self._supervised_process
         if process is None:
             return
@@ -5648,9 +5645,9 @@ class ManagedAgentRuntime:
             )
             return
 
-    def _stop_sentinel_vendor_sdk_process(self, *, timeout: float = 5.0) -> None:
+    def _stop_sentinel_inference_sdk_process(self, *, timeout: float = 5.0) -> None:
         # Despite the name, this stop path is runtime-agnostic: it just SIGTERMs
-        # self._supervised_process. Both sentinel_vendor_sdk and hermes_plugin land
+        # self._supervised_process. Both sentinel_inference_sdk and hermes_plugin land
         # here from stop(). The function early-returns when there is no
         # supervised child, so it is safe to call for any runtime type.
         process = self._supervised_process
@@ -5815,7 +5812,7 @@ class ManagedAgentRuntime:
         parent_message_id: str | None = None,
     ) -> None:
         # Lazy-init send_client for runtimes that don't enter _listener_loop
-        # (e.g. sentinel_vendor_sdk and other supervised-subprocess runtimes).
+        # (e.g. sentinel_inference_sdk and other supervised-subprocess runtimes).
         # Without this, AX_GATEWAY_EVENT lines parsed from the sentinel's
         # stdout would never reach the backend and the activity bubble
         # stalls at "Working".
@@ -7200,10 +7197,10 @@ class GatewayDaemon:
                 signal.signal(sig, handler)
             runtimes = list(self._runtimes.values())
             for runtime in runtimes:
-                if _is_sentinel_vendor_sdk_runtime(runtime.entry.get("runtime_type")):
+                if _is_sentinel_inference_sdk_runtime(runtime.entry.get("runtime_type")):
                     runtime.stop(timeout=2.0)
             for runtime in runtimes:
-                if not _is_sentinel_vendor_sdk_runtime(runtime.entry.get("runtime_type")):
+                if not _is_sentinel_inference_sdk_runtime(runtime.entry.get("runtime_type")):
                     runtime.stop(timeout=1.0)
             final_registry = load_gateway_registry()
             final_gateway = final_registry.setdefault("gateway", {})

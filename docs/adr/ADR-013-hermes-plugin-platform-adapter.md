@@ -101,7 +101,7 @@ Gateway UI Start/Stop buttons.
 
 ---
 
-## Relationship to sentinel_vendor_sdk and sentinel_hermes_sdk (ADR-012)
+## Relationship to sentinel_inference_sdk and sentinel_hermes_sdk (ADR-012)
 
 These are parallel, not overlapping runtimes:
 
@@ -109,12 +109,12 @@ These are parallel, not overlapping runtimes:
 | --- | --- | --- | --- |
 | `hermes_plugin` | Long-lived `hermes gateway run` process | Full Hermes agentic loop | Hermes approval gates + tool policy |
 | `sentinel_hermes_sdk` | Long-lived `sentinel.py` daemon, in-process Hermes AIAgent loop | 90-turn agentic loop; Bedrock, OpenRouter, Anthropic, Codex backends | Connector policy + `_secure_hermes_tools` |
-| `sentinel_vendor_sdk` | Long-lived `sentinel.py` daemon, SDK-direct API calls | Lightweight single-turn API call, no local framework | Connector policy (`allowed_tools`/`denied_tools`) |
+| `sentinel_inference_sdk` | Long-lived `sentinel.py` daemon, SDK-direct API calls | Lightweight single-turn API call, no local framework | Connector policy (`allowed_tools`/`denied_tools`) |
 
-`sentinel_vendor_sdk` dispatches to direct vendor SDKs (OpenAI, Groq, Mistral,
+`sentinel_inference_sdk` dispatches to direct vendor SDKs (OpenAI, Groq, Mistral,
 Gemini, Leapfrog). No `hermes_plugin` equivalent exists for those providers.
 `sentinel_hermes_sdk` carries the in-process Hermes loop and Bedrock IAM
-support that previously lived as `hermes_sdk` inside `sentinel_vendor_sdk`;
+support that previously lived as `hermes_sdk` inside `sentinel_inference_sdk`;
 ADR-012 decision 5 promotes it to its own runtime type because its shape
 (full agentic loop, custom tool security, framework dependency) is
 architecturally distinct from a lightweight vendor API call. See

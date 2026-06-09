@@ -101,7 +101,7 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
                     "name": "exec_command",
                     "label": "Exec Command",
                     "required": True,
-                    "placeholder": "python3 examples/sentinel_vendor_sdk/hermes_bridge.py",
+                    "placeholder": "python3 examples/sentinel_inference_sdk/hermes_bridge.py",
                 },
                 {
                     "name": "workdir",
@@ -123,7 +123,7 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
                 },
                 {
                     "label": "Hermes Sentinel",
-                    "exec_command": "python3 examples/sentinel_vendor_sdk/hermes_bridge.py",
+                    "exec_command": "python3 examples/sentinel_inference_sdk/hermes_bridge.py",
                     "workdir": str(repo_root),
                     "note": "Requires a local hermes-agent checkout plus auth setup.",
                 },
@@ -143,13 +143,14 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
                 "tools": "Gateway can record tool usage when the bridge emits tool events.",
             },
         },
-        "sentinel_vendor_sdk": {
-            "id": "sentinel_vendor_sdk",
-            "label": "Vendor SDK Sentinel",
+        "sentinel_inference_sdk": {
+            "id": "sentinel_inference_sdk",
+            "label": "Inference SDK Sentinel",
             "description": (
-                "Gateway-supervised sentinel process dispatching to lightweight direct "
-                "vendor API runtimes (openai_sdk, groq_sdk, mistral_sdk, gemini_sdk, "
-                "leapfrog_sdk). Tool access is controlled by connector policy. "
+                "Gateway-supervised sentinel process making direct inference API calls "
+                "to vendor LLMs (openai_sdk, groq_sdk, mistral_sdk, gemini_sdk, "
+                "leapfrog_sdk, xai_sdk). Requires --client to select the SDK. "
+                "Tool access is controlled by connector policy. "
                 "Renamed from hermes_sentinel in 0.7.0 — see ADR-012."
             ),
             "kind": "supervised_process",
@@ -173,9 +174,9 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
             "examples": [
                 {
                     "label": "OpenAI SDK agent",
-                    "runtime_type": "sentinel_vendor_sdk",
+                    "runtime_type": "sentinel_inference_sdk",
                     "workdir": "/home/ax-agent/agents/openai_agent",
-                    "sentinel_sdk_runtime": "openai_sdk",
+                    "client": "openai_sdk",
                 },
             ],
             "signals": {
@@ -190,11 +191,11 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
         "hermes_sentinel": {
             "id": "hermes_sentinel",
             "label": "Hermes Sentinel (legacy)",
-            "description": "Legacy name for sentinel_vendor_sdk — renamed in 0.7.0. See ADR-012.",
+            "description": "Legacy name for sentinel_inference_sdk — renamed in 0.7.0. See ADR-012.",
             "kind": "supervised_process",
             "passive": False,
             "deprecated": True,
-            "successor_runtime_type": "sentinel_vendor_sdk",
+            "successor_runtime_type": "sentinel_inference_sdk",
             "requires": [],
             "form_fields": [],
             "signals": {},
@@ -209,7 +210,7 @@ def runtime_type_catalog() -> dict[str, dict[str, Any]]:
                 "(anthropic:claude-*), OpenRouter (openrouter:<model>), and Codex "
                 "(codex:gpt-*) backends. Tool access is controlled by connector policy "
                 "plus Hermes tool security shims. Promoted from hermes_sdk inside "
-                "sentinel_vendor_sdk in 0.7.0 — see ADR-012."
+                "sentinel_inference_sdk in 0.7.0 — see ADR-012."
             ),
             "kind": "supervised_process",
             "passive": False,
@@ -435,7 +436,7 @@ def runtime_type_list() -> list[dict[str, Any]]:
         "exec",
         "hermes_plugin",
         "sentinel_hermes_sdk",
-        "sentinel_vendor_sdk",
+        "sentinel_inference_sdk",
         "sentinel_cli",
         "claude_code_channel",
         "inbox",
@@ -454,7 +455,7 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
             "exec",
             "hermes_plugin",
             "sentinel_hermes_sdk",
-            "sentinel_vendor_sdk",
+            "sentinel_inference_sdk",
             "sentinel_cli",
             "claude_code_channel",
             "inbox",

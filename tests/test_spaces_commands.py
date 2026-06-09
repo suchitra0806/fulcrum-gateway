@@ -752,9 +752,7 @@ def test_spaces_leave_member_count_lookup_failure_logs_debug_and_is_silent(monke
     client = _archive_leave_client()
     request = httpx.Request("GET", "https://example.test/spaces/s1/members")
     response = httpx.Response(403, request=request)
-    client.list_space_members.side_effect = httpx.HTTPStatusError(
-        "403 Forbidden", request=request, response=response
-    )
+    client.list_space_members.side_effect = httpx.HTTPStatusError("403 Forbidden", request=request, response=response)
     monkeypatch.setattr("ax_cli.commands.spaces.get_client", lambda: client)
     monkeypatch.setattr("ax_cli.commands.spaces.resolve_space_id", lambda c, explicit=None: "s1")
     monkeypatch.setattr("ax_cli.commands.spaces.resolve_token", lambda: None)

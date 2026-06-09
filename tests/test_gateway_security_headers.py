@@ -1,7 +1,4 @@
 import io
-import json
-
-import pytest
 
 from ax_cli.commands import gateway as gateway_cmd
 

@@ -1,4 +1,4 @@
-# ADR-012 — sentinel_vendor_sdk rename and CLI bypass removal
+# ADR-012 — sentinel_inference_sdk rename and CLI bypass removal
 
 **Status:** Accepted
 **Date:** 2026-06-05
@@ -39,8 +39,8 @@ The `hermes_sentinel` runtime was originally a Claude Code sentinel implemented 
 
 The flag is removed from:
 - `gateway.py:_build_sentinel_claude_cmd` (sentinel_cli Claude)
-- `sentinel.py:_build_claude_cmd` (sentinel_vendor_sdk Claude — dead code, removed with the legacy path)
-- `runtimes/claude_cli.py` (sentinel_vendor_sdk Claude CLI plugin)
+- `sentinel.py:_build_claude_cmd` (sentinel_inference_sdk Claude — dead code, removed with the legacy path)
+- `runtimes/claude_cli.py` (sentinel_inference_sdk Claude CLI plugin)
 
 Consequence: `sentinel_cli` Claude agents without a `settings.local.json` permissions configuration will have text-only capability after this change. The agent can respond to messages but cannot invoke tools. Operators must apply a profile to grant tool access — see [ADR-011](ADR-011-channel-settings-profiles.md) for the profiles system and [GATEWAY-AGENT-DEPLOY-001](../../specs/GATEWAY-AGENT-DEPLOY-001/spec.md) for `ax agents deploy` and `ax agents profiles apply`. This is the intended behavior — tool access should be explicitly authorized, not implicitly granted.
 
@@ -60,13 +60,13 @@ More importantly, even if Codex added a safe headless mode, the existing code wo
 
 The core issue is not implementation complexity but authorization model incompatibility: Claude's permission model is tool-name-based (settings.local.json lists allowed tools by name), which the profiles system in ADR-011 can populate. Codex's model is sandbox-based (filesystem write scope), with no named-tool filtering. There is no safe authorization model we can build for Codex headless execution that is comparable to what Claude offers. Removal forces operators toward `openai_sdk`, which has proper connector policy enforcement.
 
-There is no safe headless Codex model available. Operators who need OpenAI model access should use `openai_sdk` under `sentinel_vendor_sdk`.
+There is no safe headless Codex model available. Operators who need OpenAI model access should use `openai_sdk` under `sentinel_inference_sdk`.
 
-### 3. Remove CLI subprocess paths from the sentinel_vendor_sdk runtime
+### 3. Remove CLI subprocess paths from the sentinel_inference_sdk runtime
 
-The `sentinel_vendor_sdk` runtime (previously `hermes_sentinel`) is re-scoped to SDK-only. The `_build_claude_cmd` and `_build_codex_cmd` functions in `sentinel.py` are deleted along with the entire legacy subprocess fallback path in `run_cli`. Claude CLI subprocess access is available via `sentinel_cli` directly. The `claude_cli.py` plugin survives as the implementation backing `sentinel_cli` for operators who need the Hermes supervisor model to manage a Claude subprocess, but it is no longer reachable from `sentinel_vendor_sdk`.
+The `sentinel_inference_sdk` runtime (previously `hermes_sentinel`) is re-scoped to SDK-only. The `_build_claude_cmd` and `_build_codex_cmd` functions in `sentinel.py` are deleted along with the entire legacy subprocess fallback path in `run_cli`. Claude CLI subprocess access is available via `sentinel_cli` directly. The `claude_cli.py` plugin survives as the implementation backing `sentinel_cli` for operators who need the Hermes supervisor model to manage a Claude subprocess, but it is no longer reachable from `sentinel_inference_sdk`.
 
-### 4. Rename `hermes_sentinel` → `sentinel_vendor_sdk`
+### 4. Rename `hermes_sentinel` → `sentinel_inference_sdk`
 
 The runtime type ID, all dispatch checks, internal function names, and UI strings are updated throughout `gateway.py`, `gateway_runtime_types.py`, and `commands/gateway.py`. The runtime catalog entry is updated with a new label, description, and `successor_runtime_type` pointer from the old `hermes_sentinel` ID.
 
@@ -74,34 +74,34 @@ The runtime type ID, all dispatch checks, internal function names, and UI string
 
 This requires reading [ADR-013](ADR-013-hermes-plugin-platform-adapter.md) alongside the current state. ADR-013 records the decision to replace the "per-mention sentinel-subprocess pattern" with `hermes_plugin` — a long-lived `hermes gateway run` process. On its face, that looks like an argument for removing `hermes_sentinel` rather than renaming it.
 
-The distinction is what `hermes_sentinel` / `sentinel_vendor_sdk` *actually does* after this ADR. Before this change, its `run_cli` dispatch had two populations of runtime:
+The distinction is what `hermes_sentinel` / `sentinel_inference_sdk` *actually does* after this ADR. Before this change, its `run_cli` dispatch had two populations of runtime:
 
 1. CLI subprocess backends (Claude CLI, Codex CLI) — these spawned a new process *per mention*. This is exactly the pattern ADR-013 deprecated. We removed these in decisions 2 and 3 above.
 
 2. SDK runtime backends (openai_sdk, groq_sdk, mistral_sdk, gemini_sdk, leapfrog_sdk, hermes_sdk) — these run within a long-lived daemon process. No per-mention subprocess spawning. No CLI bypass flags. Tool authorization is handled by connector policy.
 
-After this ADR, `sentinel_vendor_sdk` is exclusively the second population. The behavior ADR-013 deprecated is gone. What remains is a Gateway-supervised persistent daemon that dispatches to vendor SDK runtimes — a different shape that does not conflict with `hermes_plugin`'s design goals.
+After this ADR, `sentinel_inference_sdk` is exclusively the second population. The behavior ADR-013 deprecated is gone. What remains is a Gateway-supervised persistent daemon that dispatches to vendor SDK runtimes — a different shape that does not conflict with `hermes_plugin`'s design goals.
 
 Note that not all SDK backends in this population are equivalent. `openai_sdk`, `groq_sdk`, `mistral_sdk`, `gemini_sdk`, and `leapfrog_sdk` are lightweight direct vendor API calls. `hermes_sdk` is architecturally distinct: it runs a full in-process Hermes AIAgent loop with Bedrock IAM, OpenRouter, and Anthropic API backends — a different shape that does not belong under the same runtime type. Decision 5 below addresses this.
 
 The runtimes that remain serve different operator needs:
 
 - `hermes_plugin`: operators running Hermes agents with its full agentic loop, tool system, and platform plugin architecture. Hermes manages the agent's reasoning and tool calls natively.
-- `sentinel_vendor_sdk`: operators running lightweight direct vendor API calls — a simpler shape where the vendor API is the agent. No local agentic framework dependency. No equivalent `hermes_plugin` path exists for openai_sdk, groq_sdk, etc.
+- `sentinel_inference_sdk`: operators running lightweight direct vendor API calls — a simpler shape where the vendor API is the agent. No local agentic framework dependency. No equivalent `hermes_plugin` path exists for openai_sdk, groq_sdk, etc.
 - `sentinel_hermes_sdk`: operators running the in-process Hermes AIAgent loop via sentinel infrastructure — see decision 5.
 
-Removing `sentinel_vendor_sdk` would break all existing deployments using non-Hermes vendor SDKs with no migration path. The rename retains those agents while stripping the parts ADR-013 rightly criticized.
+Removing `sentinel_inference_sdk` would break all existing deployments using non-Hermes vendor SDKs with no migration path. The rename retains those agents while stripping the parts ADR-013 rightly criticized.
 
 ### 5. Promote `hermes_sdk` to its own runtime type: `sentinel_hermes_sdk`
 
-`hermes_sdk` is not a lightweight vendor API call — it runs a full in-process Hermes AIAgent loop (90-turn agentic loop, parallel tool execution, context compression, subagent delegation) with its own tool security layer (`_secure_hermes_tools`) and connector tool registration. It also carries the only Bedrock IAM support in the sentinel stack. Leaving it as an undifferentiated member of `sentinel_vendor_sdk` misrepresents its shape and its capabilities.
+`hermes_sdk` is not a lightweight vendor API call — it runs a full in-process Hermes AIAgent loop (90-turn agentic loop, parallel tool execution, context compression, subagent delegation) with its own tool security layer (`_secure_hermes_tools`) and connector tool registration. It also carries the only Bedrock IAM support in the sentinel stack. Leaving it as an undifferentiated member of `sentinel_inference_sdk` misrepresents its shape and its capabilities.
 
-`sentinel_hermes_sdk` is a peer runtime type alongside `sentinel_vendor_sdk`, not a choice within it. Both are sentinels — both spawn `sentinel.py` and use the same SSE listener, session store, history store, and connector policy infrastructure. The difference is the backend: `sentinel_vendor_sdk` dispatches to a direct vendor API; `sentinel_hermes_sdk` dispatches to the in-process Hermes AIAgent loop via `--runtime hermes_sdk`.
+`sentinel_hermes_sdk` is a peer runtime type alongside `sentinel_inference_sdk`, not a choice within it. Both are sentinels — both spawn `sentinel.py` and use the same SSE listener, session store, history store, and connector policy infrastructure. The difference is the backend: `sentinel_inference_sdk` dispatches to a direct vendor API; `sentinel_hermes_sdk` dispatches to the in-process Hermes AIAgent loop via `--runtime hermes_sdk`.
 
 Consequences:
 
-- `hermes_sdk` is removed from `_HERMES_SENTINEL_SDK_RUNTIMES` and is no longer a valid `sentinel_sdk_runtime` choice within `sentinel_vendor_sdk`.
-- `sentinel_sdk_runtime` becomes a required field for `sentinel_vendor_sdk` agents — there is no default. An agent missing it will record a setup error rather than silently picking a backend.
+- `hermes_sdk` is removed from `_HERMES_SENTINEL_SDK_RUNTIMES` and is no longer a valid `sentinel_sdk_runtime` choice within `sentinel_inference_sdk`.
+- `sentinel_sdk_runtime` becomes a required field for `sentinel_inference_sdk` agents — there is no default. An agent missing it will record a setup error rather than silently picking a backend.
 - `sentinel_hermes_sdk` gets its own catalog entry, dispatch predicate, and resolved runtime in the dispatch layer (`gateway.py`). Both runtime types share the same command and environment builder; the resolved runtime is passed as a parameter.
 - Bedrock IAM auth (`bedrock:claude-*` model prefix, `AWS_REGION`, instance profile) is supported exclusively via `sentinel_hermes_sdk`.
 
@@ -111,19 +111,19 @@ Consequences:
 
 | Change | Impact | Migration |
 |---|---|---|
-| `runtime_type: hermes_sentinel` no longer valid | All existing `hermes_sentinel` agents | Update registry entry: `ax gateway agents update <name> --type sentinel_vendor_sdk` |
+| `runtime_type: hermes_sentinel` no longer valid | All existing `hermes_sentinel` agents | Update registry entry: `ax gateway agents update <name> --type sentinel_inference_sdk` |
 | `sentinel_cli` Claude agents lose unrestricted tool access | Agents without `settings.local.json` become text-only | Apply a profile: `ax agents profiles apply <name> --runtime claude --profile base` |
-| Codex CLI runtime removed | Any agent using `runtime_type: sentinel_cli` with `sentinel_runtime: codex` | No path within Gateway; use `openai_sdk` under `sentinel_vendor_sdk` for OpenAI models |
-| `--runtime codex/codex_cli` removed from `sentinel_vendor_sdk` argparse | Agent configs passing `--runtime codex` to `sentinel.py` | Switch to `--runtime openai_sdk` |
-| `sentinel_sdk_runtime: hermes_sdk` no longer valid within `sentinel_vendor_sdk` | Any `sentinel_vendor_sdk` agent relying on the `hermes_sdk` default or explicit setting | Change `runtime_type` to `sentinel_hermes_sdk`; remove `sentinel_sdk_runtime` field |
-| `sentinel_sdk_runtime` is now required for `sentinel_vendor_sdk` | Any `sentinel_vendor_sdk` agent without `sentinel_sdk_runtime` set | Add `sentinel_sdk_runtime: openai_sdk` (or `groq_sdk`, `gemini_sdk`, etc.) |
+| Codex CLI runtime removed | Any agent using `runtime_type: sentinel_cli` with `sentinel_runtime: codex` | No path within Gateway; use `openai_sdk` under `sentinel_inference_sdk` for OpenAI models |
+| `--runtime codex/codex_cli` removed from `sentinel_inference_sdk` argparse | Agent configs passing `--runtime codex` to `sentinel.py` | Switch to `--runtime openai_sdk` |
+| `sentinel_sdk_runtime: hermes_sdk` no longer valid within `sentinel_inference_sdk` | Any `sentinel_inference_sdk` agent relying on the `hermes_sdk` default or explicit setting | Change `runtime_type` to `sentinel_hermes_sdk`; remove `sentinel_sdk_runtime` field |
+| `sentinel_sdk_runtime` is now required for `sentinel_inference_sdk` | Any `sentinel_inference_sdk` agent without `sentinel_sdk_runtime` set | Add `sentinel_sdk_runtime: openai_sdk` (or `groq_sdk`, `gemini_sdk`, etc.) |
 
 ---
 
 ## Non-breaking
 
-- `sentinel_vendor_sdk` SDK runtime agents (`openai_sdk`, `groq_sdk`, `mistral_sdk`, `gemini_sdk`, `leapfrog_sdk`) are unaffected. The supervisor and plugin dispatch logic are unchanged.
-- `sentinel_hermes_sdk` is a new runtime type; existing `sentinel_vendor_sdk` agents that already set `sentinel_sdk_runtime` are unaffected.
+- `sentinel_inference_sdk` SDK runtime agents (`openai_sdk`, `groq_sdk`, `mistral_sdk`, `gemini_sdk`, `leapfrog_sdk`) are unaffected. The supervisor and plugin dispatch logic are unchanged.
+- `sentinel_hermes_sdk` is a new runtime type; existing `sentinel_inference_sdk` agents that already set `sentinel_sdk_runtime` are unaffected.
 - `hermes_plugin` agents are unaffected.
 - `claude_code_channel` agents are unaffected.
 - Connector policy enforcement is unaffected.

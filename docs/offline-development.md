@@ -146,7 +146,7 @@ AX_OFFLINE=1 ax gateway agents smoke my-hermes-agent --message "ping"
 | `claude_code_channel` | Delivery via gateway SSE + reply polling |
 | `hermes_plugin` | Delivery via gateway SSE + reply polling |
 | `sentinel_hermes_sdk` | Delivery via gateway SSE + reply polling |
-| `sentinel_vendor_sdk` | Delivery via gateway SSE + reply polling |
+| `sentinel_inference_sdk` | Delivery via gateway SSE + reply polling |
 | `inbox` / `passive` | Not supported (no handler) |
 | `sentinel_cli` | Not supported offline (requires live AI CLI) |
 

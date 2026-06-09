@@ -27,19 +27,19 @@ The vendored `sentinel.py` supports the following `--runtime` values:
 | `--runtime` | Gateway runtime type | Notes |
 | --- | --- | --- |
 | `hermes_sdk` | `sentinel_hermes_sdk` | In-process Hermes AIAgent loop; Bedrock, OpenRouter, Anthropic |
-| `openai_sdk` | `sentinel_vendor_sdk` | Direct OpenAI API calls |
-| `groq_sdk` | `sentinel_vendor_sdk` | Direct Groq API calls |
-| `gemini_sdk` | `sentinel_vendor_sdk` | Direct Gemini API calls |
-| `mistral_sdk` | `sentinel_vendor_sdk` | Direct Mistral API calls |
-| `leapfrog_sdk` | `sentinel_vendor_sdk` | Direct Leapfrog API calls |
-| `xai_sdk` | `sentinel_vendor_sdk` | Direct xAI API calls |
+| `openai_sdk` | `sentinel_inference_sdk` | Direct OpenAI API calls |
+| `groq_sdk` | `sentinel_inference_sdk` | Direct Groq API calls |
+| `gemini_sdk` | `sentinel_inference_sdk` | Direct Gemini API calls |
+| `mistral_sdk` | `sentinel_inference_sdk` | Direct Mistral API calls |
+| `leapfrog_sdk` | `sentinel_inference_sdk` | Direct Leapfrog API calls |
+| `xai_sdk` | `sentinel_inference_sdk` | Direct xAI API calls |
 | `claude_cli` | `sentinel_cli` | Claude Code subprocess (`claude -p`) |
 
-`codex_cli` was removed in 0.7.0 (ADR-012). Gateway dispatches `sentinel_hermes_sdk` and `sentinel_vendor_sdk` through `_start_sentinel_vendor_sdk_process`; the resolved `--runtime` value is passed as a parameter.
+`codex_cli` was removed in 0.7.0 (ADR-012). Gateway dispatches `sentinel_hermes_sdk` and `sentinel_inference_sdk` through `_start_sentinel_inference_sdk_process`; the resolved `--runtime` value is passed as a parameter.
 
 ## Wiring
 
-`ax_cli/gateway.py` `_sentinel_vendor_sdk_script(entry)` should resolve to:
+`ax_cli/gateway.py` `_sentinel_inference_sdk_script(entry)` should resolve to:
 
 - `Path(__file__).parent.parent / "runtimes" / "hermes" / "sentinel.py"` (the bundled path), OR
 - An operator override at `/home/ax-agent/agents/claude_agent_v2.py` if it exists (preserves the dev-fleet workflow on the EC2 production host).
@@ -62,7 +62,7 @@ On the EC2 production host, this works because PYTHONPATH puts `/home/ax-agent/a
 1. Prepend `Path(__file__).parent` (i.e. `ax_cli/runtimes/hermes/`) to `sys.path` BEFORE the public hermes-agent clone, so `import tools` resolves to the vendored `tools/__init__.py` shim.
 2. Ensure the public hermes-agent clone is also on `sys.path` (operators set this via `HERMES_REPO_PATH` or default `~/hermes-agent`) so `tools.registry` resolves correctly.
 
-`_sentinel_vendor_sdk_script` (the launcher) is the right place to set this up, since it constructs the subprocess env. The vendored `sentinel.py` does not need to be modified — the path setup happens at launch time.
+`_sentinel_inference_sdk_script` (the launcher) is the right place to set this up, since it constructs the subprocess env. The vendored `sentinel.py` does not need to be modified — the path setup happens at launch time.
 
 ### Why the shim isn't a separate import name
 
@@ -95,7 +95,7 @@ Then commit + PR. Update the line counts table in this README to reflect the new
 
 ## End-user setup (`sentinel_hermes_sdk` only)
 
-The vendored sentinel is bundled with ax-cli, but the `hermes_sdk` backend's runtime dependencies live in the `NousResearch/hermes-agent` repo and must be installed separately. `sentinel_vendor_sdk` backends (`openai_sdk`, `groq_sdk`, etc.) do not need this step.
+The vendored sentinel is bundled with ax-cli, but the `hermes_sdk` backend's runtime dependencies live in the `NousResearch/hermes-agent` repo and must be installed separately. `sentinel_inference_sdk` backends (`openai_sdk`, `groq_sdk`, etc.) do not need this step.
 
 ```bash
 git clone https://github.com/NousResearch/hermes-agent ~/hermes-agent

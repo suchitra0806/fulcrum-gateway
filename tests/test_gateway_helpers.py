@@ -2798,13 +2798,13 @@ class TestIsSentinelCliRuntime:
 
 class TestIsSentinelVendorSdkRuntime:
     def test_matches(self):
-        from ax_cli.gateway import _is_sentinel_vendor_sdk_runtime
+        from ax_cli.gateway import _is_sentinel_inference_sdk_runtime
 
-        assert _is_sentinel_vendor_sdk_runtime("sentinel_vendor_sdk") is True
-        assert _is_sentinel_vendor_sdk_runtime("hermes_sentinel") is True  # legacy alias
-        assert _is_sentinel_vendor_sdk_runtime("hermes_sdk") is False  # promoted to sentinel_hermes_sdk
-        assert _is_sentinel_vendor_sdk_runtime("sentinel_hermes_sdk") is False
-        assert _is_sentinel_vendor_sdk_runtime("hermes_plugin") is False
+        assert _is_sentinel_inference_sdk_runtime("sentinel_inference_sdk") is True
+        assert _is_sentinel_inference_sdk_runtime("hermes_sentinel") is True  # legacy alias
+        assert _is_sentinel_inference_sdk_runtime("hermes_sdk") is False  # promoted to sentinel_hermes_sdk
+        assert _is_sentinel_inference_sdk_runtime("sentinel_hermes_sdk") is False
+        assert _is_sentinel_inference_sdk_runtime("hermes_plugin") is False
 
 
 class TestIsSentinelHermesSdkRuntime:
@@ -2813,7 +2813,7 @@ class TestIsSentinelHermesSdkRuntime:
 
         assert _is_sentinel_hermes_sdk_runtime("sentinel_hermes_sdk") is True
         assert _is_sentinel_hermes_sdk_runtime("hermes_sdk") is False
-        assert _is_sentinel_hermes_sdk_runtime("sentinel_vendor_sdk") is False
+        assert _is_sentinel_hermes_sdk_runtime("sentinel_inference_sdk") is False
         assert _is_sentinel_hermes_sdk_runtime("hermes_plugin") is False
 
 
@@ -2853,7 +2853,7 @@ class TestRuntimeTypeDeprecation:
     def test_successor_for_deprecated_runtime(self):
         from ax_cli.gateway_runtime_types import runtime_type_successor
 
-        assert runtime_type_successor("hermes_sentinel") == "sentinel_vendor_sdk"
+        assert runtime_type_successor("hermes_sentinel") == "sentinel_inference_sdk"
 
     def test_successor_none_for_current_runtime(self):
         from ax_cli.gateway_runtime_types import runtime_type_successor
@@ -3002,17 +3002,17 @@ class TestHermesRepoCandidates:
 
 class TestSentinelVendorSdkModel:
     def test_hermes_model_field(self):
-        assert gw._sentinel_vendor_sdk_model({"hermes_model": "codex:gpt-4"}) == "codex:gpt-4"
+        assert gw._sentinel_inference_sdk_model({"hermes_model": "codex:gpt-4"}) == "codex:gpt-4"
 
     def test_sentinel_model_field(self):
-        assert gw._sentinel_vendor_sdk_model({"sentinel_model": "my-model"}) == "my-model"
+        assert gw._sentinel_inference_sdk_model({"sentinel_model": "my-model"}) == "my-model"
 
     def test_runtime_model(self):
-        assert gw._sentinel_vendor_sdk_model({"runtime_model": "rt-model"}) == "rt-model"
+        assert gw._sentinel_inference_sdk_model({"runtime_model": "rt-model"}) == "rt-model"
 
     def test_default_from_env(self, monkeypatch):
         monkeypatch.delenv("AX_GATEWAY_HERMES_MODEL", raising=False)
-        result = gw._sentinel_vendor_sdk_model({})
+        result = gw._sentinel_inference_sdk_model({})
         assert result
 
 

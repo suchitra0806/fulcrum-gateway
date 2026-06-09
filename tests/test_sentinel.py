@@ -392,8 +392,6 @@ class TestResolveHistoryThreadId:
         assert result == "space:space123:agent:mybot"
 
 
-
-
 # ── iter_sse ──────────────────────────────────────────────────────────────
 
 

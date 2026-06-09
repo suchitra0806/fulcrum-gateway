@@ -637,9 +637,7 @@ def test_gemini_sdk_returns_auth_error_on_permission_denied(monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "test_key")
 
     fake_model = MagicMock()
-    fake_model.generate_content.side_effect = RuntimeError(
-        "403 Permission denied: API key invalid or revoked"
-    )
+    fake_model.generate_content.side_effect = RuntimeError("403 Permission denied: API key invalid or revoked")
     _install_fake_genai(monkeypatch, fake_model)
 
     rt = get_runtime("gemini_sdk")
@@ -677,9 +675,7 @@ def test_gemini_sdk_auth_error_classifier_does_not_swallow_unrelated_errors(monk
     monkeypatch.setenv("GOOGLE_API_KEY", "test_key")
 
     fake_model = MagicMock()
-    fake_model.generate_content.side_effect = RuntimeError(
-        "500 Internal Server Error: backend unavailable"
-    )
+    fake_model.generate_content.side_effect = RuntimeError("500 Internal Server Error: backend unavailable")
     _install_fake_genai(monkeypatch, fake_model)
 
     rt = get_runtime("gemini_sdk")

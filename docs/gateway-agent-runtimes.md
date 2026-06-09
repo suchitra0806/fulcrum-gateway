@@ -64,14 +64,14 @@ Current useful modes:
   Hermes AIAgent loop via `--runtime hermes_sdk`. Use for coding sentinels
   that need Hermes session continuity, tool use, and repo access with
   Bedrock, OpenRouter, or Anthropic API backends.
-- `sentinel_vendor_sdk`: Gateway-supervised sentinel making direct vendor API
+- `sentinel_inference_sdk`: Gateway-supervised sentinel making direct vendor API
   calls (`openai_sdk`, `groq_sdk`, `gemini_sdk`, `mistral_sdk`, `leapfrog_sdk`,
   `xai_sdk`). Lightweight single-turn API path; no local Hermes framework
   dependency. `sentinel_sdk_runtime` is required with no default.
 - `hermes_sentinel` *(legacy alias)*: Former name for the sentinel supervisor
   runtimes, kept so existing registry entries keep working. Migrate to
   `sentinel_hermes_sdk` if the agent used `--runtime hermes_sdk`, or to
-  `sentinel_vendor_sdk` (with `sentinel_sdk_runtime` set) if it used a
+  `sentinel_inference_sdk` (with `sentinel_sdk_runtime` set) if it used a
   direct vendor API backend.
 - `claude_code_channel`: attached Claude Code channel. Gateway registers the
   identity and token; `ax-channel` delivers live mentions into the Claude Code

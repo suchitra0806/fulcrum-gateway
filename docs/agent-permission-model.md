@@ -94,13 +94,13 @@ Gateway scaffolds `<workdir>/.hermes/` and spawns `hermes gateway run` as a long
 
 Tool access is controlled by connector policy — see the Connector Model section below.
 
-### `sentinel_vendor_sdk` — direct vendor API runtimes
+### `sentinel_inference_sdk` — direct vendor API runtimes
 
 Gateway spawns the `sentinel.py` supervisor, which dispatches to a direct vendor API backend set via `sentinel_sdk_runtime` (required, no default): `openai_sdk`, `groq_sdk`, `mistral_sdk`, `gemini_sdk`, `leapfrog_sdk`, or `xai_sdk`.
 
 These runtimes call vendor LLM APIs directly — no Claude CLI subprocess, no permission bypass flags. Tool access is controlled by the same Gateway connector system as `hermes_plugin`. The model is identical: `connector_search` and `connector_call` are meta-tools the agent uses to discover and invoke connector-backed tools, with connector policy enforced at both search time and call time.
 
-`sentinel_vendor_sdk` was named `hermes_sentinel` prior to 0.7.0. See [ADR-012](adr/ADR-012-vendor-sdk-security-cleanup.md).
+`sentinel_inference_sdk` was named `hermes_sentinel` prior to 0.7.0. See [ADR-012](adr/ADR-012-vendor-sdk-security-cleanup.md).
 
 ### `sentinel_hermes_sdk` — in-process Hermes AIAgent loop
 
@@ -108,7 +108,7 @@ Gateway spawns the same `sentinel.py` supervisor with `--runtime hermes_sdk`, ru
 
 Tool authorization uses `_secure_hermes_tools` (a security shim on the Hermes tool registry) in addition to the standard connector policy. This is the preferred runtime for coding sentinels that need session continuity and rich tool use.
 
-`sentinel_hermes_sdk` was promoted from `hermes_sdk` within `sentinel_vendor_sdk` in 0.7.0. See [ADR-012](adr/ADR-012-vendor-sdk-security-cleanup.md).
+`sentinel_hermes_sdk` was promoted from `hermes_sdk` within `sentinel_inference_sdk` in 0.7.0. See [ADR-012](adr/ADR-012-vendor-sdk-security-cleanup.md).
 
 ### `exec` and `bedrock_agentcore` — command bridge runtimes
 

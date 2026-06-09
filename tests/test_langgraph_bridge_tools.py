@@ -298,9 +298,7 @@ def test_security_wrapper_degraded_emits_status_error_event_and_stderr(monkeypat
     wrap = langgraph_bridge._make_security_wrap(str(tmp_path))
 
     # Status-event side: surfaces in `ax gateway status`.
-    status_errors = [
-        e for e in captured if e.get("kind") == "status" and e.get("status") == "error"
-    ]
+    status_errors = [e for e in captured if e.get("kind") == "status" and e.get("status") == "error"]
     assert len(status_errors) == 1, f"expected one status:error event, got {captured!r}"
     assert "security wrapper degraded" in str(status_errors[0].get("error_message") or "")
     # Stderr side: surfaces in the operator's terminal.

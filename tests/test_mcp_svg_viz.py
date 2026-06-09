@@ -96,9 +96,7 @@ def test_render_status_card_escapes_html_in_values():
 
 
 def test_chart_handler_wraps_svg_in_json_payload():
-    result = _handle_chart(
-        {"type": "bar", "data": [{"label": "a", "value": 1}], "options": {"title": "T"}}
-    )
+    result = _handle_chart({"type": "bar", "data": [{"label": "a", "value": 1}], "options": {"title": "T"}})
     assert "content" in result
     text = result["content"][0]["text"]
     payload = json.loads(text)
