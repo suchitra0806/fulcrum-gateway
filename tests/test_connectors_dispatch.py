@@ -96,6 +96,57 @@ class TestListToolsSemantics:
         assert [t["name"] for t in result["items"]] == ["GITHUB_T_000", "GITHUB_T_001", "GITHUB_T_002"]
 
 
+class TestSearchToolsIntent:
+    def test_uses_intent_adapter_for_auto_mode(self, monkeypatch):
+        calls: dict[str, str] = {}
+
+        monkeypatch.setattr(
+            "ax_cli.connectors.providers.dispatch.has_capability",
+            lambda provider, capability: capability == "intent_search",
+        )
+
+        def _intent(query, auth_env, config, name, *, apps=None, limit=10, session_id=None, known_fields=None):
+            calls["query"] = query
+            calls["limit"] = str(limit)
+            return {
+                "items": [{"name": "GITHUB_LIST_PRS", "displayName": "List PRs"}],
+                "mode": "intent",
+                "session_id": "sess-1",
+            }
+
+        adapter = SimpleNamespace(
+            search_tools_intent=_intent,
+            search_tools=lambda *a, **k: {"items": []},
+        )
+        monkeypatch.setitem(dispatch._ADAPTERS, "fake", adapter)
+        result = dispatch.search_tools(_row(), "list prs", {}, limit=3, mode="auto")
+        assert calls["query"] == "list prs"
+        assert result["mode"] == "intent"
+        assert result["session_id"] == "sess-1"
+        assert result["items"][0]["name"] == "GITHUB_LIST_PRS"
+
+    def test_catalog_mode_uses_get_search(self, monkeypatch):
+        calls: dict[str, str] = {}
+
+        def _catalog(query, auth_env, config, name, *, apps=None, limit=10, cursor=None):
+            calls["query"] = query
+            return {"items": [{"name": "GITHUB_LIST_PRS", "displayName": "List PRs"}]}
+
+        adapter = SimpleNamespace(
+            search_tools=_catalog,
+            search_tools_intent=lambda *a, **k: {"items": []},
+        )
+        monkeypatch.setitem(dispatch._ADAPTERS, "fake", adapter)
+        monkeypatch.setattr(
+            "ax_cli.connectors.providers.dispatch.has_capability",
+            lambda provider, capability: capability == "intent_search",
+        )
+        result = dispatch.search_tools(_row(), "list prs", {}, mode="catalog")
+        assert calls["query"] == "list prs"
+        assert result["mode"] == "catalog"
+        assert "session_id" not in result
+
+
 class TestCatalogPagination:
     def test_drains_all_catalog_pages(self, fake_catalog_adapter):
         pages = [

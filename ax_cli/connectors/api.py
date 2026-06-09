@@ -82,6 +82,7 @@ def search_connector_tools(
     mode: str = "auto",
     limit: int = 10,
     apps: str | None = None,
+    session_id: str | None = None,
 ) -> ConnectorToolSearchResult:
     """Search tools for a connector by natural-language use case."""
     row, auth_env = _resolve_row_and_auth(connector_ref)
@@ -93,7 +94,8 @@ def search_connector_tools(
             auth_env,
             apps=apps,
             limit=limit,
-            mode=effective_mode if mode != "auto" else mode,
+            mode=mode,
+            session_id=session_id,
         )
     except ConnectorProviderError as exc:
         return ConnectorToolSearchResult(
@@ -106,8 +108,9 @@ def search_connector_tools(
     if not isinstance(items, list):
         items = []
     tools = [_tool_match_from_item(item) for item in items if isinstance(item, dict)]
+    resolved_mode = str(raw.get("mode") or effective_mode) if isinstance(raw, dict) else effective_mode
     return ConnectorToolSearchResult(
-        mode=effective_mode,
+        mode=resolved_mode,
         successful=True,
         tools=tools,
         session_id=raw.get("session_id") if isinstance(raw, dict) else None,

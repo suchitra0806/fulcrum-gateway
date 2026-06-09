@@ -11295,6 +11295,11 @@ def connectors_tools_search(
     ),
     mode: str = typer.Option("auto", "--mode", "-m", help="Search mode: auto, intent, or catalog"),
     limit: int = typer.Option(10, "--limit", help="Max results"),
+    session_id: str = typer.Option(
+        None,
+        "--session-id",
+        help="Composio intent-search session id from a prior search (intent/auto mode)",
+    ),
     as_json: bool = JSON_OPTION,
 ):
     """Search for tools matching a use case (intent or catalog mode).
@@ -11347,19 +11352,36 @@ def connectors_tools_search(
         err_console.print(f"[red]Auth error:[/red] {e}")
         raise typer.Exit(1)
     try:
-        result = search_tools(row, use_case, auth_env, limit=limit, mode=mode)
+        result = search_tools(
+            row,
+            use_case,
+            auth_env,
+            limit=limit,
+            mode=mode,
+            session_id=session_id,
+        )
     except ConnectorProviderError as e:
         err_console.print(f"[red]Provider error:[/red] {e}")
         raise typer.Exit(1)
 
     items = result.get("items", [])
+    resolved_mode = result.get("mode") or mode
     if as_json:
-        print_json({"connector": row.name, "query": use_case, "mode": mode, "tools": items, "count": len(items)})
+        payload = {
+            "connector": row.name,
+            "query": use_case,
+            "mode": resolved_mode,
+            "tools": items,
+            "count": len(items),
+        }
+        if result.get("session_id"):
+            payload["session_id"] = result["session_id"]
+        print_json(payload)
         return
     if not items:
         err_console.print(f"No tools found for query {use_case!r}.")
         return
-    err_console.print(f"[bold]{row.name}[/bold] search ({mode}) — {len(items)} results:")
+    err_console.print(f"[bold]{row.name}[/bold] search ({resolved_mode}) — {len(items)} results:")
     print_table(
         ["Name", "Display Name", "Description"],
         [

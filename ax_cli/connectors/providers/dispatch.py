@@ -162,6 +162,15 @@ def list_tools(
     }
 
 
+def _resolve_search_mode(provider: str, mode: str) -> str:
+    normalized = str(mode or "auto").strip().lower()
+    if normalized in {"catalog", "intent"}:
+        return normalized
+    if has_capability(provider, "intent_search"):
+        return "intent"
+    return "catalog"
+
+
 def search_tools(
     connector: ConnectorRow,
     query: str,
@@ -170,14 +179,41 @@ def search_tools(
     apps: str | None = None,
     limit: int = 10,
     mode: str = "auto",
+    session_id: str | None = None,
 ) -> dict[str, Any]:
-    if mode == "intent" or (mode == "auto" and has_capability(connector.provider, "intent_search")):
+    resolved_mode = _resolve_search_mode(connector.provider, mode)
+    session_out: str | None = None
+
+    if resolved_mode == "intent":
         if not has_capability(connector.provider, "intent_search"):
             raise ConnectorProviderError(
                 connector.provider,
                 f"Provider {connector.provider!r} does not support intent search. Use --mode catalog.",
             )
         adapter = _get_adapter(connector.provider)
+        if not hasattr(adapter, "search_tools_intent"):
+            raise ConnectorProviderError(
+                connector.provider,
+                f"Provider {connector.provider!r} does not implement intent search. Use --mode catalog.",
+            )
+        result = adapter.search_tools_intent(
+            query,
+            auth_env,
+            connector.config,
+            connector.name,
+            apps=apps,
+            limit=limit,
+            session_id=session_id,
+        )
+        items = result.get("items", [])
+        session_out = result.get("session_id")
+    elif mode == "catalog" or resolved_mode == "catalog":
+        adapter = _get_adapter(connector.provider)
+        if not hasattr(adapter, "search_tools"):
+            raise ConnectorProviderError(
+                connector.provider,
+                f"Provider {connector.provider!r} does not support catalog search.",
+            )
         result = adapter.search_tools(
             query,
             auth_env,
@@ -200,5 +236,10 @@ def search_tools(
         items = items[:limit]
 
     policy = from_config(connector.config)
-    filtered = filter_tools(items, policy)
-    return {"items": filtered}
+    filtered = filter_tools(items, policy, apply_limit=False)
+    if limit > 0:
+        filtered = filtered[: max(1, int(limit))]
+    payload: dict[str, Any] = {"items": filtered, "mode": resolved_mode}
+    if session_out:
+        payload["session_id"] = session_out
+    return payload

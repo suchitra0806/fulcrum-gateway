@@ -50,6 +50,21 @@ ax gateway connectors providers
 | `composio` | execute, list_tools, intent_search | 500+ SaaS integrations via Composio API |
 | `http_mcp` | execute, list_tools | Self-hosted MCP servers (GovCloud, air-gapped) |
 
+### Tool search modes
+
+`ax gateway connectors tools search` supports three modes (`--mode`):
+
+| Mode | Behavior |
+|------|----------|
+| `auto` (default) | Uses Composio intent search (`COMPOSIO_SEARCH_TOOLS`) when the provider supports it |
+| `intent` | Always uses Composio intent search; returns a `session_id` when Composio provides one |
+| `catalog` | Keyword search via `GET /tools?query=...` against the Composio catalog |
+
+Intent search is preferred for natural-language use cases ("send an email to my team").
+Catalog search is useful when you already know part of a tool name or want deterministic keyword matching.
+
+Pass `--session-id` on follow-up intent searches to continue a Composio search session.
+
 ## Configuration keys
 
 Set config values with:
