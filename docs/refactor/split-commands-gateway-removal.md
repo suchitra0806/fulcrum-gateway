@@ -9,26 +9,55 @@ The refactor **moves** code out of the monolith (it does not duplicate it) and d
 result, tests that reached into the old `ax_cli.commands.gateway` namespace (direct imports or
 `monkeypatch.setattr(gateway_cmd, "...")` of moved helpers) no longer resolve those names there.
 
-Per the agreed policy we did **not** delete any test. Tests fall into two buckets:
+## Status: the skipped command tests have been ported per-module
 
-1. **Re-pointed (kept, still passing)** — trivially salvageable: the test only needed its
-   import / alias / patch target changed to the new owning module. Coverage preserved.
-2. **Skipped & marked for removal** — coupled to the monolith's internal namespace in a way that
-   can't be cheaply re-pointed (they patch cross-cutting helpers and invoke CLI commands, relying
-   on the monolith resolving every helper in one namespace). These are skipped at module level with
-   `pytestmark = pytest.mark.skip(...)` and are **rewrite-per-module or removal candidates**.
+The five monolith-coupled test files were **rewritten into per-module files and deleted**. Each
+test now patches the module that actually resolves the helper at call time — the routing rule is:
 
-## Skipped files (removal / rewrite candidates) — 643 tests
+> Patch the **command's owning module**. After the split a command resolves every helper it calls
+> in its own module's namespace (defined locally, top-imported, or bottom-imported from a sibling),
+> so `monkeypatch.setattr("ax_cli.commands.gateway_<owner>.<helper>", ...)` is effective.
+> `ax_cli.gateway` (`gateway_core`) was not split, so those patches are unchanged.
 
-| File | Tests skipped | Why obsolete | Suggested replacement |
-|---|---:|---|---|
-| `tests/test_gateway_commands.py` | 287 | Patches `gateway_cmd.{AxClient,_load_gateway_user_client,_mint_agent_pat,active_gateway_pid,...}` then invokes `ax gateway ...` via CliRunner. The patched helpers now live in (and are resolved by) the per-concern modules, not the orchestrator. | Per-module command tests that patch the **owning** module (e.g. `gateway_daemon_cmd`, `gateway_agents`, `gateway_lifecycle`). |
-| `tests/test_gateway_commands_ext.py` | 162 | Same pattern (extended command coverage). | Same. |
-| `tests/test_gateway_commands_ext2.py` | 160 | Same pattern. NOTE: its shared HTTP-handler helpers (`_make_handler`, `_invoke_handler`, `_build_fake_request`, `_json_response`) are still imported by `test_gateway_ui_connectors.py`; `_make_handler` was repointed to `gateway_ui` so those helpers keep working even while this file's own tests are skipped. | Move the shared HTTP-handler helpers into a `tests/` conftest/util, then rewrite the command tests per module. |
-| `tests/test_offline_mode.py` | 25 | Mixes direct calls and `patch.object(gateway_cmd, ...)` spanning **auth + ui + messaging** in single tests; a per-symbol re-point conflicts across tests (same symbol must route to different modules in different tests). ~2–3 of these (`_load_gateway_session_or_exit`, `_load_gateway_user_client` direct-call tests) are individually salvageable against `gateway_auth` if someone wants to rescue them. | Split into per-module offline tests (auth session loading, ui offline replies, messaging fallback-author). |
-| `tests/test_gateway_offline_visibility.py` | 9 | Patches cross-cutting daemon/status symbols (`GatewayDaemon`, `active_gateway_pid`, `daemon_status`, `ui_status`, `list_gateway_approvals`, `_is_offline_mode_active`, ...) then invokes `start`/`status`/`run`. Classic monolith command-behavior coupling. | Per-module tests patching `gateway_daemon_cmd` / `gateway_diagnostics`. |
+### New per-module files (replacing the 5 deleted originals)
 
-To find them: `grep -rn "pytestmark = pytest.mark.skip" tests/ | grep gateway`.
+Shared fixtures/fakes live in **`tests/gateway_cmd_testlib.py`** (each helper's monkeypatches routed
+to the module its callers exercise). The ported tests live in:
+
+| File | Module under test |
+|---|---|
+| `tests/test_gateway_agents_cmds.py` | `gateway_agents` |
+| `tests/test_gateway_auth_cmds.py` | `gateway_auth` |
+| `tests/test_gateway_daemon_cmd_cmds.py` | `gateway_daemon_cmd` |
+| `tests/test_gateway_diagnostics_cmds.py` | `gateway_diagnostics` (status/doctor/approvals) |
+| `tests/test_gateway_lifecycle_cmds.py` | `gateway_lifecycle` |
+| `tests/test_gateway_local_cmds.py` | `gateway_local` |
+| `tests/test_gateway_messaging_cmds.py` | `gateway_messaging` (agents send/inbox) |
+| `tests/test_gateway_runtime_cmd_cmds.py` | `gateway_runtime_cmd` |
+| `tests/test_gateway_session_cmds.py` | `gateway_session` |
+| `tests/test_gateway_spaces_cmds.py` | `gateway_spaces` |
+| `tests/test_gateway_ui_cmds.py` | `gateway_ui` (handler GET/POST/PUT/DELETE, rendering) |
+| `tests/test_gateway_core_cmds.py` | core/process-level (`ax_cli.gateway` only) |
+
+**Deleted originals** (fully ported): `test_gateway_commands.py`, `test_gateway_commands_ext.py`,
+`test_gateway_commands_ext2.py`, `test_offline_mode.py`, `test_gateway_offline_visibility.py`.
+`test_gateway_ui_connectors.py` now imports the shared HTTP-handler helpers from the testlib.
+
+### All command tests ported (no remaining gateway skips)
+
+The two deep cross-module cases that initially needed restructuring were also ported by mocking the
+client seam **in each module that resolves it** (rather than a single namespace):
+
+- `test_local_session_send_hydrates_space_from_database` — DB hydration runs in
+  `gateway_spaces._hydrate_entry_space_from_database` (patch `gateway_spaces._load_gateway_user_client`),
+  the managed send in `gateway_session` (patch `gateway_session._load_managed_agent_client`).
+- `test_gateway_ui_handler_supports_agent_mutations` — the UI handler delegates `/send`+`/test` to
+  `gateway_messaging` and `/doctor` to `gateway_diagnostics`; the agent-client seams are mirrored on
+  those modules in addition to `gateway_agents`.
+
+All 643 previously-skipped command tests are restored. The full suite returns to the original
+`main` baseline of **3597 passed, 7 skipped** (the 7 skips are pre-existing and unrelated to the
+gateway split).
 
 ## Re-pointed files (kept, passing)
 
@@ -66,5 +95,4 @@ import from the new module homes (these are the only non-test importers of the m
 ## No identified dead production code
 
 The split relocated code without removing behavior; no production code path became unreachable.
-The only "no longer needed" surface is the skipped test coverage above. If the skipped command
-tests are rewritten per module, the skip markers (and these files) can be removed.
+After the per-module rewrite, the only remaining "to do" is the 2 skipped tests above.
