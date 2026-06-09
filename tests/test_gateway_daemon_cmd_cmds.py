@@ -34,7 +34,7 @@ def test_gateway_run_refuses_second_live_daemon(monkeypatch, tmp_path):
         }
     )
     gateway_core.write_gateway_pid(4242)
-    monkeypatch.setattr(gateway_core, "_pid_alive", lambda pid: pid == 4242)
+    monkeypatch.setattr("ax_cli.gateway_storage._pid_alive", lambda pid: pid == 4242)
 
     result = runner.invoke(app, ["gateway", "run", "--once"])
 
@@ -56,7 +56,7 @@ def test_gateway_run_refuses_process_table_daemon_when_pid_file_missing(monkeypa
             "username": "madtank",
         }
     )
-    monkeypatch.setattr(gateway_core, "_scan_gateway_process_pids", lambda: [5514])
+    monkeypatch.setattr("ax_cli.gateway_storage._scan_gateway_process_pids", lambda: [5514])
 
     result = runner.invoke(app, ["gateway", "run", "--once"])
 
