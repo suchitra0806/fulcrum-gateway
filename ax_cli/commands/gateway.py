@@ -9665,6 +9665,187 @@ def update_agent(
         err_console.print(f"  timeout = {entry.get('timeout_seconds')}s")
 
 
+@agents_app.command("apply")
+def apply_manifest(
+    manifest_path: str = typer.Argument(..., help="Path to a TOML agent manifest"),
+    diff_only: bool = typer.Option(
+        False,
+        "--diff",
+        "--plan",
+        help="Show the planned changes without applying. Exits 0 if the manifest matches current state; 0 with changes shown if it doesn't.",
+    ),
+    auto_confirm: bool = typer.Option(
+        False,
+        "--auto-confirm",
+        "-y",
+        help="Skip the interactive confirmation prompt. Required in non-TTY contexts (CI, devcontainer init).",
+    ),
+    as_json: bool = JSON_OPTION,
+):
+    """Apply a declarative agent manifest (closes #91).
+
+    The manifest is a TOML file declaring the agent's intended configuration:
+    name, template, space, and any of the same fields ``ax gateway agents
+    add`` / ``update`` accept. Idempotent — running ``apply`` against an
+    already-matching registry is a no-op.
+
+    Common flows:
+
+    \b
+        ax gateway agents apply /workspace/.ax/nova.agent.toml
+        ax gateway agents apply nova.agent.toml --diff
+        ax gateway agents apply nova.agent.toml --auto-confirm
+
+    Field semantics:
+
+    Fields ABSENT from the manifest are left untouched on the existing entry
+    (the same ``_UNSET`` semantics ``ax gateway agents update`` uses). Fields
+    PRESENT in the manifest are applied. An explicit empty string clears the
+    field on update — same as passing an empty ``--system-prompt``.
+    """
+    from ..agent_manifests import (
+        ManifestError,
+        build_register_kwargs,
+        build_update_kwargs,
+        compute_diff,
+        parse_manifest,
+        render_diff,
+    )
+
+    try:
+        manifest = parse_manifest(manifest_path)
+    except ManifestError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    name = str(manifest.get("name") or "").strip()
+    registry = load_gateway_registry()
+    current_entry = find_agent_entry(registry, name)
+    rows = compute_diff(manifest, current_entry)
+
+    if diff_only:
+        if as_json:
+            print_json({"name": name, "creating": current_entry is None, "diff": rows})
+            return
+        creating = current_entry is None
+        verb = "CREATE" if creating else "UPDATE"
+        err_console.print(f"[bold]Planned: {verb} @{name}[/bold]")
+        err_console.print(render_diff(rows))
+        return
+
+    # Resolve the system prompt input once (manifest may declare either
+    # system_prompt or system_prompt_file; never both — enforced in parse_manifest)
+    sys_prompt_value = manifest.get("system_prompt")
+    sys_prompt_file = manifest.get("system_prompt_file")
+    resolved_prompt: str | object
+    if sys_prompt_value is None and sys_prompt_file is None:
+        resolved_prompt = _UNSET
+    else:
+        resolved_prompt = (
+            _resolve_system_prompt_input(
+                system_prompt=sys_prompt_value,
+                system_prompt_file=sys_prompt_file,
+                current=(current_entry or {}).get("system_prompt"),
+            )
+            or ""
+        )
+
+    # Interactive confirmation — skipped via --auto-confirm or when stdout is
+    # piped (apply is operator-fronted; CI / programmatic use must opt in).
+    actionable_rows = [r for r in rows if r["op"] != "noop"]
+    if not actionable_rows:
+        if as_json:
+            print_json({"name": name, "applied": False, "no_changes": True, "agent": current_entry})
+        else:
+            err_console.print(f"[green]@{name}: manifest matches current state; nothing to do.[/green]")
+        return
+
+    if not auto_confirm:
+        import sys as _sys
+
+        if _sys.stdin.isatty() and _sys.stdout.isatty():
+            creating = current_entry is None
+            verb = "create" if creating else "update"
+            err_console.print(f"[bold]About to {verb} @{name}:[/bold]")
+            err_console.print(render_diff(rows))
+            confirmed = typer.confirm("Apply these changes?", default=False)
+            if not confirmed:
+                err_console.print("[yellow]Aborted.[/yellow]")
+                raise typer.Exit(1)
+        else:
+            err_console.print("[red]Refusing to apply non-interactively without --auto-confirm.[/red]")
+            raise typer.Exit(1)
+
+    try:
+        if current_entry is None:
+            kwargs = build_register_kwargs(manifest)
+            if resolved_prompt is not _UNSET:
+                kwargs["system_prompt"] = resolved_prompt
+            entry = _register_managed_agent(**kwargs)
+        else:
+            kwargs = build_update_kwargs(manifest, unset_sentinel=_UNSET)
+            kwargs["system_prompt"] = resolved_prompt
+            entry = _update_managed_agent(name=name, **kwargs)
+    except (LookupError, ValueError) as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    if as_json:
+        print_json({"name": name, "applied": True, "creating": current_entry is None, "agent": entry})
+        return
+    verb = "created" if current_entry is None else "updated"
+    err_console.print(f"[green]@{name}: {verb} from manifest[/green]")
+    err_console.print(f"  type = {entry.get('template_label') or entry.get('runtime_type')}")
+    err_console.print(f"  desired_state = {entry.get('desired_state')}")
+    if entry.get("timeout_seconds"):
+        err_console.print(f"  timeout = {entry.get('timeout_seconds')}s")
+
+
+@agents_app.command("export")
+def export_manifest(
+    name: str = typer.Argument(..., help="Managed agent name"),
+    output: str = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write the manifest to this path. If omitted, prints to stdout.",
+    ),
+):
+    """Export a managed agent's current state as a TOML manifest (closes #91).
+
+    Round-trip with ``ax gateway agents apply``: ``export`` captures the live
+    registry state to a file the operator can commit, edit, and re-apply. Fields
+    that aren't set on the registry entry are omitted from the output rather
+    than written as empty values, so re-applying the exported manifest is a
+    no-op.
+
+    \b
+        ax gateway agents export nova                  # to stdout
+        ax gateway agents export nova -o nova.agent.toml
+    """
+    from ..agent_manifests import entry_to_manifest, serialize_toml
+
+    registry = load_gateway_registry()
+    entry = find_agent_entry(registry, name)
+    if not entry:
+        err_console.print(f"[red]Managed agent not found:[/red] {name}")
+        raise typer.Exit(1)
+
+    manifest = entry_to_manifest(entry)
+    toml_text = serialize_toml(manifest)
+
+    if output:
+        from pathlib import Path as _Path
+
+        out_path = _Path(output).expanduser()
+        out_path.write_text(toml_text, encoding="utf-8")
+        err_console.print(f"[green]Wrote manifest:[/green] {out_path}")
+    else:
+        # Print to stdout so the operator can pipe to a file. Use raw print
+        # (not console.print) so Rich doesn't apply any styling.
+        print(toml_text, end="")
+
+
 @agents_app.command("list")
 def list_agents(
     as_json: bool = JSON_OPTION,
