@@ -329,8 +329,10 @@ def test_sentinel_inference_sdk_venv_status_ready(tmp_path, monkeypatch):
     python.write_text("#!/bin/sh\nexit 0\n")
     python.chmod(0o755)
 
-    with patch("ax_cli.commands.gateway_runtime_cmd.subprocess.run",
-               return_value=subprocess.CompletedProcess([], 0, stdout="", stderr="")):
+    with patch(
+        "ax_cli.commands.gateway_runtime_cmd.subprocess.run",
+        return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+    ):
         status = _sentinel_inference_sdk_venv_status()
 
     assert status["ready"] is True

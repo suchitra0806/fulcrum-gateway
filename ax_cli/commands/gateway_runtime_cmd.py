@@ -383,7 +383,12 @@ def _install_runtime_payload(
                 _log("pip_install_packages", "ok", f"installed {pkg_str}")
             except subprocess.CalledProcessError as exc:
                 _log("pip_install_packages", "error", f"pip install {pkg_str} failed: {_proc_error_msg(exc)}")
-                return {"ready": False, "summary": f"pip install {pkg_str} failed", "target": str(target), "steps": steps}
+                return {
+                    "ready": False,
+                    "summary": f"pip install {pkg_str} failed",
+                    "target": str(target),
+                    "steps": steps,
+                }
 
     # Step: verify named packages are importable from the venv python
     if "pip_verify_packages" in recipe["install_steps"]:
@@ -401,7 +406,12 @@ def _install_runtime_payload(
                     _log("verify", "ok", f"{pkg} importable from {venv_python}")
                 else:
                     _log("verify", "error", f"{pkg} not importable: {result.stderr.strip()[:200]}")
-                    return {"ready": False, "summary": f"{pkg} not importable after install", "target": str(target), "steps": steps}
+                    return {
+                        "ready": False,
+                        "summary": f"{pkg} not importable after install",
+                        "target": str(target),
+                        "steps": steps,
+                    }
             except Exception as exc:  # noqa: BLE001
                 _log("verify", "error", f"verify failed: {exc}")
                 return {"ready": False, "summary": "verify failed", "target": str(target), "steps": steps}
