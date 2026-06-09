@@ -15,7 +15,9 @@ import httpx
 
 from ..constants import CONNECT_TIMEOUT, DEFAULT_COMPOSIO_BASE_URL, READ_TIMEOUT
 from ..errors import ConnectorAuthError, ConnectorProviderError, classify_provider_error
-from .composio_intent import search_tools_intent
+from . import composio_intent
+
+search_tools_intent = composio_intent.search_tools_intent
 
 log = logging.getLogger("connectors.composio")
 
