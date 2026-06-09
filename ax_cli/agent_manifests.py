@@ -76,7 +76,7 @@ FIELD_TO_KWARG: dict[str, str] = {
     "allow_all_users": "allow_all_users",
     "allowed_users": "allowed_users",
     "exec_command": "exec_cmd",
-    "client": "client",
+    "client": "agent_client",
     "connector_ref": "connector_ref",
     "audience": "audience",
 }
