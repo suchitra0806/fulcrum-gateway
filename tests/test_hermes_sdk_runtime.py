@@ -158,3 +158,99 @@ def test_install_secure_tools_tolerates_callback_error(monkeypatch, tmp_path, ca
     captured = capsys.readouterr()
     assert "WARNING" in captured.err
     assert "tool security setup failed" in captured.err
+
+
+# ── AX_HERMES_STRICT_SECURITY=1: opt-in fail-closed mode (follow-up to #151) ──
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "TRUE", "Yes", " 1 ", "\ttrue\n"])
+def test_strict_security_enabled_recognizes_truthy_values(monkeypatch, value):
+    """Truthy parsing matches the documented variants and tolerates
+    whitespace/case so operators don't get surprised by AX_HERMES_STRICT_SECURITY=Yes
+    being silently treated as off."""
+    monkeypatch.setenv("AX_HERMES_STRICT_SECURITY", value)
+    assert hermes_sdk._strict_security_enabled() is True
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no", "off", "FALSE", "nope"])
+def test_strict_security_enabled_rejects_falsy_values(monkeypatch, value):
+    """Anything that isn't 1/true/yes leaves the helper in its loud-but-functional
+    default — explicitly including ``0`` and ``false`` so an operator setting
+    ``AX_HERMES_STRICT_SECURITY=0`` to opt OUT keeps the existing PR #191 behavior."""
+    monkeypatch.setenv("AX_HERMES_STRICT_SECURITY", value)
+    assert hermes_sdk._strict_security_enabled() is False
+
+
+def test_strict_security_disabled_when_env_unset(monkeypatch):
+    """Default (env var not present) is lenient — preserves the PR #191
+    backward-compatible posture for deployments that don't opt in."""
+    monkeypatch.delenv("AX_HERMES_STRICT_SECURITY", raising=False)
+    assert hermes_sdk._strict_security_enabled() is False
+
+
+def test_install_secure_tools_strict_mode_reraises_on_failure(monkeypatch, tmp_path, capsys, caplog):
+    """Strict mode: when AX_HERMES_STRICT_SECURITY=1 AND _secure_hermes_tools
+    raises, the helper must fire all three loud-degradation channels FIRST
+    (so operators see WHAT failed) and then raise HermesSecuritySetupError
+    with the original exception preserved as __cause__ (so the caller can
+    include the underlying failure in its operator-facing error)."""
+    monkeypatch.setenv("AX_HERMES_STRICT_SECURITY", "1")
+
+    original = ImportError("No module named 'tools'")
+
+    def _boom(workdir):
+        raise original
+
+    monkeypatch.setattr(hermes_sdk, "_secure_hermes_tools", _boom)
+    cb = _RecordingCallback()
+
+    with caplog.at_level(logging.ERROR, logger="runtime.hermes_sdk"):
+        with pytest.raises(hermes_sdk.HermesSecuritySetupError) as excinfo:
+            hermes_sdk._install_secure_tools(str(tmp_path), cb=cb)
+
+    # __cause__ chain preserves the underlying ImportError so the caller can
+    # surface a specific operator-facing error rather than a generic refusal.
+    assert excinfo.value.__cause__ is original
+
+    # All three loud-degradation channels fire BEFORE the raise so the failure
+    # is visible whether or not the caller catches the exception. This is the
+    # belt-and-suspenders posture: strict mode adds a refusal, it doesn't
+    # replace the loud signal.
+    assert any(
+        "tool security setup failed" in record.message and record.levelno == logging.ERROR for record in caplog.records
+    )
+    assert len(cb.status_calls) == 1
+    assert "security_wrapper_degraded" in cb.status_calls[0]
+    captured = capsys.readouterr()
+    assert "WARNING" in captured.err
+    assert "tool security setup failed" in captured.err
+
+
+def test_install_secure_tools_lenient_when_env_explicitly_unset(monkeypatch, tmp_path):
+    """Lenient mode is the default: when AX_HERMES_STRICT_SECURITY is unset
+    AND _secure_hermes_tools raises, the helper returns False without raising
+    (preserves the PR #191 loud-but-functional posture, matches PR #121)."""
+    monkeypatch.delenv("AX_HERMES_STRICT_SECURITY", raising=False)
+
+    def _boom(workdir):
+        raise ImportError("tools package missing")
+
+    monkeypatch.setattr(hermes_sdk, "_secure_hermes_tools", _boom)
+
+    result = hermes_sdk._install_secure_tools(str(tmp_path), cb=None)
+
+    assert result is False  # no raise
+
+
+def test_install_secure_tools_strict_mode_returns_true_on_success(monkeypatch, tmp_path):
+    """Strict mode AND wrap succeeds: helper returns True normally, no
+    spurious raise. The strict-mode branch must be gated on the failure
+    path so the happy path is identical to lenient mode."""
+    monkeypatch.setenv("AX_HERMES_STRICT_SECURITY", "1")
+    called = []
+    monkeypatch.setattr(hermes_sdk, "_secure_hermes_tools", lambda workdir: called.append(workdir))
+
+    result = hermes_sdk._install_secure_tools(str(tmp_path), cb=None)
+
+    assert result is True
+    assert called == [str(tmp_path)]
