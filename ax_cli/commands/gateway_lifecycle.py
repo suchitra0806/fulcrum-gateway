@@ -411,7 +411,7 @@ def stop_agent(name: str = typer.Argument(..., help="Managed agent name")):
 
 @agents_app.command("restart")
 def restart_agent(name: str = typer.Argument(..., help="Managed agent name")):
-    """Stop then start a managed agent (convenience wrapper for stop + start)."""
+    """Signal the daemon to recycle a running managed agent's process."""
     if active_gateway_pid() is None:
         err_console.print(
             f"[red]Gateway daemon is stopped — `agents restart {name}` would only "
@@ -419,14 +419,22 @@ def restart_agent(name: str = typer.Argument(..., help="Managed agent name")):
         )
         err_console.print("[yellow]Start it with `ax gateway start`, then retry.[/yellow]")
         raise typer.Exit(1)
-    try:
-        _set_managed_agent_desired_state(name, "stopped")
-    except LookupError:
+    registry = load_gateway_registry()
+    entry = find_agent_entry(registry, name)
+    if not entry:
         err_console.print(f"[red]Managed agent not found:[/red] {name}")
         raise typer.Exit(1)
-    err_console.print(f"[yellow]Desired state set to stopped:[/yellow] @{name}")
-    _set_managed_agent_desired_state(name, "running")
-    err_console.print(f"[green]Desired state set to running:[/green] @{name}")
+    entry["desired_state"] = "running"
+    entry["restart_requested_at"] = datetime.now(timezone.utc).isoformat()
+    entry["last_runtime_error_at"] = None
+    entry["consecutive_setup_errors"] = 0
+    entry["last_setup_error_signature"] = None
+    entry["setup_disabled"] = False
+    entry["setup_disabled_at"] = None
+    entry["setup_disabled_reason"] = None
+    save_gateway_registry(registry)
+    record_gateway_activity("managed_agent_restart_requested", entry=entry)
+    err_console.print(f"[green]Restart requested:[/green] @{name} (daemon will recycle the process on next reconcile)")
 
 
 # Deferred cross-module imports (bottom-of-file to avoid import cycles; bound

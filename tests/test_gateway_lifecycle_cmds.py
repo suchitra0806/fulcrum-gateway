@@ -441,7 +441,7 @@ def test_agents_restart_refuses_when_daemon_stopped(monkeypatch, tmp_path):
     assert entry["desired_state"] == "running"
 
 
-def test_agents_restart_stops_then_starts(monkeypatch, tmp_path):
+def test_agents_restart_writes_nonce_and_signals_daemon(monkeypatch, tmp_path):
     _isolate_gateway_paths(monkeypatch, tmp_path)
     monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
 
@@ -463,11 +463,13 @@ def test_agents_restart_stops_then_starts(monkeypatch, tmp_path):
     result = runner.invoke(app, ["gateway", "agents", "restart", "echo-demo"])
 
     assert result.exit_code == 0, result.output
-    assert "Desired state set to stopped" in result.output
-    assert "Desired state set to running" in result.output
+    assert "Restart requested" in result.output
     reloaded = gateway_core.load_gateway_registry()
     entry = next(a for a in reloaded["agents"] if a["name"] == "echo-demo")
     assert entry["desired_state"] == "running"
+    assert entry.get("restart_requested_at"), (
+        "restart_requested_at nonce must be written so the daemon reconciler forces a respawn"
+    )
 
 
 def test_agents_restart_unknown_agent(monkeypatch, tmp_path):
