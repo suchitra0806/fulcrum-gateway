@@ -407,3 +407,78 @@ class TestAgentsAttachTextRendering:
         output = _strip(result.output)
         assert "channel ready" in output.lower()
         assert "bot1" in output
+
+
+# ── agents restart ────────────────────────────────────────────────────────
+
+
+def test_agents_restart_refuses_when_daemon_stopped(monkeypatch, tmp_path):
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+
+    gateway_core.save_gateway_session({"token": "axp_u_test", "base_url": "https://paxai.app", "space_id": "space-1"})
+    registry = {
+        "agents": [
+            {
+                "name": "echo-demo",
+                "agent_id": "agent-echo",
+                "template_id": "echo_test",
+                "runtime_type": "echo",
+                "desired_state": "running",
+            }
+        ],
+    }
+    gateway_core.save_gateway_registry(registry)
+    monkeypatch.setattr(_gw_lifecycle, "active_gateway_pid", lambda: None)
+
+    result = runner.invoke(app, ["gateway", "agents", "restart", "echo-demo"])
+
+    assert result.exit_code == 1, result.output
+    assert "Gateway daemon is stopped" in result.output
+    assert "ax gateway start" in result.output
+    reloaded = gateway_core.load_gateway_registry()
+    entry = next(a for a in reloaded["agents"] if a["name"] == "echo-demo")
+    assert entry["desired_state"] == "running"
+
+
+def test_agents_restart_stops_then_starts(monkeypatch, tmp_path):
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+
+    gateway_core.save_gateway_session({"token": "axp_u_test", "base_url": "https://paxai.app", "space_id": "space-1"})
+    registry = {
+        "agents": [
+            {
+                "name": "echo-demo",
+                "agent_id": "agent-echo",
+                "template_id": "echo_test",
+                "runtime_type": "echo",
+                "desired_state": "running",
+            }
+        ],
+    }
+    gateway_core.save_gateway_registry(registry)
+    monkeypatch.setattr(_gw_lifecycle, "active_gateway_pid", lambda: 12345)
+
+    result = runner.invoke(app, ["gateway", "agents", "restart", "echo-demo"])
+
+    assert result.exit_code == 0, result.output
+    assert "Desired state set to stopped" in result.output
+    assert "Desired state set to running" in result.output
+    reloaded = gateway_core.load_gateway_registry()
+    entry = next(a for a in reloaded["agents"] if a["name"] == "echo-demo")
+    assert entry["desired_state"] == "running"
+
+
+def test_agents_restart_unknown_agent(monkeypatch, tmp_path):
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+
+    gateway_core.save_gateway_session({"token": "axp_u_test", "base_url": "https://paxai.app", "space_id": "space-1"})
+    gateway_core.save_gateway_registry({"agents": []})
+    monkeypatch.setattr(_gw_lifecycle, "active_gateway_pid", lambda: 12345)
+
+    result = runner.invoke(app, ["gateway", "agents", "restart", "no-such-agent"])
+
+    assert result.exit_code == 1, result.output
+    assert "Managed agent not found" in result.output

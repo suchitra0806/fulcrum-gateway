@@ -409,5 +409,25 @@ def stop_agent(name: str = typer.Argument(..., help="Managed agent name")):
     err_console.print(f"[green]Desired state set to stopped:[/green] @{name}")
 
 
+@agents_app.command("restart")
+def restart_agent(name: str = typer.Argument(..., help="Managed agent name")):
+    """Stop then start a managed agent (convenience wrapper for stop + start)."""
+    if active_gateway_pid() is None:
+        err_console.print(
+            f"[red]Gateway daemon is stopped — `agents restart {name}` would only "
+            "set desired_state, no supervisor would bring the agent up.[/red]"
+        )
+        err_console.print("[yellow]Start it with `ax gateway start`, then retry.[/yellow]")
+        raise typer.Exit(1)
+    try:
+        _set_managed_agent_desired_state(name, "stopped")
+    except LookupError:
+        err_console.print(f"[red]Managed agent not found:[/red] {name}")
+        raise typer.Exit(1)
+    err_console.print(f"[yellow]Desired state set to stopped:[/yellow] @{name}")
+    _set_managed_agent_desired_state(name, "running")
+    err_console.print(f"[green]Desired state set to running:[/green] @{name}")
+
+
 # Deferred cross-module imports (bottom-of-file to avoid import cycles; bound
 # into module globals after defs, resolved at call time).
