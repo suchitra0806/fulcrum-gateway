@@ -507,7 +507,7 @@ def _agent_templates_payload() -> dict:
     return {"templates": templates, "count": len(templates)}
 
 
-_SENTINEL_INFERENCE_SDK_SUPPORTED_CLIENTS = {"openai"}
+_SENTINEL_INFERENCE_SDK_SUPPORTED_CLIENTS = {"openai_sdk"}
 
 
 @runtime_app.command("install")
@@ -517,7 +517,7 @@ def runtime_install(
     client: str = typer.Option(
         None,
         "--client",
-        help="Client library to install. Required for sentinel_inference_sdk. Supported: openai.",
+        help="Client library to install. Required for sentinel_inference_sdk. Supported: openai_sdk.",
     ),
     as_json: bool = JSON_OPTION,
 ):
@@ -529,7 +529,7 @@ def runtime_install(
       ~/hermes-agent and installs into a venv at ~/hermes-agent/.venv.
     - ``sentinel_inference_sdk`` — creates a venv at ~/hermes-agent/.venv
       (or reuses an existing one) and installs the specified client package.
-      Requires ``--client``. Only ``openai`` is supported today; other clients
+      Requires ``--client``. Only ``openai_sdk`` is supported today; other clients
       are unsupported and must be added via a separate PR.
       Prints the resolved ``python_path`` so you can wire it to an agent with
       ``ax gateway agents update <name> --python <path>``.
@@ -540,7 +540,7 @@ def runtime_install(
     Requires an active gateway operator session — run ``ax gateway login`` first.
 
         ax gateway runtime install hermes
-        ax gateway runtime install sentinel_inference_sdk --client openai
+        ax gateway runtime install sentinel_inference_sdk --client openai_sdk
         ax gateway runtime install hermes --target /opt/work/hermes-agent
     """
     operator_session = load_gateway_session()
@@ -552,8 +552,8 @@ def runtime_install(
         if not client:
             err_console.print(
                 "[red]--client is required for sentinel_inference_sdk.[/red] "
-                "Supported clients: openai. "
-                "Example: ax gateway runtime install sentinel_inference_sdk --client openai"
+                "Supported clients: openai_sdk. "
+                "Example: ax gateway runtime install sentinel_inference_sdk --client openai_sdk"
             )
             raise typer.Exit(1)
         if client not in _SENTINEL_INFERENCE_SDK_SUPPORTED_CLIENTS:

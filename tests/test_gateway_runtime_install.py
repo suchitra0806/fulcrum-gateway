@@ -253,7 +253,7 @@ def test_cli_sentinel_install_requires_client(monkeypatch):
     result = runner.invoke(app, ["gateway", "runtime", "install", "sentinel_inference_sdk"])
     assert result.exit_code != 0
     assert "--client" in result.output
-    assert "openai" in result.output
+    assert "openai_sdk" in result.output
 
 
 def test_cli_sentinel_install_rejects_unsupported_client(monkeypatch):
@@ -262,7 +262,7 @@ def test_cli_sentinel_install_rejects_unsupported_client(monkeypatch):
     result = runner.invoke(app, ["gateway", "runtime", "install", "sentinel_inference_sdk", "--client", "foo"])
     assert result.exit_code != 0
     assert "Unsupported client" in result.output
-    assert "openai" in result.output
+    assert "openai_sdk" in result.output
 
 
 # ── sentinel_inference_sdk ────────────────────────────────────────────────
