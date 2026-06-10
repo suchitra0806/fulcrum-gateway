@@ -391,3 +391,35 @@ def test_every_field_in_field_map_is_known():
         if field in register_only:
             continue
         assert field in inverse_keys, f"FIELD_TO_KWARG has {field} but ENTRY_TO_MANIFEST does not"
+
+
+# ── provider field ────────────────────────────────────────────────────────
+
+
+def test_provider_field_round_trips_through_manifest(tmp_path):
+    """provider parses, maps to kwargs, exports, and serializes correctly."""
+    p = tmp_path / "codex-coder.toml"
+    p.write_text(
+        'name = "codex-coder"\ntemplate = "hermes"\nprovider = "openai-codex"\n',
+        encoding="utf-8",
+    )
+    m = parse_manifest(str(p))
+    assert m["provider"] == "openai-codex"
+
+    # build_register_kwargs passes provider through
+    kwargs = build_register_kwargs(m)
+    assert kwargs["provider"] == "openai-codex"
+
+    # build_update_kwargs includes provider
+    sentinel = object()
+    update_kwargs = build_update_kwargs(m, unset_sentinel=sentinel)
+    assert update_kwargs["provider"] == "openai-codex"
+
+    # entry_to_manifest exports provider from a registry entry
+    entry = {"name": "codex-coder", "template_id": "hermes", "provider": "openai-codex"}
+    exported = entry_to_manifest(entry)
+    assert exported["provider"] == "openai-codex"
+
+    # serialize_toml emits the provider line
+    toml_text = serialize_toml(exported)
+    assert 'provider = "openai-codex"' in toml_text
