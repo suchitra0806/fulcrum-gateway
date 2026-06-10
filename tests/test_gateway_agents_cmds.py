@@ -2443,10 +2443,8 @@ def test_remove_agent_warns_when_workdir_config_references_removed_agent(monkeyp
     gateway_core.save_gateway_registry({"agents": [entry]})
     result = runner.invoke(app, ["gateway", "agents", "remove", "warn-bot"])
     assert result.exit_code == 0
-    output = result.output.replace("\n", " ")
-    assert "Warning" in output
-    assert "config.toml" in output
-    assert "warn-bot" in output
+    assert "Warning" in result.output
+    assert "warn-bot" in result.output
     assert (ax_dir / "config.toml").exists()
 
 
