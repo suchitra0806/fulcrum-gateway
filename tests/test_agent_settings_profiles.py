@@ -157,6 +157,19 @@ def test_resolve_missing_profile_raises(tmp_path, monkeypatch):
         resolve(["missing"], "claude_cli")
 
 
+def test_resolve_raises_clear_error_for_unmergeable_list(tmp_path, monkeypatch):
+    """A profile fragment with a list-of-dicts (e.g. ``hooks``) can't be
+    list-unioned via set() — raise a clear ValueError naming the offending
+    key instead of letting an opaque TypeError escape."""
+    monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", tmp_path)
+    (tmp_path / "claude_cli").mkdir()
+    (tmp_path / "claude_cli" / "base.json").write_text(json.dumps({"hooks": [{"matcher": "a"}]}))
+    (tmp_path / "claude_cli" / "extra.json").write_text(json.dumps({"hooks": [{"matcher": "b"}]}))
+
+    with pytest.raises(ValueError, match="hooks"):
+        resolve(["base", "extra"], "claude_cli")
+
+
 def test_resolve_multiple_profiles_merged(tmp_path, monkeypatch):
     monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", tmp_path)
     (tmp_path / "claude_cli").mkdir()

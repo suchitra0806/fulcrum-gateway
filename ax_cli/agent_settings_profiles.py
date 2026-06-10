@@ -127,14 +127,28 @@ def _load_profile_fragment(client: str, profile_name: str) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
-def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> None:
-    """Merge *overlay* into *base* in-place: lists union, scalars last-wins."""
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any], path: tuple[str, ...] = ()) -> None:
+    """Merge *overlay* into *base* in-place: lists union, scalars last-wins.
+
+    List union requires hashable items (`set(base[key])`). Today's fragments
+    are all string lists, so this holds — but a fragment that introduces a
+    list of dicts (e.g. ``hooks``) would otherwise raise an opaque TypeError.
+    Raise a clear ValueError instead, naming the offending key, so it's
+    caught by the CLI's existing ValueError handling.
+    """
     for key, val in overlay.items():
+        sub_path = path + (key,)
         if key in base:
             if isinstance(base[key], dict) and isinstance(val, dict):
-                _deep_merge(base[key], val)
+                _deep_merge(base[key], val, sub_path)
             elif isinstance(base[key], list) and isinstance(val, list):
-                existing = set(base[key])
+                try:
+                    existing = set(base[key])
+                except TypeError as exc:
+                    label = ".".join(sub_path)
+                    raise ValueError(
+                        f"Cannot merge list at '{label}': items must be hashable (got non-hashable items, e.g. dicts)"
+                    ) from exc
                 base[key] = base[key] + [item for item in val if item not in existing]
             else:
                 base[key] = val
