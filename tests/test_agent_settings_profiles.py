@@ -41,8 +41,14 @@ def test_list_all_returns_all_clients():
     result = list_all()
     assert "claude_cli" in result
     assert "base" in result["claude_cli"]
-    assert "echo" in result
-    assert "test" in result["echo"]
+
+
+def test_list_all_excludes_unsupported_clients():
+    """The `echo/test.json` fixture ships in the package tree for tests, but
+    `echo` isn't in SUPPORTED_CLIENTS — it can never be applied, so it
+    shouldn't show up in `ax agents profiles list`."""
+    result = list_all()
+    assert "echo" not in result
 
 
 def test_list_all_empty_when_no_profiles_dir(tmp_path, monkeypatch):
@@ -261,6 +267,34 @@ def test_apply_reset_replaces_existing(tmp_path, monkeypatch):
     assert "should-be-gone" not in result["permissions"]["allow"]
 
 
+def test_apply_raises_on_unparseable_existing_settings(tmp_path, monkeypatch):
+    """An existing-but-invalid settings.local.json must not be silently
+    treated as empty and overwritten — fail closed instead."""
+    profiles_root = _base_profile_dir(tmp_path)
+    monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", profiles_root)
+    workdir = tmp_path / "agent"
+    (workdir / ".claude").mkdir(parents=True)
+    settings_path = workdir / ".claude" / "settings.local.json"
+    settings_path.write_text("{not valid json")
+
+    with pytest.raises(ValueError, match="settings.local.json"):
+        apply(["base"], "claude_cli", workdir)
+
+    # File must be untouched — no silent overwrite.
+    assert settings_path.read_text() == "{not valid json"
+
+
+def test_diff_raises_on_unparseable_existing_settings(tmp_path, monkeypatch):
+    profiles_root = _base_profile_dir(tmp_path)
+    monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", profiles_root)
+    workdir = tmp_path / "agent"
+    (workdir / ".claude").mkdir(parents=True)
+    (workdir / ".claude" / "settings.local.json").write_text("{not valid json")
+
+    with pytest.raises(ValueError, match="settings.local.json"):
+        diff(["base"], "claude_cli", workdir)
+
+
 def test_apply_records_ax_profiles_key(tmp_path, monkeypatch):
     profiles_root = _base_profile_dir(tmp_path)
     monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", profiles_root)
@@ -318,10 +352,26 @@ def test_diff_shows_removals_on_reset(tmp_path, monkeypatch):
     workdir.mkdir()
     _write_settings(workdir, {"permissions": {"allow": ["old-permission"]}})
 
-    result = diff(["base"], "claude_cli", workdir)
+    result = diff(["base"], "claude_cli", workdir, reset=True)
 
     assert "permissions.allow: old-permission" in result["remove"]
     assert "permissions.allow: mcp__ax-channel__*" in result["add"]
+
+
+def test_diff_default_does_not_show_removals(tmp_path, monkeypatch):
+    """Without --reset, apply() merges (nothing is removed), so the default
+    diff must not claim existing entries will be removed."""
+    profiles_root = _base_profile_dir(tmp_path)
+    monkeypatch.setattr("ax_cli.agent_settings_profiles._PROFILES_DIR", profiles_root)
+    workdir = tmp_path / "agent"
+    workdir.mkdir()
+    _write_settings(workdir, {"permissions": {"allow": ["old-permission"]}})
+
+    result = diff(["base"], "claude_cli", workdir)
+
+    assert result["remove"] == []
+    assert "permissions.allow: mcp__ax-channel__*" in result["add"]
+    assert "permissions.allow: old-permission" not in result["add"]
 
 
 def test_diff_no_change_when_already_applied(tmp_path, monkeypatch):

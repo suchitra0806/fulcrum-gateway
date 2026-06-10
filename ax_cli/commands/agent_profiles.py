@@ -63,7 +63,7 @@ def _resolve_client(agent_name: str) -> str:
 
 @profiles_app.command("list")
 def profiles_list(
-    client: Optional[str] = typer.Option(None, "--client", help="Filter to a specific client (e.g. claude)"),
+    client: Optional[str] = typer.Option(None, "--client", help="Filter to a specific client (e.g. claude_cli)"),
     as_json: bool = JSON_OPTION,
 ):
     """List available profiles, optionally filtered by client."""
@@ -89,9 +89,15 @@ def profiles_diff(
     agent_name: str = typer.Argument(..., help="Agent name (as registered with Gateway)"),
     profile: Optional[list[str]] = typer.Option(None, "--profile", "-p", help="Profile(s) to diff against"),
     workdir: Optional[str] = typer.Option(None, "--workdir", help="Agent workdir (overrides Gateway registry lookup)"),
+    reset: bool = typer.Option(False, "--reset", help="Preview replacing existing settings instead of merging"),
     as_json: bool = JSON_OPTION,
 ):
-    """Show what applying profiles would change in the agent's settings.local.json."""
+    """Show what applying profiles would change in the agent's settings.local.json.
+
+    By default, mirrors `apply`'s merge semantics: ``remove`` is empty unless
+    a profile fragment removes a profile-managed key. Use --reset to preview
+    `apply --reset` instead, which replaces the file's current content.
+    """
     if not profile:
         err_console.print("[red]Error:[/red] At least one --profile is required.")
         raise typer.Exit(1)
@@ -99,7 +105,7 @@ def profiles_diff(
     resolved_workdir = _resolve_workdir(agent_name, workdir)
     resolved_client = _resolve_client(agent_name)
     try:
-        result = diff(list(profile), resolved_client, resolved_workdir)
+        result = diff(list(profile), resolved_client, resolved_workdir, reset=reset)
     except ValueError as exc:
         err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1)

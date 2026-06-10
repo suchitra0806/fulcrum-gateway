@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -64,13 +65,19 @@ def _settings_path(workdir: str | Path, client: str) -> Path:
 
 
 def _read_settings(workdir: str | Path, client: str) -> dict[str, Any]:
+    """Read the client's settings file, or {} if it doesn't exist.
+
+    Raises ValueError if the file exists but isn't valid JSON — callers
+    (notably `apply`) must not silently treat an unreadable file as empty,
+    since merging into {} and writing back would discard its content.
+    """
     path = _settings_path(workdir, client)
     if not path.exists():
         return {}
     try:
         return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return {}
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError(f"Could not read existing settings file {path}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -91,10 +98,19 @@ def list_available(client: str) -> list[str]:
 
 
 def list_all() -> dict[str, list[str]]:
-    """Return all profiles grouped by client: {client: [profile, ...]}."""
+    """Return all profiles grouped by client: {client: [profile, ...]}.
+
+    Only includes clients in SUPPORTED_CLIENTS — fixtures for unsupported
+    clients (e.g. ``echo``, used in tests) ship in the package tree but
+    can never be applied, so they're excluded here.
+    """
     if not _PROFILES_DIR.is_dir():
         return {}
-    return {d.name: list_available(d.name) for d in sorted(_PROFILES_DIR.iterdir()) if d.is_dir()}
+    return {
+        d.name: list_available(d.name)
+        for d in sorted(_PROFILES_DIR.iterdir())
+        if d.is_dir() and d.name in SUPPORTED_CLIENTS
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +119,8 @@ def list_all() -> dict[str, list[str]]:
 
 
 def _load_profile_fragment(client: str, profile_name: str) -> dict[str, Any]:
+    if "/" in profile_name or "\\" in profile_name or profile_name in (".", ".."):
+        raise ValueError(f"Invalid profile name '{profile_name}'")
     path = _profiles_dir(client) / f"{profile_name}.json"
     if not path.exists():
         raise FileNotFoundError(f"Profile '{profile_name}' not found for client '{client}' (looked in {path})")
@@ -190,8 +208,14 @@ def _list_diff(
     return add, remove
 
 
-def diff(profiles: list[str], client: str, workdir: str | Path) -> dict[str, Any]:
+def diff(profiles: list[str], client: str, workdir: str | Path, *, reset: bool = False) -> dict[str, Any]:
     """Return a dict describing the difference between current settings and *profiles*.
+
+    Mirrors `apply()`'s semantics for *reset*: by default `apply` merges into
+    existing settings (nothing is removed), so the default diff target is
+    `merge(current, resolved)` too — `remove` will be empty unless `--reset`
+    is also used. With *reset*, the target is the resolved profile content
+    alone, matching `apply(..., reset=True)`'s replace semantics.
 
     Raises ValueError for unsupported clients.
 
@@ -206,7 +230,12 @@ def diff(profiles: list[str], client: str, workdir: str | Path) -> dict[str, Any
 
     current = _read_settings(workdir, client)
     current_profiles: list[str] = current.get(_AX_PROFILES_KEY, [])
-    target = resolve(profiles, client)
+    resolved = resolve(profiles, client)
+    if reset:
+        target = resolved
+    else:
+        target = copy.deepcopy({k: v for k, v in current.items() if k != _AX_PROFILES_KEY})
+        _deep_merge(target, resolved)
     add, remove = _list_diff(current, target)
 
     return {
@@ -261,7 +290,7 @@ def agent_info_from_registry(agent_name: str) -> dict[str, str | None] | None:
       ``runtime_type``— the raw Gateway runtime_type (e.g. ``claude_code_channel``),
                         or None if unset.
       ``client``      — the profile client derived from ``runtime_type`` via
-                        `_gateway_runtime_to_client` (e.g. ``claude``), or None
+                        `_gateway_runtime_to_client` (e.g. ``claude_cli``), or None
                         when that gateway runtime has no profile support yet.
     """
     try:
