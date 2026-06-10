@@ -2313,11 +2313,28 @@ def recover_agents(
 def remove_agent(name: str = typer.Argument(..., help="Managed agent name")):
     """Remove a managed agent from local Gateway control."""
     try:
-        _remove_managed_agent(name)
+        entry = _remove_managed_agent(name)
     except LookupError:
         err_console.print(f"[red]Managed agent not found:[/red] {name}")
         raise typer.Exit(1)
     err_console.print(f"[green]Removed managed agent:[/green] @{name}")
+    workdir = str(entry.get("workdir") or "").strip()
+    if workdir:
+        config_path = Path(workdir) / ".ax" / "config.toml"
+        if config_path.exists():
+            try:
+                try:
+                    import tomllib
+                except ImportError:
+                    import tomli as tomllib  # type: ignore[no-redef]
+                cfg = tomllib.loads(config_path.read_text())
+                if str(cfg.get("agent_name") or "").strip() == name:
+                    err_console.print(
+                        f"[yellow]Warning:[/yellow] {config_path} still references @{name}. "
+                        "Update or remove it to avoid errors when running commands from that directory."
+                    )
+            except Exception:
+                pass  # best-effort — never block the remove on a config read failure
 
 
 # Deferred cross-module imports (bottom-of-file to avoid import cycles; bound
