@@ -6,6 +6,7 @@ Extracted from ``ax_cli/gateway.py`` (issue #28 Phase 2).
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -956,6 +957,35 @@ def clear_gateway_pid(pid: int | None = None) -> None:
     pid_path().unlink()
 
 
+def _read_last_chain_state(path: Path) -> tuple[int, str | None]:
+    """Tail the activity log for (last_seq, last_record_hash).
+
+    Returns (0, None) when the file is missing, empty, or the trailing line has
+    no `seq` field (pre-feature record — the chain starts fresh on next write).
+    """
+    if not path.exists():
+        return (0, None)
+    last_line: str | None = None
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for raw in handle:
+                stripped = raw.rstrip("\n")
+                if stripped:
+                    last_line = stripped
+    except OSError:
+        return (0, None)
+    if not last_line:
+        return (0, None)
+    try:
+        rec = json.loads(last_line)
+    except json.JSONDecodeError:
+        return (0, None)
+    seq_val = rec.get("seq") if isinstance(rec, dict) else None
+    if not isinstance(seq_val, int) or seq_val <= 0:
+        return (0, None)
+    return (seq_val, hashlib.sha256(last_line.encode("utf-8")).hexdigest())
+
+
 def record_gateway_activity(
     event: str,
     *,
@@ -993,6 +1023,9 @@ def record_gateway_activity(
     path = activity_log_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with _ACTIVITY_LOCK:
+        last_seq, last_hash = _read_last_chain_state(path)
+        record["seq"] = last_seq + 1
+        record["prev_hash"] = last_hash
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
         path.chmod(0o600)
