@@ -2277,10 +2277,12 @@ def _write_json_response(handler: BaseHTTPRequestHandler, payload: dict, *, stat
 
 
 def _write_html_response(handler: BaseHTTPRequestHandler, payload: str) -> None:
+    import re
+
     nonce = _generate_nonce()
-    payload = payload.replace("<script>", f'<script nonce="{nonce}">')
-    payload = payload.replace("<script ", f'<script nonce="{nonce}" ')
-    payload = payload.replace("<style>", f'<style nonce="{nonce}">')
+    # Inject nonce into <script> and <style> tags exactly once, without
+    # double-applying when a tag already has other attributes.
+    payload = re.sub(r"<(script|style)(?=[ >])", lambda m: f'<{m.group(1)} nonce="{nonce}"', payload)
     body = payload.encode("utf-8")
     try:
         handler.send_response(HTTPStatus.OK.value)
