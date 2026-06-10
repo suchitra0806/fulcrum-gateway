@@ -1308,6 +1308,44 @@ def test_recover_managed_agents_from_evidence_restores_lost_row(monkeypatch, tmp
     assert events[0].get("agent_name") == "ghost-agent"
 
 
+def test_recover_managed_agents_without_event_token_file(monkeypatch, tmp_path):
+    """#170: the event-side ``token_file`` is dead data — recovery derives the
+    token path from the agent name. A managed_agent_added event that omits
+    ``token_file`` entirely (as written after #170) still recovers correctly.
+    """
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    gateway_core.save_gateway_registry({"agents": []})
+
+    token_dir = gateway_core.agent_dir("ghost-agent")
+    token_dir.mkdir(parents=True, exist_ok=True)
+    (token_dir / "token").write_text("axp_a_ghost.evidence", encoding="utf-8")
+
+    # No token_file kwarg — mirrors managed_agent_added events written post-#170.
+    gateway_core.record_gateway_activity(
+        "managed_agent_added",
+        agent_name="ghost-agent",
+        agent_id="agent-ghost-id",
+        asset_id="agent-ghost-id",
+        install_id="install-ghost",
+        gateway_id="gateway-host",
+        runtime_type="claude_code_channel",
+        transport="gateway",
+        space_id="49afd277-78d2-4a32-9858-3594cda684af",
+        credential_source="gateway",
+    )
+
+    payload = _gw_agents._recover_managed_agents_from_evidence(["ghost-agent"])
+
+    assert payload["count"] == 1
+    stored = gateway_core.load_gateway_registry()
+    row = next((a for a in stored["agents"] if a.get("name") == "ghost-agent"), None)
+    assert row is not None, "recovered row missing from registry"
+    assert row["agent_id"] == "agent-ghost-id"
+    # Token path is name-derived, not sourced from the (now-absent) event field.
+    assert row["token_file"] == "agents/ghost-agent/token"
+    assert gateway_core.resolve_agent_token_file(row) == token_dir / "token"
+
+
 def test_recover_managed_agents_refuses_when_token_missing(monkeypatch, tmp_path):
     """Recovery requires BOTH the activity event AND the token file.
     Missing token → no recovery (we don't fabricate credentials).
