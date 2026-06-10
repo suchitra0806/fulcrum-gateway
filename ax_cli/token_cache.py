@@ -178,6 +178,12 @@ class TokenExchanger:
     ) -> str:
         """Get a valid JWT, using cache or exchanging if needed."""
         if not self.pat_key_id:
+            if self.pat.startswith("axp_a_offline_"):
+                raise ValueError(
+                    "Offline-mode agent token (axp_a_offline_*) cannot be exchanged for a "
+                    "live platform token. It is only usable under AX_OFFLINE=1; re-register "
+                    "the agent to obtain a real credential."
+                )
             raise ValueError("Cannot extract key_id from PAT — invalid format")
 
         key = _cache_key(self.pat_key_id, token_class, agent_id, audience, scope, agent_name)

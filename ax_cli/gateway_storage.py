@@ -305,6 +305,14 @@ def load_gateway_managed_agent_token(entry: dict[str, Any]) -> str:
             "Gateway-managed agents require an agent-bound token. "
             f"Refusing to use a user bootstrap PAT from {token_file}."
         )
+    if token.startswith("axp_a_offline_") and not os.environ.get("AX_OFFLINE"):
+        name = str(entry.get("name") or "").strip()
+        raise ValueError(
+            f"Agent {('@' + name) if name else '<unknown>'} has a stale offline-mode token "
+            "(axp_a_offline_*), which is only valid under AX_OFFLINE=1. Re-register it to "
+            f"connect to the live platform: ax gateway agents remove {name or '<name>'} "
+            "(then re-add it)."
+        )
     if not str(entry.get("agent_id") or "").strip():
         raise ValueError("Gateway-managed agents require a bound agent_id before runtime use.")
     return token
