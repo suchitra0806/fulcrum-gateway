@@ -22,6 +22,7 @@ from ax_cli.commands.gateway_runtime_cmd import (
     _install_runtime_payload,
     _proc_error_msg,
     _resolve_install_target,
+    _sentinel_inference_sdk_venv_status,
     _venv_module_unavailable_reason,
 )
 from ax_cli.main import app
@@ -29,16 +30,16 @@ from ax_cli.main import app
 runner = CliRunner()
 
 
-def test_allowlist_only_hermes_today():
-    """Installing anything other than 'hermes' must fail before any subprocess runs."""
+def test_allowlist_only_known_templates():
+    """Installing anything outside the allowlist must fail before any subprocess runs."""
     with pytest.raises(ValueError, match="unknown runtime template"):
         _install_runtime_payload("evil", operator_session={"user": "test"})
 
     with pytest.raises(ValueError, match="unknown runtime template"):
         _install_runtime_payload("ollama", operator_session={"user": "test"})
 
-    # Confirm allowlist is exactly {hermes} so a future addition is a code review
-    assert set(_RUNTIME_INSTALL_RECIPES.keys()) == {"hermes"}
+    # Confirm allowlist is exactly the expected set so a future addition is a code review
+    assert set(_RUNTIME_INSTALL_RECIPES.keys()) == {"hermes", "sentinel_inference_sdk"}
 
 
 def test_operator_session_required():
@@ -244,6 +245,116 @@ def test_cli_install_json_output(monkeypatch, tmp_path):
     assert payload["ready"] is True
     assert "target" in payload
     assert "steps" in payload
+
+
+def test_cli_sentinel_install_requires_client(monkeypatch):
+    """`runtime install sentinel_inference_sdk` without --client exits 1."""
+    monkeypatch.setattr("ax_cli.commands.gateway_runtime_cmd.load_gateway_session", lambda: {"user": "test"})
+    result = runner.invoke(app, ["gateway", "runtime", "install", "sentinel_inference_sdk"])
+    assert result.exit_code != 0
+    assert "--client" in result.output
+    assert "openai_sdk" in result.output
+
+
+def test_cli_sentinel_install_rejects_unsupported_client(monkeypatch):
+    """`runtime install sentinel_inference_sdk --client foo` exits 1."""
+    monkeypatch.setattr("ax_cli.commands.gateway_runtime_cmd.load_gateway_session", lambda: {"user": "test"})
+    result = runner.invoke(app, ["gateway", "runtime", "install", "sentinel_inference_sdk", "--client", "foo"])
+    assert result.exit_code != 0
+    assert "Unsupported client" in result.output
+    assert "openai_sdk" in result.output
+
+
+# ── sentinel_inference_sdk ────────────────────────────────────────────────
+
+
+def test_sentinel_inference_sdk_in_allowlist():
+    assert "sentinel_inference_sdk" in _RUNTIME_INSTALL_RECIPES
+    recipe = _RUNTIME_INSTALL_RECIPES["sentinel_inference_sdk"]
+    assert "openai" in recipe["packages"]
+    assert "clone" not in recipe["install_steps"]
+    assert "pip_install_packages" in recipe["install_steps"]
+    assert "pip_verify_packages" in recipe["install_steps"]
+
+
+def test_sentinel_inference_sdk_install_happy_path(tmp_path, monkeypatch):
+    """venv + pip install openai + verify all succeed → ready=True with python_path."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    target = tmp_path / "hermes-agent"
+
+    def _fake_run(args, **_kw):
+        if args[1:3] == ["-m", "venv"]:
+            venv = Path(args[3])
+            (venv / "bin").mkdir(parents=True, exist_ok=True)
+            (venv / "bin" / "pip").write_text("#!/bin/sh\nexit 0\n")
+            (venv / "bin" / "pip").chmod(0o755)
+            (venv / "bin" / "python3").write_text("#!/bin/sh\nexit 0\n")
+            (venv / "bin" / "python3").chmod(0o755)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    with patch("ax_cli.commands.gateway_runtime_cmd.subprocess.run", side_effect=_fake_run):
+        result = _install_runtime_payload("sentinel_inference_sdk", operator_session={"user": "test"})
+
+    assert result["ready"] is True
+    assert "installed at" in result["summary"]
+    assert "python_path" in result
+    assert result["python_path"] == str(target / ".venv" / "bin" / "python3")
+    step_names = [s["step"] for s in result["steps"]]
+    assert "pip_install_packages" in step_names
+    assert "verify" in step_names
+    assert "clone" not in step_names
+
+
+def test_sentinel_inference_sdk_install_pip_failure(tmp_path, monkeypatch):
+    """pip install openai failure → ready=False, no partial cleanup (no clone)."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    def _fake_run(args, **_kw):
+        if args[1:3] == ["-m", "venv"]:
+            venv = Path(args[3])
+            (venv / "bin").mkdir(parents=True, exist_ok=True)
+            (venv / "bin" / "pip").write_text("#!/bin/sh\nexit 0\n")
+            (venv / "bin" / "pip").chmod(0o755)
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if "pip" in str(args[0]):
+            raise subprocess.CalledProcessError(1, args, stderr="ERROR: network error")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    with patch("ax_cli.commands.gateway_runtime_cmd.subprocess.run", side_effect=_fake_run):
+        result = _install_runtime_payload("sentinel_inference_sdk", operator_session={"user": "test"})
+
+    assert result["ready"] is False
+    assert "pip install" in result["summary"]
+    pip_steps = [s for s in result["steps"] if s["step"] == "pip_install_packages"]
+    assert pip_steps[-1]["status"] == "error"
+
+
+def test_sentinel_inference_sdk_venv_status_not_ready(tmp_path, monkeypatch):
+    """Status reports not-ready when venv python doesn't exist."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    status = _sentinel_inference_sdk_venv_status()
+    assert status["ready"] is False
+    assert "sentinel_inference_sdk" in status["summary"]
+    assert "runtime install" in status["summary"]
+
+
+def test_sentinel_inference_sdk_venv_status_ready(tmp_path, monkeypatch):
+    """Status reports ready when venv python exists and openai is importable."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    venv_bin = tmp_path / "hermes-agent" / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    python = venv_bin / "python3"
+    python.write_text("#!/bin/sh\nexit 0\n")
+    python.chmod(0o755)
+
+    with patch(
+        "ax_cli.commands.gateway_runtime_cmd.subprocess.run",
+        return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+    ):
+        status = _sentinel_inference_sdk_venv_status()
+
+    assert status["ready"] is True
+    assert status["python_path"] == str(python)
 
 
 def test_cli_status_unknown_template():
