@@ -30,7 +30,6 @@ In:
 Out (follow-up):
 - Backend richer heartbeat schema (currently backend treats body extras as ignorable; once the protocol matures, backend ingests `status`/`note`/`cadence_seconds`)
 - Heartbeat-derived `responsive` axis on the AVAIL-CONTRACT-001 resolved DTO (depends on backend wiring)
-- Gateway daemon emitting heartbeats on behalf of managed sentinels (separate task #19, GATEWAY-PULSE-001)
 - MCP tool surface for heartbeats (separate, AWS-Agent-Registry-equivalent surface)
 
 ## Data model — local store at `~/.ax/heartbeats.json`
@@ -176,6 +175,5 @@ This section covers gateway-managed runtime heartbeat loops, not the
 
 ## Out-of-scope cross-references
 
-- **AGENT-AVAILABILITY-CONTRACT-001** (PR #97 merged) — heartbeats feed the Responsive axis. When backend wires `agent_state.responsive` from heartbeat freshness × declared cadence, this primitive becomes the data source.
-- **GATEWAY-PULSE-001** (task #19) — Gateway daemon emitting heartbeats on behalf of managed sentinels. Will reuse this primitive's local store + push semantics.
+- **AGENT-AVAILABILITY-CONTRACT-001** ([spec](../AGENT-AVAILABILITY-CONTRACT-001/spec.md)) — heartbeats feed the Responsive axis. When backend wires `agent_state.responsive` from heartbeat freshness × declared cadence, this primitive becomes the data source.
 - **AGENT-TRIGGER-SEMANTICS-001** (backend_sentinel pending) — vocabulary alignment when that frame lands.
