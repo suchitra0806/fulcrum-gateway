@@ -196,6 +196,7 @@ class GatewayDaemon:
                     "exec_command",
                     "workdir",
                     "model",
+                    "restart_requested_at",
                 )
                 changed_fields = [
                     field
