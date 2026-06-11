@@ -201,16 +201,28 @@ def connector_search(ref: str, body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("mode must be auto, intent, or catalog")
     limit = int(body.get("limit") or 10)
     app = str(body.get("app") or "").strip() or None
+    session_id = str(body.get("session_id") or "").strip() or None
     auth_env = _read_connector_auth(row)
-    result = search_tools(row, query, auth_env, apps=app, limit=limit, mode=mode)
+    result = search_tools(
+        row,
+        query,
+        auth_env,
+        apps=app,
+        limit=limit,
+        mode=mode,
+        session_id=session_id,
+    )
     items = result.get("items", [])
-    return {
+    payload = {
         "connector": row.name,
         "query": query,
-        "mode": mode,
+        "mode": result.get("mode") or mode,
         "tools": items,
         "count": len(items),
     }
+    if result.get("session_id"):
+        payload["session_id"] = result["session_id"]
+    return payload
 
 
 def connector_call(ref: str, body: dict[str, Any]) -> dict[str, Any]:
