@@ -100,6 +100,35 @@ class TestSecurityHeaders:
         assert "<script>" not in html
         assert "<style>" not in html
 
+    def test_nonce_injected_exactly_once_per_tag(self):
+        """Regression: double replacement produced nonce="X" nonce="X" on every tag."""
+        h = _make_handler(path="/")
+        h.do_GET()
+        html = h.body.decode("utf-8")
+        # No tag should carry the nonce attribute more than once.
+        import re
+
+        for tag in re.findall(r"<(?:script|style)[^>]*>", html):
+            nonce_count = tag.count(" nonce=")
+            assert nonce_count <= 1, f"Duplicate nonce attribute in tag: {tag!r}"
+
+    def test_csp_nonce_matches_html_nonce(self):
+        """The nonce in the CSP header must be the same value embedded in the HTML tags."""
+        import re
+
+        h = _make_handler(path="/")
+        h.do_GET()
+        headers = _header_dict(h)
+        csp = headers["Content-Security-Policy"]
+        m = re.search(r"'nonce-([^']+)'", csp)
+        assert m, "No nonce found in CSP header"
+        csp_nonce = m.group(1)
+        html = h.body.decode("utf-8")
+        html_nonces = re.findall(r'<(?:script|style) nonce="([^"]+)"', html)
+        assert html_nonces, "No nonced tags found in HTML"
+        for html_nonce in html_nonces:
+            assert html_nonce == csp_nonce, f"HTML tag nonce {html_nonce!r} does not match CSP nonce {csp_nonce!r}"
+
     def test_no_hsts_header(self):
         h = _make_handler(path="/healthz")
         h.do_GET()
