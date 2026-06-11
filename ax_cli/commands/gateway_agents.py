@@ -706,6 +706,7 @@ def _update_managed_agent(
     allowed_users: str | object = _UNSET,
     connector_ref: str | object = _UNSET,
     agent_client: str | object = _UNSET,
+    python_path: str | object = _UNSET,
     desired_state: str | None = None,
 ) -> dict:
     name = name.strip()
@@ -791,6 +792,13 @@ def _update_managed_agent(
             entry["client"] = sdk_clean
         else:
             entry.pop("client", None)
+
+    if python_path is not _UNSET:
+        py_clean = str(python_path or "").strip()
+        if py_clean:
+            entry["python"] = py_clean
+        else:
+            entry.pop("python", None)
 
     if template_effective_id == "langgraph_composio" and not str(entry.get("connector_ref") or "").strip():
         raise ValueError(
@@ -1704,6 +1712,11 @@ def update_agent(
         "--client",
         help="MCP host or inference SDK client (claude_cli for sentinel_cli; openai_sdk | gemini_sdk | groq_sdk | mistral_sdk | leapfrog_sdk | xai_sdk for sentinel_inference_sdk). Not accepted for claude_code_channel.",
     ),
+    python_path: str = typer.Option(
+        None,
+        "--python",
+        help="Path to the Python interpreter used by sentinel_inference_sdk agents. Pass an empty string to clear.",
+    ),
     desired_state: str = typer.Option(None, "--desired-state", help="running | stopped"),
     as_json: bool = JSON_OPTION,
 ):
@@ -1735,6 +1748,7 @@ def update_agent(
             allowed_users=allowed_users if allowed_users is not None else _UNSET,
             connector_ref=connector_ref if connector_ref is not None else _UNSET,
             agent_client=client if client is not None else _UNSET,
+            python_path=python_path if python_path is not None else _UNSET,
             desired_state=desired_state,
         )
     except (LookupError, ValueError) as exc:

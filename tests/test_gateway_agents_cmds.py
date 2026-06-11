@@ -785,6 +785,59 @@ def test_gateway_agents_update_changes_template_and_workdir(monkeypatch, tmp_pat
     assert attestation["attestation_state"] == "verified"
 
 
+def test_gateway_agents_update_python_flag_writes_and_clears(monkeypatch, tmp_path):
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+    gateway_core.save_gateway_session(
+        {
+            "token": "axp_u_test.token",
+            "base_url": "https://paxai.app",
+            "space_id": "space-1",
+            "username": "codex",
+        }
+    )
+    token_file = tmp_path / "agent.token"
+    token_file.write_text("axp_a_agent.secret")
+    registry = gateway_core.load_gateway_registry()
+    entry = {
+        "name": "northstar",
+        "agent_id": "agent-2",
+        "space_id": "space-1",
+        "base_url": "https://paxai.app",
+        "runtime_type": "sentinel_inference_sdk",
+        "template_id": "sentinel_inference_sdk",
+        "template_label": "Sentinel Inference SDK",
+        "desired_state": "running",
+        "effective_state": "running",
+        "token_file": str(token_file),
+        "transport": "gateway",
+        "credential_source": "gateway",
+        "created_via": "cli",
+        "client": "openai_sdk",
+    }
+    registry["agents"] = [entry]
+    gateway_core.ensure_local_asset_binding(registry, entry, created_via="cli", auto_approve=True)
+    gateway_core.ensure_gateway_identity_binding(registry, entry, session=gateway_core.load_gateway_session())
+    gateway_core.save_gateway_registry(registry)
+    monkeypatch.setattr(_gw_agents, "_load_gateway_user_client", lambda: _FakeUserClient())
+
+    result = runner.invoke(
+        app,
+        ["gateway", "agents", "update", "northstar", "--python", "/usr/bin/python3.11", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    stored = gateway_core.load_gateway_registry()["agents"][0]
+    assert stored["python"] == "/usr/bin/python3.11"
+
+    result2 = runner.invoke(
+        app,
+        ["gateway", "agents", "update", "northstar", "--python", "", "--json"],
+    )
+    assert result2.exit_code == 0, result2.output
+    stored2 = gateway_core.load_gateway_registry()["agents"][0]
+    assert "python" not in stored2
+
+
 def test_gateway_agents_add_ollama_persists_model_override(monkeypatch, tmp_path):
     config_dir = tmp_path / "config"
     monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
