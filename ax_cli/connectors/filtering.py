@@ -70,8 +70,7 @@ def _normalize_tools_limit(value: Any) -> int | None:
     back to DEFAULT_TOOLS_LIMIT.
 
     Note: "unbounded" still only surfaces as many tools as the upstream catalog
-    fetch returns, which is itself capped at MAX_TOOLS_LIMIT until catalog
-    pagination lands (#140).
+    drain returns, bounded by MAX_CATALOG_PAGES × CATALOG_PAGE_SIZE.
     """
     try:
         limit = int(value)
