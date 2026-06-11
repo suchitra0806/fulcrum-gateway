@@ -923,7 +923,7 @@
       }
       if (presence === "STALE") return { label: "Stale", tone: "warning", detail: detail || "Heartbeat is overdue." };
       if (presence === "OFFLINE") return { label: "Offline", tone: "error", detail: detail || "Runtime is not currently connected." };
-      if (presence === "ACTIVE" || presence === "LIVE" || agent.connected) {
+      if (agent.connected) {
         return { label: "Active", tone: "ok", detail: detail || "Live and ready." };
       }
       if (confidence === "MEDIUM" && reason === "launch_available") {

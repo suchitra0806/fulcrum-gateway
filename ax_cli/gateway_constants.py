@@ -20,7 +20,6 @@ SSE_IDLE_TIMEOUT_SECONDS = 45.0
 RUNTIME_HEARTBEAT_INTERVAL_SECONDS = 30.0
 RUNTIME_STALE_AFTER_SECONDS = 75.0  # 2.5 heartbeats: brief gap — yellow, likely self-heals
 RUNTIME_OFFLINE_AFTER_SECONDS = 300.0  # 10 heartbeats: persistent gap — red, needs operator attention
-RUNTIME_HIDDEN_AFTER_SECONDS = 15 * 60.0  # default: hide stale agents after 15 min
 SETUP_ERROR_BACKOFF_SCHEDULE = (30.0, 60.0, 120.0, 300.0, 600.0)
 SETUP_ERROR_MAX_CONSECUTIVE = 10
 
@@ -41,8 +40,9 @@ HERMES_KNOWN_PROVIDERS: dict[str, dict[str, str]] = {
 
 
 # active = visible, normal operation
-# hidden = system auto-hid because of staleness; auto-restores on reconnect
-# archived = user explicitly disabled; sticky (no auto-restore); requires explicit `agents restore`
+# hidden = operator took the agent out of the active roster (`agents hide` /
+#          Cleanup UI); the sweep never sets or clears it (ADR-008)
+# archived = user explicitly disabled; sticky; requires explicit `agents restore`
 _LIFECYCLE_PHASES = {"active", "hidden", "archived"}
 LOCAL_SESSION_TTL_SECONDS = 24 * 60 * 60
 GATEWAY_EVENT_PREFIX = "AX_GATEWAY_EVENT "
@@ -456,26 +456,6 @@ def _is_system_agent(entry: dict[str, Any]) -> bool:
     if name.startswith("switchboard-"):
         return True
     return False
-
-
-def _hide_after_stale_seconds(registry: dict[str, Any] | None = None) -> float:
-    """Resolve the stale-to-hidden threshold (env > registry > default)."""
-    env_raw = os.environ.get("AX_GATEWAY_HIDE_AFTER_STALE_SECONDS", "").strip()
-    if env_raw:
-        try:
-            return max(0.0, float(env_raw))
-        except ValueError:
-            pass
-    if isinstance(registry, dict):
-        gw = registry.get("gateway") or {}
-        if isinstance(gw, dict):
-            raw = gw.get("hide_after_stale_seconds")
-            if raw is not None:
-                try:
-                    return max(0.0, float(raw))
-                except (TypeError, ValueError):
-                    pass
-    return RUNTIME_HIDDEN_AFTER_SECONDS
 
 
 def _template_asset_defaults(template_id: str | None, runtime_type: object) -> dict[str, Any]:

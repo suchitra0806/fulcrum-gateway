@@ -326,6 +326,7 @@ else if mode == INBOX:
   reachability = queue_available
 else if activation == attach_only and liveness in {stale, offline}:
   reachability = sse_disconnected if sse_connected == false
+                                     and registry signal is fresh (≤ 75s)
                  else attach_required
 else if mode == LIVE and liveness == connected:
   reachability = live_now
@@ -337,7 +338,11 @@ else:
 
 The `attach_only` branch is what lets attached sessions render an actionable
 red state without waiting for the offline threshold — see the escalation
-scope note in the Daemon-to-UI Status Contract below.
+scope note in the Daemon-to-UI Status Contract below. The freshness gate on
+`sse_disconnected` exists because the channel bridge heartbeats every 30s
+while alive: a frozen `sse_connected=false` left behind by a session that
+died during an SSE outage must read as "process gone" (`attach_required`),
+not "SSE down".
 
 #### Invariants
 

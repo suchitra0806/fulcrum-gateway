@@ -146,6 +146,11 @@ follow the signaling contract in ADR-007.
   reducing false alarms.
 - **Positive:** The `desired_state` / `lifecycle_phase` checks eliminate
   separate "stopped" and "hidden" branches in class-specific code paths.
+- **Breaking:** the sweep's auto-hide path (hide stale agents after a
+  threshold, auto-restore on reconnect) is removed by this decision — a
+  system that sets `lifecycle_phase=hidden` on its own would make gray mean
+  "broken for a while" instead of operator intent. Hide and unhide are
+  operator-only operations.
 - **Negative:** The 300-second escalation threshold is fixed. Agents with
   legitimately long quiet periods between heartbeats may incorrectly escalate
   — though INBOX and ON-DEMAND agents are protected by the LIVE-mode-only
@@ -195,7 +200,7 @@ The decision to introduce it as a separate field (rather than using
 | Attached runtime + `presence=STALE` | `reachability=attach_required` | generic | "Stopped" | gray | "Not running" | red | Red — process gone, new label |
 | `presence=STALE` (other runtimes) | `presence` (from `liveness`) | generic | "Stale" | yellow | "Stale" | yellow | Unchanged |
 | `presence=OFFLINE` | `presence` (from `liveness`) | generic | "Offline" | gray | "Offline" | red | Red — desired=running but unreachable |
-| `presence=ACTIVE/LIVE` or `connected=true` | `presence`, `connected` | generic | "Active" | green | "Active" | green | Unchanged |
+| `connected=true` | `connected` | generic | "Active" | green | "Active" | green | Unchanged |
 | `confidence=MEDIUM`, `launch_available` | `confidence`, `confidence_reason` | generic | "Ready" | green | "Ready" | green | Unchanged |
 | `confidence=HIGH` | `confidence` | generic | "Ready" | green | "Ready" | green | Unchanged |
 | `presence=IDLE` | `presence` | generic | "Idle" | gray | "Idle" | green | Green — connected, healthy, quiet |

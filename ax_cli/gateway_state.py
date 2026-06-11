@@ -166,7 +166,14 @@ def _derive_reply(reply_mode: str) -> str:
     return "SUMMARY"
 
 
-def _derive_reachability(*, snapshot: dict[str, Any], mode: str, liveness: str, activation: str) -> str:
+def _derive_reachability(
+    *,
+    snapshot: dict[str, Any],
+    mode: str,
+    liveness: str,
+    activation: str,
+    last_seen_age: int | None = None,
+) -> str:
     attestation_state = _normalized_optional_controlled(
         snapshot.get("attestation_state"), _CONTROLLED_ATTESTATION_STATES
     )
@@ -189,7 +196,12 @@ def _derive_reachability(*, snapshot: dict[str, Any], mode: str, liveness: str, 
     if mode == "INBOX":
         return "queue_available"
     if activation == "attach_only" and liveness in {"stale", "offline"}:
-        if snapshot.get("sse_connected") is False:
+        # A frozen sse_connected=False from a session that died during an SSE
+        # outage must not mask "process gone". The channel bridge heartbeat
+        # loop writes every 30s while alive, so sse_disconnected is only
+        # trustworthy while the registry signal is fresh.
+        signal_fresh = last_seen_age is not None and last_seen_age <= RUNTIME_STALE_AFTER_SECONDS
+        if snapshot.get("sse_connected") is False and signal_fresh:
             return "sse_disconnected"
         return "attach_required"
     if mode == "LIVE" and liveness == "connected":
