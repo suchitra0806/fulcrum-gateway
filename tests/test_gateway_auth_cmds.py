@@ -391,9 +391,10 @@ def test_with_upstream_429_retry_falls_back_to_exp_backoff_without_retry_after(m
     assert sleeps == [1.0, 2.0]  # exp backoff: 1*2^0, 1*2^1
 
 
-def test_with_upstream_429_retry_caps_wait_at_max(monkeypatch):
-    """Pathological Retry-After values are capped at ``max_wait`` so a
-    misbehaving server can't hang the CLI for hours.
+def test_with_upstream_429_retry_fails_fast_when_retry_after_exceeds_max(monkeypatch):
+    """Retry-After values exceeding max_wait cause immediate failure — retrying
+    after a shorter window would ignore the server's explicit guidance and could
+    trigger circuit-breaker escalation.
     """
     sleeps: list[float] = []
     monkeypatch.setattr(_gw_auth.time, "sleep", lambda s: sleeps.append(s))
@@ -410,7 +411,19 @@ def test_with_upstream_429_retry_caps_wait_at_max(monkeypatch):
 
     with pytest.raises(_gw_auth.UpstreamRateLimitedError):
         _gw_auth._with_upstream_429_retry(call, max_retries=2, base_wait=1.0, max_wait=30.0)
-    assert sleeps == [30.0, 30.0]  # both capped at max_wait
+    assert sleeps == []  # no sleep — fails immediately when Retry-After exceeds max_wait
+
+
+def test_upstream_rate_limited_error_includes_retry_after_in_message(monkeypatch):
+    """UpstreamRateLimitedError message includes the retry-after time."""
+    monkeypatch.setattr(_gw_auth.time, "sleep", lambda s: None)
+
+    def call():
+        raise _make_429_error()  # retry-after: 12
+
+    with pytest.raises(_gw_auth.UpstreamRateLimitedError) as exc_info:
+        _gw_auth._with_upstream_429_retry(call, max_retries=1, base_wait=1.0)
+    assert "12s" in str(exc_info.value)
 
 
 def test_with_upstream_429_retry_propagates_other_errors(monkeypatch):
@@ -539,3 +552,83 @@ def test_load_gateway_user_client_offline(monkeypatch, tmp_path):
     monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path))
     client = _gw_auth._load_gateway_user_client()
     assert isinstance(client, OfflineAxClient)
+
+
+# ── _load_gateway_user_client request logging ─────────────────────────────
+
+
+def _read_log_records(log_path) -> list[dict]:
+    records = []
+    if log_path.exists():
+        for line in log_path.read_text().splitlines():
+            if line.strip():
+                try:
+                    records.append(json.loads(line))
+                except Exception:
+                    pass
+    return records
+
+
+class TestLoadGatewayUserClientLogging:
+    """_load_gateway_user_client attaches the correct role to logged requests."""
+
+    def _setup(self, monkeypatch):
+        monkeypatch.setattr(_gw_auth._cli_request_logger, "_enabled", True)
+        monkeypatch.setattr(_gw_auth._ui_request_logger, "_enabled", True)
+        monkeypatch.setattr(_gw_auth, "load_gateway_session", lambda: {"token": "axp_u_test", "base_url": "http://x"})
+
+    def test_logs_cli_role_by_default(self, monkeypatch):
+        monkeypatch.setattr(_gw_auth, "_is_ui_server_process", False)
+        self._setup(monkeypatch)
+        client = _gw_auth._load_gateway_user_client()
+        client._http._on_request_complete("GET", "/api/v1/agents", 200, 50, 9999999999.0, "application/json")
+        records = _read_log_records(gateway_core.api_requests_log_path())
+        assert records, "expected at least one log entry"
+        record = records[-1]
+        assert record["role"] == "cli"
+        assert record["method"] == "GET"
+        assert record["status"] == 200
+        assert record["remaining"] == 50
+
+    def test_logs_ui_server_role_in_ui_process(self, monkeypatch):
+        monkeypatch.setattr(_gw_auth, "_is_ui_server_process", True)
+        self._setup(monkeypatch)
+        client = _gw_auth._load_gateway_user_client()
+        client._http._on_request_complete("GET", "/api/v1/agents", 200, 50, None, "application/json")
+        records = _read_log_records(gateway_core.api_requests_log_path())
+        assert records, "expected at least one log entry"
+        assert records[-1]["role"] == "ui_server"
+
+
+class TestRateLimitThresholdSelection:
+    """Human-initiated callers get the aggressive threshold; automated traffic yields early."""
+
+    def test_cli_process_is_interactive(self, monkeypatch):
+        from ax_cli.client import RATE_LIMIT_INTERACTIVE_LOW_WATER
+
+        monkeypatch.setattr(_gw_auth, "_is_ui_server_process", False)
+        assert _gw_auth._rate_limit_low_water_for_caller() == RATE_LIMIT_INTERACTIVE_LOW_WATER
+
+    def test_ui_process_defaults_to_automated(self, monkeypatch):
+        from ax_cli.client import RATE_LIMIT_LOW_WATER
+
+        monkeypatch.setattr(_gw_auth, "_is_ui_server_process", True)
+        assert _gw_auth._rate_limit_low_water_for_caller() == RATE_LIMIT_LOW_WATER
+
+    def test_ui_dashboard_mutation_is_interactive(self, monkeypatch):
+        from ax_cli.client import RATE_LIMIT_INTERACTIVE_LOW_WATER
+
+        monkeypatch.setattr(_gw_auth, "_is_ui_server_process", True)
+        token = _gw_auth._interactive_request.set(True)
+        try:
+            assert _gw_auth._rate_limit_low_water_for_caller() == RATE_LIMIT_INTERACTIVE_LOW_WATER
+        finally:
+            _gw_auth._interactive_request.reset(token)
+
+    def test_loader_threads_threshold_into_client(self, monkeypatch):
+        monkeypatch.setattr(_gw_auth, "_is_ui_server_process", False)
+        monkeypatch.setattr(_gw_auth, "load_gateway_session", lambda: {"token": "axp_u_test", "base_url": "http://x"})
+        from ax_cli.client import RATE_LIMIT_INTERACTIVE_LOW_WATER
+
+        client = _gw_auth._load_gateway_user_client()
+        assert client._http._rate_limit_low_water == RATE_LIMIT_INTERACTIVE_LOW_WATER

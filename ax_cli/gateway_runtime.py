@@ -20,7 +20,7 @@ from typing import Any, Callable
 
 import httpx
 
-from .client import AxClient
+from .client import AxClient, _RateLimitState
 from .commands.listen import (
     _is_self_authored,
     _iter_sse,
@@ -212,10 +212,12 @@ class ManagedAgentRuntime:
         *,
         client_factory: Callable[..., Any] = AxClient,
         logger: RuntimeLogger | None = None,
+        rate_limit_state: _RateLimitState | None = None,
     ) -> None:
         self.entry = dict(entry)
         self.client_factory = client_factory
         self.logger = logger or (lambda _msg: None)
+        self._rate_limit_state = rate_limit_state
         self.stop_event = threading.Event()
         self._listener_thread: threading.Thread | None = None
         self._worker_thread: threading.Thread | None = None
@@ -293,6 +295,11 @@ class ManagedAgentRuntime:
             token=self._token(),
             agent_name=self.name,
             agent_id=self.agent_id,
+            rate_limit_state=self._rate_limit_state,
+            on_request_complete=_daemon_request_logger.make_callback(
+                agent_name=self.name,
+                agent_id=str(self.agent_id or ""),
+            ),
         )
 
     def _send_heartbeat_best_effort(self, status: str) -> None:
@@ -1956,6 +1963,7 @@ from .gateway_hermes import (  # noqa: E402
     _summarize_sentinel_command,
 )
 from .gateway_storage import (  # noqa: E402
+    _daemon_request_logger,
     append_agent_pending_message,
     find_agent_entry,
     load_agent_pending_messages,
