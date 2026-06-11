@@ -3,7 +3,7 @@
 **Status:** v1 — CLI primitive implemented. Sections added 2026-06-03: *Gateway-Managed Runtime Heartbeats* (protocol, by-connection-path breakdown, sweep prohibition); verified against the codebase and extended with *Gateway-presence heartbeats* 2026-06-10.
 **Owner:** @markgalpin (transferred from @orion, 2026-06-03)
 **Date:** 2026-04-25
-**Related:** GATEWAY-CONNECTIVITY-001 (derives staleness thresholds from this spec's 30s heartbeat cadence), GATEWAY-AGENT-REGISTRY-001 (agent class definitions), ADR-009 (gateway runtime heartbeat decision)
+**Related:** [GATEWAY-CONNECTIVITY-001](../GATEWAY-CONNECTIVITY-001/spec.md) (derives staleness thresholds from this spec's 30s heartbeat cadence), [GATEWAY-AGENT-REGISTRY-001](../GATEWAY-AGENT-REGISTRY-001/spec.md) (agent class definitions), [ADR-009](../../docs/adr/ADR-009-platform-heartbeat-contract.md) (gateway runtime heartbeat decision)
 **Source directives:**
 - @madtank 2026-04-25 04:11 UTC — "we need to start getting features like heartbeat... we need to have our own pulse on the gateway"
 - @madtank 2026-04-25 15:25 UTC — "keep moving and shipping faster, especially around gateway and connectedness and the registry... it's funny how we might be competing against AWS and Google"
@@ -15,7 +15,7 @@
 
 The platform already has a backend heartbeat endpoint (`POST /api/v1/agents/heartbeat`) used by SSE listeners. This spec adds the **CLI primitive** so any agent — not just SSE-connected ones — can ping presence on its own cadence.
 
-**CLI-first.** Local store at `~/.ax/heartbeats.json` (resolution: `AX_HEARTBEATS_FILE` env override → nearest project-local `.ax/heartbeats.json` → `~/.ax/heartbeats.json`); offline-safe; pushes when online. Same offline-first pattern as TASK-LOOP-001. Promote richer protocol semantics to the platform after the CLI version is validated.
+**CLI-first.** Local store at `~/.ax/heartbeats.json` (resolution: `AX_HEARTBEATS_FILE` env override → nearest project-local `.ax/heartbeats.json` → `~/.ax/heartbeats.json`); offline-safe; pushes when online. Same offline-first pattern as [TASK-LOOP-001](../TASK-LOOP-001/README.md). Promote richer protocol semantics to the platform after the CLI version is validated.
 
 ## Scope
 
@@ -29,7 +29,7 @@ In:
 
 Out (follow-up):
 - Backend richer heartbeat schema (currently backend treats body extras as ignorable; once the protocol matures, backend ingests `status`/`note`/`cadence_seconds`)
-- Heartbeat-derived `responsive` axis on the AVAIL-CONTRACT-001 resolved DTO (depends on backend wiring)
+- Heartbeat-derived `responsive` axis on the [AGENT-AVAILABILITY-CONTRACT-001](../AGENT-AVAILABILITY-CONTRACT-001/spec.md) resolved DTO (depends on backend wiring)
 - MCP tool surface for heartbeats (separate, AWS-Agent-Registry-equivalent surface)
 
 ## Data model — local store at `~/.ax/heartbeats.json`
