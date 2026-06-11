@@ -2421,3 +2421,63 @@ def test_smoke_channel_shows_reply_from_log(monkeypatch, tmp_path):
             result = runner.invoke(app, ["gateway", "agents", "smoke", "my-channel", "--message", "ping"])
     assert result.exit_code == 0
     assert "pong" in result.output
+
+
+# ── agents remove: workdir config warning (#219) ──────────────────────────
+
+
+def test_remove_agent_warns_when_workdir_config_references_removed_agent(monkeypatch, tmp_path):
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    workdir = tmp_path / "myworkdir"
+    ax_dir = workdir / ".ax"
+    ax_dir.mkdir(parents=True)
+    (ax_dir / "config.toml").write_text('agent_name = "warn-bot"\n')
+    entry = {
+        "name": "warn-bot",
+        "agent_id": "agent-warn",
+        "space_id": "space-x",
+        "template_id": "pass_through",
+        "runtime_type": "pass_through",
+        "workdir": str(workdir),
+    }
+    gateway_core.save_gateway_registry({"agents": [entry]})
+    result = runner.invoke(app, ["gateway", "agents", "remove", "warn-bot"])
+    assert result.exit_code == 0
+    assert "Warning" in result.output
+    assert "warn-bot" in result.output
+    assert (ax_dir / "config.toml").exists()
+
+
+def test_remove_agent_no_warn_when_workdir_config_has_different_agent(monkeypatch, tmp_path):
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    workdir = tmp_path / "myworkdir"
+    ax_dir = workdir / ".ax"
+    ax_dir.mkdir(parents=True)
+    (ax_dir / "config.toml").write_text('agent_name = "other-bot"\n')
+    entry = {
+        "name": "no-warn-bot",
+        "agent_id": "agent-no-warn",
+        "space_id": "space-x",
+        "template_id": "pass_through",
+        "runtime_type": "pass_through",
+        "workdir": str(workdir),
+    }
+    gateway_core.save_gateway_registry({"agents": [entry]})
+    result = runner.invoke(app, ["gateway", "agents", "remove", "no-warn-bot"])
+    assert result.exit_code == 0
+    assert "Warning" not in result.output
+
+
+def test_remove_agent_no_warn_when_no_workdir(monkeypatch, tmp_path):
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    entry = {
+        "name": "no-workdir-bot",
+        "agent_id": "agent-no-workdir",
+        "space_id": "space-x",
+        "template_id": "pass_through",
+        "runtime_type": "pass_through",
+    }
+    gateway_core.save_gateway_registry({"agents": [entry]})
+    result = runner.invoke(app, ["gateway", "agents", "remove", "no-workdir-bot"])
+    assert result.exit_code == 0
+    assert "Warning" not in result.output
