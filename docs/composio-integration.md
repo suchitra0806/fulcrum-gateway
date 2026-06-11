@@ -116,7 +116,8 @@ ax gateway connectors set composio-main tools_limit 100
 > cursor-based pagination (up to `MAX_CATALOG_PAGES` pages at
 > `MAX_TOOLS_LIMIT` per page). `total` reports the provider's `total_items`
 > when available; `matched`/`clipped` reflect policy filtering on the full
-> drained catalog.
+> drained catalog. If the drain hits `MAX_CATALOG_PAGES`, `tools list` sets
+> `catalog_bounded` and prints a warning — `total` may exceed `catalog_drained`.
 
 ## Auth management
 

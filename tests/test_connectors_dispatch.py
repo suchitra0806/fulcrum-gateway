@@ -8,6 +8,7 @@ rejected when an ``allowed_toolkits`` allow-list was set."""
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -124,7 +125,31 @@ class TestCatalogPagination:
         assert calls == [None, "page-2"]
         assert result["total"] == 2
         assert result["matched"] == 2
+        assert result["catalog_bounded"] is False
         assert [t["name"] for t in result["items"]] == ["TOOL_A", "TOOL_B"]
+
+    def test_warns_when_catalog_drain_hits_max_pages(self, fake_catalog_adapter, monkeypatch, caplog):
+        monkeypatch.setattr("ax_cli.connectors.providers.dispatch.MAX_CATALOG_PAGES", 2)
+        pages = [
+            {
+                "items": [{"name": "TOOL_A", "appName": "github"}],
+                "next_cursor": "page-2",
+                "total_items": 5000,
+            },
+            {
+                "items": [{"name": "TOOL_B", "appName": "github"}],
+                "next_cursor": "page-3",
+                "total_items": 5000,
+            },
+        ]
+        fake_catalog_adapter(pages)
+        with caplog.at_level(logging.WARNING, logger="connectors.dispatch"):
+            result = dispatch.list_tools(_row({"tools_limit": 50}), {})
+        assert result["catalog_bounded"] is True
+        assert result["catalog_drained"] == 2
+        assert result["total"] == 5000
+        assert result["matched"] == 2
+        assert "MAX_CATALOG_PAGES=2" in caplog.text
 
     def test_total_uses_provider_inventory_when_reported(self, fake_catalog_adapter):
         pages = [
@@ -148,6 +173,7 @@ class TestCatalogPagination:
         result = dispatch.list_tools(_row({"tools_limit": 200}), {})
         assert result["total"] == 450
         assert result["matched"] == 450
+        assert result["catalog_bounded"] is False
         assert result["filtered"] == 200
         assert result["clipped"] is True
 
