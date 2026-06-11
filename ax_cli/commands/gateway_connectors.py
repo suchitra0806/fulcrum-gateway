@@ -643,7 +643,9 @@ def connectors_tools_list(
     if items:
         err_console.print(f"[bold]{row.name}[/bold] ({row.provider}) — {len(items)} tools:")
     if catalog_bounded:
-        drained_note = f"{catalog_drained} tools fetched" if catalog_drained is not None else "catalog partially fetched"
+        drained_note = (
+            f"{catalog_drained} tools fetched" if catalog_drained is not None else "catalog partially fetched"
+        )
         total_note = f"; provider reports {total_reported} total" if total_reported is not None else ""
         err_console.print(
             f"[yellow]Note:[/yellow] Catalog drain hit MAX_CATALOG_PAGES ({drained_note}{total_note}). "
