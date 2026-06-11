@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": ["ax-channel"],
+  "permissions": {
+    "allow": ["mcp__ax-channel__*"]
+  }
+}
