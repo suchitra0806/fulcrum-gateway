@@ -785,6 +785,96 @@ def test_gateway_agents_update_changes_template_and_workdir(monkeypatch, tmp_pat
     assert attestation["attestation_state"] == "verified"
 
 
+def _seed_manifest_apply_agent(monkeypatch, tmp_path):
+    """Seed a registry with one echo agent so `agents apply` exercises the
+    real (unmocked) _update_managed_agent path."""
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+    gateway_core.save_gateway_session(
+        {
+            "token": "axp_u_test.token",
+            "base_url": "https://paxai.app",
+            "space_id": "space-1",
+            "username": "codex",
+        }
+    )
+    token_file = tmp_path / "echo.token"
+    token_file.write_text("axp_a_agent.secret")
+    workdir = tmp_path / "orig-workdir"
+    workdir.mkdir()
+    registry = gateway_core.load_gateway_registry()
+    entry = {
+        "name": "northstar",
+        "agent_id": "agent-1",
+        "space_id": "space-1",
+        "base_url": "https://paxai.app",
+        "runtime_type": "echo",
+        "template_id": "echo_test",
+        "template_label": "Echo (Test)",
+        "description": "original description",
+        "workdir": str(workdir),
+        "desired_state": "running",
+        "effective_state": "running",
+        "token_file": str(token_file),
+        "transport": "gateway",
+        "credential_source": "gateway",
+        "created_via": "cli",
+    }
+    registry["agents"] = [entry]
+    gateway_core.ensure_local_asset_binding(registry, entry, created_via="cli", auto_approve=True)
+    gateway_core.ensure_gateway_identity_binding(registry, entry, session=gateway_core.load_gateway_session())
+    gateway_core.save_gateway_registry(registry)
+    monkeypatch.setattr(_gw_agents, "_load_gateway_user_client", lambda: _FakeUserClient())
+    return entry
+
+
+def test_gateway_agents_apply_without_template_preserves_existing_fields(monkeypatch, tmp_path):
+    """Re-applying a manifest that omits template/type/description must not
+    crash and must leave those fields untouched (regression: build_update_kwargs
+    maps absent fields to _UNSET, and _update_managed_agent treated the truthy
+    sentinel as a real template id → ValueError: Unknown template)."""
+    _seed_manifest_apply_agent(monkeypatch, tmp_path)
+    manifest_path = tmp_path / "northstar.agent.toml"
+    manifest_path.write_text('name = "northstar"\ntimeout_seconds = 120\n')
+
+    result = runner.invoke(
+        app,
+        ["gateway", "agents", "apply", str(manifest_path), "--auto-confirm", "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["applied"] is True
+    assert payload["creating"] is False
+    stored = gateway_core.load_gateway_registry()["agents"][0]
+    assert stored["timeout_seconds"] == 120
+    assert stored["template_id"] == "echo_test"
+    assert stored["runtime_type"] == "echo"
+    assert stored["description"] == "original description"
+
+
+def test_gateway_agents_apply_resolves_relative_workdir_against_apply_cwd(monkeypatch, tmp_path):
+    """workdir = "." in a manifest must resolve to the operator's cwd at apply
+    time, not be stored literally (regression: the literal "." resolved against
+    the daemon's cwd at launch, starting the sentinel in the wrong directory)."""
+    _seed_manifest_apply_agent(monkeypatch, tmp_path)
+    apply_cwd = tmp_path / "operator-cwd"
+    apply_cwd.mkdir()
+    monkeypatch.chdir(apply_cwd)
+    manifest_path = tmp_path / "northstar.agent.toml"
+    manifest_path.write_text('name = "northstar"\nworkdir = "."\n')
+
+    result = runner.invoke(
+        app,
+        ["gateway", "agents", "apply", str(manifest_path), "--auto-confirm", "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    stored = gateway_core.load_gateway_registry()["agents"][0]
+    assert Path(stored["workdir"]).is_absolute()
+    assert stored["workdir"] == str(apply_cwd.resolve())
+
+
 def test_gateway_agents_add_ollama_persists_model_override(monkeypatch, tmp_path):
     config_dir = tmp_path / "config"
     monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
