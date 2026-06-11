@@ -3,7 +3,7 @@
 **Status:** v1 — CLI primitive implemented. Sections added 2026-06-03: *Gateway-Managed Runtime Heartbeats* (protocol, by-connection-path breakdown, sweep prohibition); verified against the codebase and extended with *Gateway-presence heartbeats* 2026-06-10.
 **Owner:** @markgalpin (transferred from @orion, 2026-06-03)
 **Date:** 2026-04-25
-**Related:** GATEWAY-CONNECTIVITY-001 (derives staleness thresholds from this spec's 15s interval), GATEWAY-AGENT-REGISTRY-001 (agent class definitions), ADR-009 (gateway runtime heartbeat decision)
+**Related:** GATEWAY-CONNECTIVITY-001 (derives staleness thresholds from this spec's 30s heartbeat cadence), GATEWAY-AGENT-REGISTRY-001 (agent class definitions), ADR-009 (gateway runtime heartbeat decision)
 **Source directives:**
 - @madtank 2026-04-25 04:11 UTC — "we need to start getting features like heartbeat... we need to have our own pulse on the gateway"
 - @madtank 2026-04-25 15:25 UTC — "keep moving and shipping faster, especially around gateway and connectedness and the registry... it's funny how we might be competing against AWS and Google"
@@ -15,7 +15,7 @@
 
 The platform already has a backend heartbeat endpoint (`POST /api/v1/agents/heartbeat`) used by SSE listeners. This spec adds the **CLI primitive** so any agent — not just SSE-connected ones — can ping presence on its own cadence.
 
-**CLI-first.** Local store at `~/.ax/heartbeats.json`; offline-safe; pushes when online. Same offline-first pattern as TASK-LOOP-001. Promote richer protocol semantics to the platform after the CLI version is validated.
+**CLI-first.** Local store at `~/.ax/heartbeats.json` (resolution: `AX_HEARTBEATS_FILE` env override → nearest project-local `.ax/heartbeats.json` → `~/.ax/heartbeats.json`); offline-safe; pushes when online. Same offline-first pattern as TASK-LOOP-001. Promote richer protocol semantics to the platform after the CLI version is validated.
 
 ## Scope
 
@@ -90,7 +90,7 @@ ax heartbeat watch --interval N [--status S] [--note "..."] [--max-ticks N]
 
 ## Acceptance smokes (`tests/test_heartbeat_commands.py`)
 
-11 pytest cases covering:
+The original 11 acceptance smokes (the file has since grown to 44 tests):
 
 1. `send` records and pushes when online (verifies backend call, store update, ttl)
 2. `send` queues locally on network error (verifies push_error, no last_pushed_at)
@@ -122,9 +122,9 @@ agent-bound token. User-level tokens are rejected by the platform.
 
 | Status | When | Sender |
 | --- | --- | --- |
-| `connected` | Every 15 seconds while the SSE listener loop is running | Runtime's `_send_client` in `_listener_loop` |
+| `connected` | Every 30 seconds (`RUNTIME_HEARTBEAT_INTERVAL_SECONDS`) while the SSE listener loop is running; ticks fire on event/keepalive arrival, bounded by the 45s SSE idle timeout | Runtime's `_send_client` in `_listener_loop`; ax platform adapter's `_heartbeat_loop` (first beat at connect, then every 30s) |
 | `stale` | On SSE connection failure, before backoff sleep | Runtime's `_send_client` or `_send_heartbeat_best_effort` |
-| `offline` | On `stop()` — agent is shutting down | Runtime's `_send_heartbeat_best_effort` |
+| `offline` | On `stop()` — agent is shutting down | Runtime's `_send_heartbeat_best_effort`; ax platform adapter on disconnect |
 | `setup_error` | On first transition to `effective_state=error` | Runtime's `_send_heartbeat_best_effort` |
 
 ### By connection path
