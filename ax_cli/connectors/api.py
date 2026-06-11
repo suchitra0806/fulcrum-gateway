@@ -11,8 +11,7 @@ from typing import Any
 
 from .auth import read_auth
 from .errors import ConnectorProviderError
-from .providers.dispatch import execute_tool, search_tools
-from .providers.registry import has_capability
+from .providers.dispatch import execute_tool, resolve_search_mode, search_tools
 from .storage import find_connector
 
 
@@ -66,15 +65,6 @@ def _resolve_row_and_auth(connector_ref: str):
     return row, auth_env
 
 
-def _effective_search_mode(provider: str, mode: str) -> str:
-    normalized = str(mode or "auto").strip().lower()
-    if normalized in {"catalog", "intent"}:
-        return normalized
-    if has_capability(provider, "intent_search"):
-        return "intent"
-    return "catalog"
-
-
 def search_connector_tools(
     connector_ref: str,
     use_case: str,
@@ -82,10 +72,11 @@ def search_connector_tools(
     mode: str = "auto",
     limit: int = 10,
     apps: str | None = None,
+    session_id: str | None = None,
 ) -> ConnectorToolSearchResult:
     """Search tools for a connector by natural-language use case."""
     row, auth_env = _resolve_row_and_auth(connector_ref)
-    effective_mode = _effective_search_mode(row.provider, mode)
+    effective_mode = resolve_search_mode(row.provider, mode)
     try:
         raw = search_tools(
             row,
@@ -93,7 +84,8 @@ def search_connector_tools(
             auth_env,
             apps=apps,
             limit=limit,
-            mode=effective_mode if mode != "auto" else mode,
+            mode=mode,
+            session_id=session_id,
         )
     except ConnectorProviderError as exc:
         return ConnectorToolSearchResult(
@@ -106,8 +98,9 @@ def search_connector_tools(
     if not isinstance(items, list):
         items = []
     tools = [_tool_match_from_item(item) for item in items if isinstance(item, dict)]
+    resolved_mode = str(raw.get("mode") or effective_mode) if isinstance(raw, dict) else effective_mode
     return ConnectorToolSearchResult(
-        mode=effective_mode,
+        mode=resolved_mode,
         successful=True,
         tools=tools,
         session_id=raw.get("session_id") if isinstance(raw, dict) else None,
