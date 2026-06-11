@@ -172,6 +172,13 @@ success reply.
 
 ## Signal Contract
 
+The per-class signaling contract (which registry fields each agent class
+writes, and what it must not set) is formalised in
+[ADR-007](adr/ADR-007-agent-classes-and-signals.md) and
+[GATEWAY-AGENT-REGISTRY-001](../specs/GATEWAY-AGENT-REGISTRY-001/spec.md)
+(Runtime State and Signaling Fields). This section covers the per-message
+delivery signals layered on top of it.
+
 Every inbound message should have a visible delivery signal before the final
 reply. This is how operators know work did not disappear into a black hole.
 
@@ -310,12 +317,18 @@ The reconcile loop bridges desired to effective. It runs every ~1 second
 4. Signals liveness transitions upstream when a delta is detected
 
 Heartbeats originate from the agent runtimes themselves, not from the
-daemon sweep. The sweep observes liveness state and reports deltas
-upstream, but does not drive the heartbeat cadence.
+daemon sweep ([ADR-009](adr/ADR-009-platform-heartbeat-contract.md)). The
+sweep observes liveness state and reports deltas upstream, but does not
+drive the heartbeat cadence.
 
 Presence is informational — Gateway does not use presence to make lifecycle
 decisions. An agent can be `effective_state: running` locally but
-`presence: offline` upstream if the heartbeat hasn't propagated yet.
+`presence: offline` upstream if the heartbeat hasn't propagated yet. How
+presence and the other derived fields translate into operator-visible status
+(tones, staleness escalation at 75s/300s, operator-intent priority) is
+defined in [ADR-008](adr/ADR-008-agent-status-model.md) and the Daemon-to-UI
+Status Contract section of
+[GATEWAY-CONNECTIVITY-001](../specs/GATEWAY-CONNECTIVITY-001/spec.md).
 
 ### Manual attach
 

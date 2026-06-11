@@ -43,6 +43,8 @@ Start here and follow in order:
 | [ADR-004](adr/ADR-004-space-state-in-session.md) | Space state in session.json, not registry | Accepted |
 | [ADR-005](adr/ADR-005-credentials-never-in-workspace.md) | Credentials brokered, never in workspace | Accepted |
 | [ADR-006](adr/ADR-006-use-admin-proxy-tiers.md) | use/admin tier model for proxy | Proposed |
+| [ADR-007](adr/ADR-007-agent-classes-and-signals.md) | Five agent classes and their gateway signaling contracts | Accepted |
+| [ADR-008](adr/ADR-008-agent-status-model.md) | Agent status model: operator intent priority, liveness escalation, UI tones | Accepted |
 
 ## Other docs
 

@@ -843,25 +843,36 @@
       const counts = mailboxCounts(agent);
       const unread = counts.messages;
       const tasks = counts.tasks;
+      const lifecyclePhase = String(agent.lifecycle_phase || "").toLowerCase();
+      const reachability = String(agent.reachability || "").toLowerCase();
 
+      // Operator intent — evaluated before any health signal.
+      // Hidden and archived override everything: the operator explicitly removed
+      // this agent from active operation, regardless of what runtime signals say
+      // (a common reason is that the agent didn't record shutdown properly).
+      if (lifecyclePhase === "hidden" || lifecyclePhase === "archived") {
+        return {
+          label: lifecyclePhase === "archived" ? "Archived" : "Hidden",
+          tone: "muted",
+          detail: "Removed from active operation by the operator.",
+        };
+      }
+      // Gray only when actually stopped (connected=false); yellow while still transitioning.
+      if (desired === "stopped") {
+        return {
+          label: agent.connected ? "Stopping" : "Stopped",
+          tone: agent.connected ? "warning" : "muted",
+          detail: "Stopped via the gateway. New messages won't be delivered or processed until you Start it again.",
+        };
+      }
+      // Everything below is desired=running.
       if (externalManaged && !agent.connected) {
-        const stopped = desired === "stopped" || ["offline", "stopped", "disconnected"].includes(externalState);
         const kindLabel = externalKind === "hermes_plugin" ? "Hermes plugin" : "External runtime";
         const externalDetail = String(agent.local_attach_detail || "").trim();
         return {
-          label: stopped ? "Plugin stopped" : "Plugin not attached",
-          tone: "warning",
+          label: "Plugin not attached",
+          tone: "error",
           detail: externalDetail || `${kindLabel} has not sent a fresh Gateway heartbeat. Start the plugin process to receive messages.`,
-        };
-      }
-      // Operator intent overrides observed presence — if the user hit Stop,
-      // the agent should read "Stopped" immediately, even if a stale heartbeat
-      // is still draining out of the system.
-      if (desired === "stopped") {
-        return {
-          label: "Stopped",
-          tone: "muted",
-          detail: "Stopped via the gateway. New messages won't be delivered or processed until you Start it again.",
         };
       }
       if (approval === "pending") {
@@ -877,14 +888,14 @@
         return { label: "Needs approval", tone: "warning", detail: detail || "Re-approve the runtime binding in Gateway." };
       }
       if (confidence === "BLOCKED") {
-        return { label: "Blocked", tone: "warning", detail: detail || "Gateway has blocked this runtime." };
+        return { label: "Blocked", tone: "error", detail: detail || "Gateway has blocked this runtime." };
       }
       const currentStatus = String(agent.current_status || "").toLowerCase();
       if (currentStatus.includes("attach") && !agent.connected) {
         return {
           label: "Starting",
           tone: "warning",
-          detail: agent.current_activity || "Starting Claude Code.",
+          detail: agent.current_activity || "Starting attached session.",
         };
       }
       if (isMailboxRuntime(agent)) {
@@ -894,24 +905,24 @@
           if (tasks > 0) parts.push(tasks === 1 ? "1 task" : `${tasks} tasks`);
           return { label: parts.join(" · "), tone: "warning", detail: "Mailbox has queued work waiting for the agent to check in." };
         }
-        return { label: "Inbox", tone: "muted", detail: detail || "Mailbox is available. It is not a live listener." };
+        return { label: "Inbox", tone: "ok", detail: detail || "Mailbox is available and ready." };
       }
-      if (isAttachedRuntime(agent) && String(agent.reachability || "").toLowerCase() === "sse_disconnected") {
+      if (reachability === "sse_disconnected") {
         return {
           label: "SSE down",
           tone: "error",
-          detail: detail || "Claude Code is attached but the platform SSE subscription is down — messages will not be delivered. Reconnect the ax-channel MCP server.",
+          detail: detail || "The attached session has an SSE subscription that is down — messages will not be delivered. Reconnect the ax-channel MCP server.",
         };
       }
-      if (isAttachedRuntime(agent) && presence === "STALE") {
+      if (reachability === "attach_required") {
         return {
-          label: "Stopped",
-          tone: "muted",
-          detail: "Claude Code is not running. Start it to receive messages.",
+          label: "Not running",
+          tone: "error",
+          detail: "The attached session is not running. Start it to receive messages.",
         };
       }
       if (presence === "STALE") return { label: "Stale", tone: "warning", detail: detail || "Heartbeat is overdue." };
-      if (presence === "OFFLINE") return { label: "Offline", tone: "muted", detail: detail || "Runtime is not currently connected." };
+      if (presence === "OFFLINE") return { label: "Offline", tone: "error", detail: detail || "Runtime is not currently connected." };
       if (presence === "ACTIVE" || presence === "LIVE" || agent.connected) {
         return { label: "Active", tone: "ok", detail: detail || "Live and ready." };
       }
@@ -919,8 +930,8 @@
         return { label: "Ready", tone: "ok", detail: detail || "Cold-starts on send." };
       }
       if (confidence === "HIGH") return { label: "Ready", tone: "ok", detail: detail || "Gateway can route traffic now." };
-      if (presence === "IDLE") return { label: "Idle", tone: "muted", detail: detail || "Waiting for traffic." };
-      return { label: "Idle", tone: "muted", detail: detail || "" };
+      if (presence === "IDLE") return { label: "Idle", tone: "ok", detail: detail || "Connected and waiting for traffic." };
+      return { label: "Unknown", tone: "warning", detail: detail || "Gateway has partial health signals for this agent." };
     }
 
     function sendAvailability(agent) {
@@ -952,11 +963,11 @@
       }
       const presence = String(agent.presence || "").toUpperCase();
       const reachability = String(agent.reachability || "").toLowerCase();
-      if (isAttachedRuntime(agent) && reachability === "sse_disconnected") {
-        return { disabled: true, reason: "Claude Code is attached but the SSE subscription is down. Reconnect the ax-channel MCP server." };
+      if (reachability === "sse_disconnected") {
+        return { disabled: true, reason: "The attached session SSE subscription is down. Reconnect the ax-channel MCP server." };
       }
       if (isAttachedRuntime(agent) && (presence === "STALE" || reachability === "attach_required")) {
-        return { disabled: true, reason: "Start this Claude Code session before sending." };
+        return { disabled: true, reason: "Start the attached session before sending." };
       }
       if (!isMailboxRuntime(agent) && (presence === "OFFLINE" || presence === "ERROR" || presence === "STALE")) {
         return { disabled: true, reason: "Agent is not connected right now." };
@@ -1529,7 +1540,7 @@
       if (currentTool) return relativeActivity(`Tool: ${currentTool}`, agent.last_seen_at || agent.last_work_received_at || agent.added_at);
       const currentActivity = String(agent.current_activity || "").trim();
       if (currentActivity) return relativeActivity(currentActivity, agent.last_seen_at || agent.last_work_received_at || agent.added_at);
-      if (isAttachedRuntime(agent) && String(agent.reachability || "").toLowerCase() === "sse_disconnected") {
+      if (String(agent.reachability || "").toLowerCase() === "sse_disconnected") {
         return relativeActivity("SSE disconnected", agent.last_channel_heartbeat_at || agent.last_seen_at || agent.added_at);
       }
       if (isAttachedRuntime(agent) && String(agent.reachability || "").toLowerCase() === "attach_required") {
@@ -1960,15 +1971,10 @@
     }
 
     function isMailboxRuntime(agent) {
-      // Pass-through / inbox runtimes hold queued messages until polled — they
-      // don't "process" in the way listener-loop agents do. Distinct UX:
-      // mailbox state ("N unread", "All caught up") instead of "Working".
+      // Determined by gateway-computed mode field. INBOX mode means the agent
+      // holds queued messages until polled — distinct UX from live listeners.
       if (!agent) return false;
-      const intakeModel = String(agent.intake_model || "").toLowerCase();
-      const runtimeType = String(agent.runtime_type || "").toLowerCase();
-      const template = String(agent.template_id || "").toLowerCase();
-      if (template === "claude_code_channel" || runtimeType === "claude_code_channel") return false;
-      return intakeModel === "polling_mailbox" || runtimeType === "inbox" || template === "pass_through";
+      return String(agent.mode || "").toUpperCase() === "INBOX";
     }
 
     function isAttachedRuntime(agent) {
