@@ -107,12 +107,15 @@ def search_tools(
     *,
     apps: str | None = None,
     limit: int = 10,
+    cursor: str | None = None,
 ) -> dict[str, Any]:
     base = _base_url(config)
     key = _api_key(auth_env, connector_name)
     params: dict[str, Any] = {"query": query, "limit": limit}
     if apps:
         params["toolkit_slug"] = apps
+    if cursor:
+        params["cursor"] = cursor
 
     try:
         resp = httpx.get(

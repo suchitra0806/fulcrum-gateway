@@ -142,6 +142,12 @@ class TestSearchTools:
             search_tools("test", auth_env, config, "test-conn", apps="github")
             assert mock_get.call_args.kwargs["params"]["toolkit_slug"] == "github"
 
+    def test_search_with_cursor_param(self, auth_env: dict, config: dict):
+        mock_data = {"items": [], "next_cursor": None, "total_pages": 1, "current_page": 1}
+        with patch("httpx.get", return_value=_mock_response(200, mock_data)) as mock_get:
+            search_tools("test", auth_env, config, "test-conn", cursor="abc123")
+            assert mock_get.call_args.kwargs["params"]["cursor"] == "abc123"
+
     def test_search_auth_error(self, auth_env: dict, config: dict):
         with patch("httpx.get", return_value=_mock_response(401, {"error": "Invalid API key"})):
             with pytest.raises(ConnectorProviderError) as exc_info:

@@ -13,7 +13,7 @@ from ..activity import (
     record_connector_tool_failed,
     record_connector_tool_started,
 )
-from ..constants import MAX_TOOLS_LIMIT
+from ..constants import MAX_CATALOG_PAGES, MAX_TOOLS_LIMIT
 from ..errors import ConnectorPolicyError, ConnectorProviderError
 from ..filtering import assert_tool_allowed, filter_tools, from_config, tool_sort_key
 from ..types import ConnectorRow
@@ -107,6 +107,38 @@ def execute_tool(
     return result
 
 
+def _drain_catalog_tools(
+    adapter: ModuleType,
+    auth_env: dict[str, str],
+    config: dict[str, Any],
+    connector_name: str,
+) -> tuple[list[dict[str, Any]], int | None]:
+    """Drain paginated catalog search results (Composio and similar providers)."""
+    items: list[dict[str, Any]] = []
+    cursor: str | None = None
+    provider_total: int | None = None
+
+    for _ in range(MAX_CATALOG_PAGES):
+        result = adapter.search_tools(
+            "",
+            auth_env,
+            config,
+            connector_name,
+            limit=MAX_TOOLS_LIMIT,
+            cursor=cursor,
+        )
+        items.extend(result.get("items", []))
+        if provider_total is None and result.get("total_items") is not None:
+            provider_total = int(result["total_items"])
+
+        next_cursor = result.get("next_cursor")
+        if not next_cursor:
+            break
+        cursor = str(next_cursor)
+
+    return items, provider_total
+
+
 def list_tools(
     connector: ConnectorRow,
     auth_env: dict[str, str],
@@ -115,20 +147,14 @@ def list_tools(
     if hasattr(adapter, "list_tools"):
         result = adapter.list_tools(auth_env, connector.config, connector.name)
         items = result.get("tools", [])
+        provider_total = None
     else:
-        # Catalog providers (e.g. Composio) have no list endpoint; we page a
-        # single empty search capped at MAX_TOOLS_LIMIT. Providers with more
-        # than MAX_TOOLS_LIMIT tools are silently truncated here — there is no
-        # pagination yet, so `total` reflects what this one page returned, not
-        # everything the provider offers.
-        result = adapter.search_tools(
-            "",
+        items, provider_total = _drain_catalog_tools(
+            adapter,
             auth_env,
             connector.config,
             connector.name,
-            limit=MAX_TOOLS_LIMIT,
         )
-        items = result.get("items", [])
     policy = from_config(connector.config)
     # Match the full policy first (apply_limit=False) so we can report how many
     # tools were clipped by tools_limit. Sort by name so the clip is
@@ -136,9 +162,10 @@ def list_tools(
     matched = filter_tools(items, policy, apply_limit=False)
     matched.sort(key=tool_sort_key)
     filtered = matched[: policy.tools_limit]
+    total = provider_total if provider_total is not None else len(items)
     return {
         "items": filtered,
-        "total": len(items),
+        "total": total,
         "matched": len(matched),
         "filtered": len(filtered),
         "limit": policy.tools_limit,

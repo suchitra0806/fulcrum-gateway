@@ -112,12 +112,11 @@ ax gateway connectors set composio-main tools_limit 100
   if specific high-value tools must stay in view, name them with `allowed_tools`
   patterns rather than relying on the limit to surface them.
 
-> **Pagination gap:** catalog discovery pages a single empty search capped at
-> `MAX_TOOLS_LIMIT` (see `ax_cli/connectors/constants.py`, currently 200).
-> Providers exposing more than that (large Composio catalogs) are silently
-> truncated at the source — `total` reflects that one page, not the provider's
-> full inventory. Use `tools search` with a use case to reach tools beyond the
-> first page until cursor-based pagination lands (#140).
+> **Catalog pagination:** `tools list` drains the Composio catalog via
+> cursor-based pagination (up to `MAX_CATALOG_PAGES` pages at
+> `MAX_TOOLS_LIMIT` per page). `total` reports the provider's `total_items`
+> when available; `matched`/`clipped` reflect policy filtering on the full
+> drained catalog.
 
 ## Auth management
 
