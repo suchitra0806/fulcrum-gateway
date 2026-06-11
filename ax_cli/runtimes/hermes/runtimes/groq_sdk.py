@@ -98,13 +98,13 @@ class GroqSDKRuntime(BaseRuntime):
 
         try:
             from groq import (
-                Groq,
-                RateLimitError,
+                APIStatusError,
                 APITimeoutError,
                 AuthenticationError,
-                PermissionDeniedError,
+                Groq,
                 InternalServerError,
-                APIStatusError,
+                PermissionDeniedError,
+                RateLimitError,
             )
         except ImportError as e:
             # pyproject.toml does not declare `groq` as a hard dependency, so
