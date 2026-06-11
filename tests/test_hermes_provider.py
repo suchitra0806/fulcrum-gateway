@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ax_cli.commands.gateway import _validate_hermes_provider
+from ax_cli.commands.gateway_runtime_cmd import _validate_hermes_provider
 
 
 @pytest.fixture()

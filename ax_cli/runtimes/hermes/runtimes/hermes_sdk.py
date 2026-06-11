@@ -307,11 +307,13 @@ def _secure_hermes_tools(workdir: str):
     routes that exception through :func:`_install_secure_tools` which
     surfaces the failure as a ``cb.on_status`` event and a stderr
     WARNING so operators see the sandbox loss instead of discovering
-    it via behavior. The caller proceeds with unsandboxed tools today
-    for backward compatibility with existing deployments; a strict
-    fail-closed posture under an opt-in env var is a separate
-    follow-up. Do not run a degraded runtime in a deployment where
-    tool sandboxing is part of the trust boundary.
+    it via behavior. By default the caller proceeds with unsandboxed
+    tools for backward compatibility with existing deployments.
+    Setting ``AX_HERMES_STRICT_SECURITY=1`` flips the caller to a
+    fail-closed posture: the runtime refuses to start when this
+    function raises, so tool sandboxing becomes a hard precondition.
+    Do not run a degraded runtime in a deployment where tool
+    sandboxing is part of the trust boundary.
     """
     import json as _json
 
@@ -362,6 +364,27 @@ def _secure_hermes_tools(workdir: str):
     _wrap("execute_code", _check_code)
 
 
+class HermesSecuritySetupError(RuntimeError):
+    """Raised by :func:`_install_secure_tools` when the wrap fails under
+    ``AX_HERMES_STRICT_SECURITY=1``.
+
+    The runtime refuses to start in strict mode; the underlying exception
+    (e.g. ``ImportError`` from a missing tools package) is preserved as
+    ``__cause__`` so the caller can include it in operator-facing diagnostics.
+    """
+
+
+def _strict_security_enabled() -> bool:
+    """True when ``AX_HERMES_STRICT_SECURITY`` is set to a truthy value.
+
+    Accepted truthy values are ``1``, ``true``, ``yes`` (case-insensitive,
+    whitespace-stripped). Anything else (including ``0``, empty string,
+    or the env var being unset) yields False, preserving the loud-but-
+    functional default from PR #191.
+    """
+    return os.environ.get("AX_HERMES_STRICT_SECURITY", "").strip().lower() in ("1", "true", "yes")
+
+
 def _install_secure_tools(workdir: str, cb: StreamCallback | None = None) -> bool:
     """Install Hermes tool security wraps and surface failures loudly.
 
@@ -376,10 +399,16 @@ def _install_secure_tools(workdir: str, cb: StreamCallback | None = None) -> boo
     - A ``WARNING`` line on stderr with ``flush=True`` for operators running
       the runtime directly without a callback consumer.
 
-    Returns False if the wrap failed (caller proceeds with unsandboxed tools
-    for backward compatibility today; this is the loud-but-functional posture,
-    matching the langgraph bridge fix in PR #121). A strict fail-closed mode
-    under an opt-in env var is a separate follow-up.
+    Default posture is loud-but-functional: returns False on failure so the
+    caller can proceed with unsandboxed tools (matches the langgraph bridge
+    fix in PR #121).
+
+    Strict posture is opt-in via ``AX_HERMES_STRICT_SECURITY=1``: after the
+    three loud-degradation channels fire, raises :class:`HermesSecuritySetupError`
+    with the original exception as ``__cause__``. The caller is expected to
+    return a ``crashed`` :class:`RuntimeResult` and refuse to start the
+    runtime. Use this in deployments where tool sandboxing is part of the
+    trust boundary.
     """
     try:
         _secure_hermes_tools(workdir)
@@ -398,6 +427,10 @@ def _install_secure_tools(workdir: str, cb: StreamCallback | None = None) -> boo
             except Exception:
                 pass
         print(f"WARNING: {warning}", file=sys.stderr, flush=True)
+        if _strict_security_enabled():
+            raise HermesSecuritySetupError(
+                "Hermes refused to start: tool security setup failed and AX_HERMES_STRICT_SECURITY is enabled."
+            ) from exc
         return False
 
 
@@ -716,9 +749,22 @@ class HermesSDKRuntime(BaseRuntime):
         # Agents can only read shared repos + own dir, write to worktrees only.
         # Failures route through _install_secure_tools so the degradation is
         # surfaced via cb.on_status + stderr WARNING rather than absorbed into
-        # a single log.warning line (#151). Loud-but-functional posture; the
-        # runtime proceeds with unsandboxed tools today for backward compat.
-        _install_secure_tools(workdir, cb=cb)
+        # a single log.warning line (#151). Loud-but-functional posture by
+        # default; AX_HERMES_STRICT_SECURITY=1 flips this to fail-closed:
+        # the helper raises HermesSecuritySetupError after the three loud
+        # channels fire and the runtime refuses to start.
+        try:
+            _install_secure_tools(workdir, cb=cb)
+        except HermesSecuritySetupError as exc:
+            return RuntimeResult(
+                text=(
+                    "Hermes runtime refused to start: tool security setup "
+                    "failed and AX_HERMES_STRICT_SECURITY is enabled. "
+                    f"Underlying error: {exc.__cause__!r}"
+                ),
+                exit_reason="crashed",
+                elapsed_seconds=int(time.time() - start_time),
+            )
 
         # ── Build conversation history ──
         history = list(extra.get("history", []))

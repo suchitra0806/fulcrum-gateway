@@ -267,7 +267,7 @@ def _write_channel_workspace_context(workdir: Path, *, agent_name: str) -> Path:
     # file Claude Code reads automatically as project context). Look up the
     # registry entry to get the operator's system_prompt; fall through to a
     # stub entry if the agent isn't registered yet (channel-setup-only flow).
-    from .gateway import _render_agent_persona_markdown, _write_marker_section
+    from .gateway_agents import _render_agent_persona_markdown, _write_marker_section
 
     entry: dict[str, Any] = {
         "name": agent_name,

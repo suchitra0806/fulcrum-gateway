@@ -30,9 +30,9 @@ def connector() -> ConnectorRow:
 @pytest.fixture()
 def tmp_activity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     activity_file = tmp_path / "activity.jsonl"
-    monkeypatch.setattr("ax_cli.gateway.activity_log_path", lambda: activity_file)
+    monkeypatch.setattr("ax_cli.gateway_storage.activity_log_path", lambda: activity_file)
     registry_data = {"gateway": {"gateway_id": "gw-test-123"}}
-    monkeypatch.setattr("ax_cli.gateway.load_gateway_registry", lambda: registry_data)
+    monkeypatch.setattr("ax_cli.gateway_storage.load_gateway_registry", lambda: registry_data)
     return activity_file
 
 

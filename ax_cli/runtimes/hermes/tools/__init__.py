@@ -7,6 +7,7 @@ Each tool returns an OpenAI-compatible tool definition and an execute function.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import pathlib
 import subprocess
@@ -334,6 +335,27 @@ def _glob_files(args: dict, workdir: str) -> ToolResult:
     return ToolResult(output="\n".join(matches) or "(no matches)")
 
 
+@contextlib.contextmanager
+def _gateway_config_ctx():
+    """Temporarily restore AX_CONFIG_DIR to the global ~/.ax so connector
+    registry lookups resolve to the gateway's connectors.json, not the
+    agent workdir's .ax/ (which the sentinel sets AX_CONFIG_DIR to)."""
+    gw_dir = os.environ.get("AX_GATEWAY_DIR", "").strip()
+    if gw_dir:
+        global_ax = str(pathlib.Path(gw_dir).expanduser().parent)
+    else:
+        global_ax = str(pathlib.Path.home() / ".ax")
+    old = os.environ.get("AX_CONFIG_DIR")
+    os.environ["AX_CONFIG_DIR"] = global_ax
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("AX_CONFIG_DIR", None)
+        else:
+            os.environ["AX_CONFIG_DIR"] = old
+
+
 def _connector_search(args: dict, workdir: str) -> ToolResult:
     try:
         from ax_cli.connectors import (
@@ -348,18 +370,19 @@ def _connector_search(args: dict, workdir: str) -> ToolResult:
     query = args["query"]
     app = args.get("app")
     limit = args.get("limit", 5)
-    try:
-        row = find_connector(ref)
-    except ConnectorNotFoundError:
-        return ToolResult(output=f"Connector not found: {ref}", is_error=True)
-    try:
-        auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
-    except Exception as e:
-        return ToolResult(output=f"Auth error: {e}", is_error=True)
-    try:
-        result = search_tools(row, query, auth_env, apps=app, limit=limit)
-    except Exception as e:
-        return ToolResult(output=f"Search error: {e}", is_error=True)
+    with _gateway_config_ctx():
+        try:
+            row = find_connector(ref)
+        except ConnectorNotFoundError:
+            return ToolResult(output=f"Connector not found: {ref}", is_error=True)
+        try:
+            auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
+        except Exception as e:
+            return ToolResult(output=f"Auth error: {e}", is_error=True)
+        try:
+            result = search_tools(row, query, auth_env, apps=app, limit=limit)
+        except Exception as e:
+            return ToolResult(output=f"Search error: {e}", is_error=True)
     items = result.get("items", [])
     if not items:
         return ToolResult(output=f"No tools found for: {query}")
@@ -394,29 +417,28 @@ def _connector_call(args: dict, workdir: str) -> ToolResult:
             tool_args = _json.loads(tool_args)
         except _json.JSONDecodeError:
             return ToolResult(output=f"Invalid JSON in args: {tool_args}", is_error=True)
-    try:
-        row = find_connector(ref)
-    except ConnectorNotFoundError:
-        return ToolResult(output=f"Connector not found: {ref}", is_error=True)
-    if not row.enabled:
-        return ToolResult(output=f"Connector {ref!r} is disabled", is_error=True)
-    try:
-        auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
-    except Exception as e:
-        return ToolResult(output=f"Auth error: {e}", is_error=True)
-    import os as _os
-
-    try:
-        result = connector_execute(
-            row,
-            tool,
-            tool_args,
-            auth_env,
-            agent_name=_os.environ.get("AX_AGENT_NAME"),
-            agent_id=_os.environ.get("AX_AGENT_ID"),
-        )
-    except Exception as e:
-        return ToolResult(output=f"Connector error: {e}", is_error=True)
+    with _gateway_config_ctx():
+        try:
+            row = find_connector(ref)
+        except ConnectorNotFoundError:
+            return ToolResult(output=f"Connector not found: {ref}", is_error=True)
+        if not row.enabled:
+            return ToolResult(output=f"Connector {ref!r} is disabled", is_error=True)
+        try:
+            auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
+        except Exception as e:
+            return ToolResult(output=f"Auth error: {e}", is_error=True)
+        try:
+            result = connector_execute(
+                row,
+                tool,
+                tool_args,
+                auth_env,
+                agent_name=os.environ.get("AX_AGENT_NAME"),
+                agent_id=os.environ.get("AX_AGENT_ID"),
+            )
+        except Exception as e:
+            return ToolResult(output=f"Connector error: {e}", is_error=True)
     output = _json.dumps(result, indent=2, default=str)
     if len(output) > 20000:
         output = output[:20000] + "\n...(truncated)..."
@@ -434,18 +456,19 @@ def _connector_apps(args: dict, workdir: str) -> ToolResult:
     except ImportError:
         return ToolResult(output="Connector module not available", is_error=True)
     ref = args["connector"]
-    try:
-        row = find_connector(ref)
-    except ConnectorNotFoundError:
-        return ToolResult(output=f"Connector not found: {ref}", is_error=True)
-    try:
-        auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
-    except Exception as e:
-        return ToolResult(output=f"Auth error: {e}", is_error=True)
-    try:
-        items = list_apps(row, auth_env)
-    except Exception as e:
-        return ToolResult(output=f"Error listing apps: {e}", is_error=True)
+    with _gateway_config_ctx():
+        try:
+            row = find_connector(ref)
+        except ConnectorNotFoundError:
+            return ToolResult(output=f"Connector not found: {ref}", is_error=True)
+        try:
+            auth_env = read_auth(row.id, row.name) if row.auth_ref else {}
+        except Exception as e:
+            return ToolResult(output=f"Auth error: {e}", is_error=True)
+        try:
+            items = list_apps(row, auth_env)
+        except Exception as e:
+            return ToolResult(output=f"Error listing apps: {e}", is_error=True)
     if not items:
         return ToolResult(output="No connected apps found")
     lines = [f"{a.get('appName', '?')}  status={a.get('status', '?')}" for a in items]

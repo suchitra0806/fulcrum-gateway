@@ -16,6 +16,7 @@ from ax_cli.runtimes.hermes.sentinel import (
     SessionStore,
     _is_ax_noise,
     _is_paused,
+    _parse_retry_after,
     get_author_id,
     get_author_name,
     is_mentioned,
@@ -704,6 +705,33 @@ class TestAxAPISendMessage:
         result = api.send_message("space1", "hello")
         assert result is None
 
+    def test_send_message_429_sleeps_retry_after_and_returns_none(self, monkeypatch):
+        api, client = self._make_api()
+        client.post.return_value = MagicMock(
+            status_code=429,
+            headers={"retry-after": "5"},
+            text="rate limited",
+        )
+        slept: list[float] = []
+        monkeypatch.setattr("ax_cli.runtimes.hermes.sentinel.time.sleep", lambda s: slept.append(s))
+
+        result = api.send_message("space1", "hello")
+        assert result is None
+        assert slept == [5.0]
+
+    def test_send_message_429_defaults_to_60s_when_no_header(self, monkeypatch):
+        api, client = self._make_api()
+        client.post.return_value = MagicMock(
+            status_code=429,
+            headers={},
+            text="rate limited",
+        )
+        slept: list[float] = []
+        monkeypatch.setattr("ax_cli.runtimes.hermes.sentinel.time.sleep", lambda s: slept.append(s))
+
+        api.send_message("space1", "hello")
+        assert slept == [60.0]
+
 
 class TestAxAPIEditMessage:
     def _make_api(self):
@@ -759,6 +787,39 @@ class TestAxAPIEditMessage:
         call_kwargs = client.patch.call_args
         body = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
         assert "metadata" not in body
+
+    def test_edit_message_429_sleeps_retry_after_and_returns_false(self, monkeypatch):
+        api, client = self._make_api()
+        client.patch.return_value = MagicMock(
+            status_code=429,
+            headers={"retry-after": "10"},
+        )
+        slept: list[float] = []
+        monkeypatch.setattr("ax_cli.runtimes.hermes.sentinel.time.sleep", lambda s: slept.append(s))
+
+        result = api.edit_message("msg_1", "content")
+        assert result is False
+        assert slept == [10.0]
+
+
+class TestParseRetryAfter:
+    def _resp(self, headers: dict) -> MagicMock:
+        return MagicMock(headers=headers)
+
+    def test_integer_seconds(self):
+        assert _parse_retry_after(self._resp({"retry-after": "30"})) == 30.0
+
+    def test_missing_header_returns_default(self):
+        assert _parse_retry_after(self._resp({})) == 60.0
+
+    def test_missing_header_custom_default(self):
+        assert _parse_retry_after(self._resp({}), default=90.0) == 90.0
+
+    def test_unparseable_header_returns_default(self):
+        assert _parse_retry_after(self._resp({"retry-after": "not-a-number"})) == 60.0
+
+    def test_clamps_to_minimum_one_second(self):
+        assert _parse_retry_after(self._resp({"retry-after": "0"})) == 1.0
 
 
 class TestAxAPIRequestSummary:

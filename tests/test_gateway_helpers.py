@@ -19,7 +19,8 @@ from typing import Any
 import pytest
 
 from ax_cli import gateway as gw
-from ax_cli.commands import gateway as gw_cmd
+from ax_cli.commands import gateway_auth as gw_auth
+from ax_cli.commands import gateway_session as gw_session
 
 # ---------------------------------------------------------------------------
 # ax_cli.gateway — pure helpers
@@ -2322,7 +2323,7 @@ class TestHermesSetupStatus:
         # Force candidates to only contain paths that definitely don't exist.
         fake_path = tmp_path / "definitely-not-here" / "hermes-agent"
         monkeypatch.setattr(
-            "ax_cli.gateway._hermes_repo_candidates",
+            "ax_cli.gateway_assets._hermes_repo_candidates",
             lambda entry=None: [fake_path],
         )
         entry = {
@@ -2371,7 +2372,7 @@ class TestRegistryRefForAgent:
     """_registry_ref_for_agent: returns #N ref for an agent in the registry."""
 
     def test_by_identity(self):
-        from ax_cli.commands.gateway import _registry_ref_for_agent
+        from ax_cli.commands.gateway_agents import _registry_ref_for_agent
 
         agents = [{"name": "alpha"}, {"name": "beta"}]
         registry = {"agents": agents}
@@ -2379,14 +2380,14 @@ class TestRegistryRefForAgent:
         assert _registry_ref_for_agent(registry, agents[1]) == "#2"
 
     def test_by_name(self):
-        from ax_cli.commands.gateway import _registry_ref_for_agent
+        from ax_cli.commands.gateway_agents import _registry_ref_for_agent
 
         agents = [{"name": "alpha"}, {"name": "beta"}]
         registry = {"agents": agents}
         assert _registry_ref_for_agent(registry, {"name": "beta"}) == "#2"
 
     def test_by_install_id(self):
-        from ax_cli.commands.gateway import _registry_ref_for_agent
+        from ax_cli.commands.gateway_agents import _registry_ref_for_agent
 
         iid = str(uuid.uuid4())
         agents = [{"name": "alpha", "install_id": iid}]
@@ -2394,7 +2395,7 @@ class TestRegistryRefForAgent:
         assert _registry_ref_for_agent(registry, {"install_id": iid}) == "#1"
 
     def test_not_found(self):
-        from ax_cli.commands.gateway import _registry_ref_for_agent
+        from ax_cli.commands.gateway_agents import _registry_ref_for_agent
 
         registry = {"agents": [{"name": "alpha"}]}
         assert _registry_ref_for_agent(registry, {"name": "gamma"}) is None
@@ -2404,7 +2405,7 @@ class TestWithRegistryRefs:
     """_with_registry_refs: annotates an agent dict with registry ref + code."""
 
     def test_adds_ref(self):
-        from ax_cli.commands.gateway import _with_registry_refs
+        from ax_cli.commands.gateway_agents import _with_registry_refs
 
         agents = [{"name": "alpha", "install_id": "abc12345-6789"}]
         registry = {"agents": agents}
@@ -2414,7 +2415,7 @@ class TestWithRegistryRefs:
         assert result["registry_code"] == "abc12345"
 
     def test_no_ref(self):
-        from ax_cli.commands.gateway import _with_registry_refs
+        from ax_cli.commands.gateway_agents import _with_registry_refs
 
         registry = {"agents": [{"name": "alpha"}]}
         result = _with_registry_refs(registry, {"name": "unknown"})
@@ -2425,20 +2426,20 @@ class TestLocalFingerprintVerification:
     """_local_fingerprint_verification: best-effort OS cross-check."""
 
     def test_missing_pid(self):
-        from ax_cli.commands.gateway import _local_fingerprint_verification
+        from ax_cli.commands.gateway_session import _local_fingerprint_verification
 
         result = _local_fingerprint_verification({})
         assert result["status"] == "unverified"
         assert result["reason"] == "missing_pid"
 
     def test_invalid_pid(self):
-        from ax_cli.commands.gateway import _local_fingerprint_verification
+        from ax_cli.commands.gateway_session import _local_fingerprint_verification
 
         result = _local_fingerprint_verification({"pid": "not-a-number"})
         assert result["status"] == "unverified"
 
     def test_procfs_unavailable(self):
-        from ax_cli.commands.gateway import _local_fingerprint_verification
+        from ax_cli.commands.gateway_session import _local_fingerprint_verification
 
         # On macOS, /proc doesn't exist
         result = _local_fingerprint_verification({"pid": "99999"})
@@ -2449,7 +2450,7 @@ class TestFindLocalOriginCollision:
     """_find_local_origin_collision: detects duplicate agent registrations."""
 
     def test_no_collision(self):
-        from ax_cli.commands.gateway import _find_local_origin_collision
+        from ax_cli.commands.gateway_session import _find_local_origin_collision
 
         registry = {
             "agents": [
@@ -2461,7 +2462,7 @@ class TestFindLocalOriginCollision:
         assert result is None
 
     def test_collision_found(self):
-        from ax_cli.commands.gateway import _find_local_origin_collision
+        from ax_cli.commands.gateway_session import _find_local_origin_collision
 
         fp = {"exe_path": "/usr/bin/a", "cwd": "/home/a", "user": "u"}
         registry = {"agents": [{"name": "alpha", "local_fingerprint": fp}]}
@@ -2470,7 +2471,7 @@ class TestFindLocalOriginCollision:
         assert result["name"] == "alpha"
 
     def test_same_name_no_collision(self):
-        from ax_cli.commands.gateway import _find_local_origin_collision
+        from ax_cli.commands.gateway_session import _find_local_origin_collision
 
         fp = {"exe_path": "/usr/bin/a", "cwd": "/home/a", "user": "u"}
         registry = {"agents": [{"name": "alpha", "local_fingerprint": fp}]}
@@ -2482,23 +2483,23 @@ class TestNormalizeTimeoutSeconds:
     """_normalize_timeout_seconds: validates and normalizes timeout values."""
 
     def test_valid(self):
-        from ax_cli.commands.gateway import _normalize_timeout_seconds
+        from ax_cli.commands.gateway_runtime_cmd import _normalize_timeout_seconds
 
         assert _normalize_timeout_seconds(30) == 30
 
     def test_none(self):
-        from ax_cli.commands.gateway import _normalize_timeout_seconds
+        from ax_cli.commands.gateway_runtime_cmd import _normalize_timeout_seconds
 
         assert _normalize_timeout_seconds(None) is None
 
     def test_zero_raises(self):
-        from ax_cli.commands.gateway import _normalize_timeout_seconds
+        from ax_cli.commands.gateway_runtime_cmd import _normalize_timeout_seconds
 
         with pytest.raises(ValueError, match="at least 1"):
             _normalize_timeout_seconds(0)
 
     def test_negative_raises(self):
-        from ax_cli.commands.gateway import _normalize_timeout_seconds
+        from ax_cli.commands.gateway_runtime_cmd import _normalize_timeout_seconds
 
         with pytest.raises(ValueError, match="at least 1"):
             _normalize_timeout_seconds(-5)
@@ -2508,7 +2509,7 @@ class TestAgentRowSpaceIds:
     """_agent_row_space_ids: collects all distinct space IDs from agent rows."""
 
     def test_collects_ids(self):
-        from ax_cli.commands.gateway import _agent_row_space_ids
+        from ax_cli.commands.gateway_spaces import _agent_row_space_ids
 
         registry = {
             "agents": [
@@ -2521,7 +2522,7 @@ class TestAgentRowSpaceIds:
         assert result == {"s1", "s2"}
 
     def test_empty(self):
-        from ax_cli.commands.gateway import _agent_row_space_ids
+        from ax_cli.commands.gateway_spaces import _agent_row_space_ids
 
         assert _agent_row_space_ids({"agents": []}) == set()
 
@@ -2530,21 +2531,21 @@ class TestSpaceListFromResponse:
     """_space_list_from_response: normalizes backend space list response."""
 
     def test_dict_with_spaces_key(self):
-        from ax_cli.commands.gateway import _space_list_from_response
+        from ax_cli.commands.gateway_spaces import _space_list_from_response
 
         raw = {"spaces": [{"id": "s1", "name": "S1"}]}
         result = _space_list_from_response(raw)
         assert len(result) == 1
 
     def test_raw_list(self):
-        from ax_cli.commands.gateway import _space_list_from_response
+        from ax_cli.commands.gateway_spaces import _space_list_from_response
 
         raw = [{"id": "s1", "name": "S1"}]
         result = _space_list_from_response(raw)
         assert len(result) == 1
 
     def test_skips_non_dict(self):
-        from ax_cli.commands.gateway import _space_list_from_response
+        from ax_cli.commands.gateway_spaces import _space_list_from_response
 
         raw = {"spaces": [{"id": "s1"}, "bad", 123]}
         result = _space_list_from_response(raw)
@@ -2555,20 +2556,20 @@ class TestGatewaySessionChallengeEnabled:
     """_gateway_session_challenge_enabled: reads opt-in env var."""
 
     def test_not_set(self, monkeypatch):
-        from ax_cli.commands.gateway import _gateway_session_challenge_enabled
+        from ax_cli.commands.gateway_session import _gateway_session_challenge_enabled
 
         monkeypatch.delenv("AX_GATEWAY_SESSION_CHALLENGE", raising=False)
         assert _gateway_session_challenge_enabled() is False
 
     def test_truthy(self, monkeypatch):
-        from ax_cli.commands.gateway import _gateway_session_challenge_enabled
+        from ax_cli.commands.gateway_session import _gateway_session_challenge_enabled
 
         for val in ("1", "true", "yes", "on"):
             monkeypatch.setenv("AX_GATEWAY_SESSION_CHALLENGE", val)
             assert _gateway_session_challenge_enabled() is True
 
     def test_falsy(self, monkeypatch):
-        from ax_cli.commands.gateway import _gateway_session_challenge_enabled
+        from ax_cli.commands.gateway_session import _gateway_session_challenge_enabled
 
         for val in ("0", "false", "no", "off", ""):
             monkeypatch.setenv("AX_GATEWAY_SESSION_CHALLENGE", val)
@@ -2579,7 +2580,7 @@ class TestFindLocalSessionRecord:
     """_find_local_session_record: looks up session by ID in registry."""
 
     def test_found(self):
-        from ax_cli.commands.gateway import _find_local_session_record
+        from ax_cli.commands.gateway_session import _find_local_session_record
 
         registry = {"local_sessions": [{"session_id": "sess-1", "status": "active"}]}
         result = _find_local_session_record(registry, "sess-1")
@@ -2587,13 +2588,13 @@ class TestFindLocalSessionRecord:
         assert result["session_id"] == "sess-1"
 
     def test_not_found(self):
-        from ax_cli.commands.gateway import _find_local_session_record
+        from ax_cli.commands.gateway_session import _find_local_session_record
 
         registry = {"local_sessions": []}
         assert _find_local_session_record(registry, "sess-1") is None
 
     def test_empty_id(self):
-        from ax_cli.commands.gateway import _find_local_session_record
+        from ax_cli.commands.gateway_session import _find_local_session_record
 
         registry = {"local_sessions": [{"session_id": "sess-1"}]}
         assert _find_local_session_record(registry, "") is None
@@ -2603,7 +2604,7 @@ class TestSpaceCacheWith:
     """_space_cache_with: ensures a space_id is present in cache rows."""
 
     def test_adds_missing(self):
-        from ax_cli.commands.gateway import _space_cache_with
+        from ax_cli.commands.gateway_messaging import _space_cache_with
 
         rows = _space_cache_with([], "s1", name="Space One")
         assert len(rows) == 1
@@ -2612,14 +2613,14 @@ class TestSpaceCacheWith:
         assert rows[0]["is_default"] is True
 
     def test_preserves_existing(self):
-        from ax_cli.commands.gateway import _space_cache_with
+        from ax_cli.commands.gateway_messaging import _space_cache_with
 
         existing = [{"space_id": "s1", "name": "S1", "is_default": True}]
         rows = _space_cache_with(existing, "s2", name="S2")
         assert len(rows) == 2
 
     def test_deduplicates(self):
-        from ax_cli.commands.gateway import _space_cache_with
+        from ax_cli.commands.gateway_messaging import _space_cache_with
 
         existing = [{"space_id": "s1", "name": "S1"}]
         rows = _space_cache_with(existing, "s1")
@@ -2630,14 +2631,14 @@ class TestGatewayTestSenderName:
     """_gateway_test_sender_name: derives the per-space switchboard name."""
 
     def test_format(self):
-        from ax_cli.commands.gateway import _gateway_test_sender_name
+        from ax_cli.commands.gateway_messaging import _gateway_test_sender_name
 
         result = _gateway_test_sender_name("12345678-1234-1234-1234-123456789abc")
         assert result.startswith("switchboard-")
         assert len(result) > len("switchboard-")
 
     def test_short_space_id(self):
-        from ax_cli.commands.gateway import _gateway_test_sender_name
+        from ax_cli.commands.gateway_messaging import _gateway_test_sender_name
 
         result = _gateway_test_sender_name("abc")
         assert result.startswith("switchboard-")
@@ -2935,16 +2936,16 @@ class TestEntryRequiresOperatorApproval:
 
 class TestGenerateSessionChallengeCode:
     def test_returns_string(self):
-        code = gw_cmd._generate_session_challenge_code()
+        code = gw_session._generate_session_challenge_code()
         assert isinstance(code, str)
         assert len(code) > 0
 
     def test_uppercase(self):
-        code = gw_cmd._generate_session_challenge_code()
+        code = gw_session._generate_session_challenge_code()
         assert code == code.upper()
 
     def test_unique(self):
-        codes = {gw_cmd._generate_session_challenge_code() for _ in range(10)}
+        codes = {gw_session._generate_session_challenge_code() for _ in range(10)}
         assert len(codes) > 1
 
 
@@ -3011,12 +3012,12 @@ class TestLoadGatewaySessionOrExit:
 
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
         with pytest.raises(typer.Exit):
-            gw_cmd._load_gateway_session_or_exit()
+            gw_auth._load_gateway_session_or_exit()
 
     def test_returns_session_when_exists(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
         gw.save_gateway_session({"token": "axp_u_test", "base_url": "https://paxai.app"})
-        session = gw_cmd._load_gateway_session_or_exit()
+        session = gw_auth._load_gateway_session_or_exit()
         assert session["token"] == "axp_u_test"
 
 
@@ -3026,7 +3027,7 @@ class TestLoadGatewayUserClient:
 
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
         with pytest.raises(typer.Exit):
-            gw_cmd._load_gateway_user_client()
+            gw_auth._load_gateway_user_client()
 
     def test_missing_token_exits(self, monkeypatch, tmp_path):
         import typer
@@ -3034,7 +3035,7 @@ class TestLoadGatewayUserClient:
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
         gw.save_gateway_session({"base_url": "https://paxai.app"})
         with pytest.raises(typer.Exit):
-            gw_cmd._load_gateway_user_client()
+            gw_auth._load_gateway_user_client()
 
     def test_non_user_token_exits(self, monkeypatch, tmp_path):
         import typer
@@ -3042,12 +3043,12 @@ class TestLoadGatewayUserClient:
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
         gw.save_gateway_session({"token": "axp_a_agent.token", "base_url": "https://paxai.app"})
         with pytest.raises(typer.Exit):
-            gw_cmd._load_gateway_user_client()
+            gw_auth._load_gateway_user_client()
 
     def test_valid_session_returns_client(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
         gw.save_gateway_session({"token": "axp_u_test.token", "base_url": "https://paxai.app"})
-        client = gw_cmd._load_gateway_user_client()
+        client = gw_auth._load_gateway_user_client()
         assert client is not None
         client.close()
 
@@ -3056,13 +3057,13 @@ class TestLoadGatewayUserClient:
         surfaces as a typed error instead of a raw traceback."""
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
         gw.save_gateway_session({"token": "axp_u_test.token", "base_url": "https://paxai.app"})
-        client = gw_cmd._load_gateway_user_client()
+        client = gw_auth._load_gateway_user_client()
         monkeypatch.setattr(
             client._exchanger,
             "get_token",
             lambda *a, **k: (_ for _ in ()).throw(TestGatewayExchangeBoundary._exchange_error(401)),
         )
-        with pytest.raises(gw_cmd.GatewaySessionRejectedError):
+        with pytest.raises(gw_auth.GatewaySessionRejectedError):
             client._get_jwt()
         client.close()
 
@@ -3074,8 +3075,8 @@ class TestGatewayExchangeBoundary:
 
     def _client(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
-        client = gw_cmd.AxClient(base_url="https://paxai.app", token="axp_u_test.token")
-        gw_cmd._guard_gateway_exchange(client)
+        client = gw_auth.AxClient(base_url="https://paxai.app", token="axp_u_test.token")
+        gw_auth._guard_gateway_exchange(client)
         return client
 
     @staticmethod
@@ -3091,7 +3092,7 @@ class TestGatewayExchangeBoundary:
         monkeypatch.setattr(
             client._exchanger, "get_token", lambda *a, **k: (_ for _ in ()).throw(self._exchange_error(401))
         )
-        with pytest.raises(gw_cmd.GatewaySessionRejectedError):
+        with pytest.raises(gw_auth.GatewaySessionRejectedError):
             client._get_jwt()
         client.close()
 
@@ -3100,7 +3101,7 @@ class TestGatewayExchangeBoundary:
         monkeypatch.setattr(
             client._exchanger, "get_token", lambda *a, **k: (_ for _ in ()).throw(self._exchange_error(403))
         )
-        with pytest.raises(gw_cmd.GatewaySessionRejectedError):
+        with pytest.raises(gw_auth.GatewaySessionRejectedError):
             client._get_jwt()
         client.close()
 
@@ -3137,7 +3138,7 @@ class TestGatewayExchangeBoundary:
             pass
 
         double = _Double()
-        gw_cmd._guard_gateway_exchange(double)  # must not raise
+        gw_auth._guard_gateway_exchange(double)  # must not raise
         assert not hasattr(double, "_get_jwt")
 
 
@@ -3165,7 +3166,7 @@ class TestGatewaySessionStalenessWarning:
         # `ax login`, forgot `ax gateway login`" shape.
         self._make_user_toml(monkeypatch, tmp_path, mtime=2_000_000.0)
         self._make_session(mtime=1_000_000.0)
-        gw_cmd._load_gateway_user_client()
+        gw_auth._load_gateway_user_client()
         stderr = capsys.readouterr().err
         assert "gateway session is older than your user login" in stderr
         assert "ax gateway login" in stderr
@@ -3174,7 +3175,7 @@ class TestGatewaySessionStalenessWarning:
         # Fresh `ax gateway login` after `ax login` — no warning.
         self._make_user_toml(monkeypatch, tmp_path, mtime=1_000_000.0)
         self._make_session(mtime=2_000_000.0)
-        gw_cmd._load_gateway_user_client()
+        gw_auth._load_gateway_user_client()
         stderr = capsys.readouterr().err
         assert "older than your user login" not in stderr
 
@@ -3183,7 +3184,7 @@ class TestGatewaySessionStalenessWarning:
         # crash the gateway command itself.
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
         self._make_session(mtime=1_000_000.0)
-        gw_cmd._load_gateway_user_client()
+        gw_auth._load_gateway_user_client()
         stderr = capsys.readouterr().err
         assert "older than your user login" not in stderr
 
@@ -3209,7 +3210,7 @@ class TestGatewaySessionStalenessWarning:
         staging_p.write_text('token = "axp_u_staging.token"\nbase_url = "https://paxai.app"\n')
         os.utime(staging_p, (2_000_000.0, 2_000_000.0))
 
-        gw_cmd._load_gateway_user_client()
+        gw_auth._load_gateway_user_client()
         stderr = capsys.readouterr().err
         assert "older than your user login" not in stderr
 
@@ -3224,7 +3225,7 @@ class TestApplySpaceToGatewaySession:
 
     def test_updates_session_space(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
-        monkeypatch.setattr(gw, "active_gateway_pid", lambda: None)
+        monkeypatch.setattr("ax_cli.gateway_storage.active_gateway_pid", lambda: None)
         gw.save_gateway_session({"token": "axp_u_x", "space_id": "space-a", "space_name": "Ay"})
 
         out = gw.apply_space_to_gateway_session("space-b", space_name="Bee")
@@ -3240,11 +3241,11 @@ class TestApplySpaceToGatewaySession:
 
     def test_noop_when_already_aligned(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
-        monkeypatch.setattr(gw, "active_gateway_pid", lambda: None)
+        monkeypatch.setattr("ax_cli.gateway_storage.active_gateway_pid", lambda: None)
         gw.save_gateway_session({"token": "axp_u_x", "space_id": "space-a", "space_name": "Ay"})
         # Spy: a no-op must not emit a redundant audit event.
         calls = []
-        monkeypatch.setattr(gw, "record_gateway_activity", lambda *a, **k: calls.append((a, k)))
+        monkeypatch.setattr("ax_cli.gateway_storage.record_gateway_activity", lambda *a, **k: calls.append((a, k)))
 
         out = gw.apply_space_to_gateway_session("space-a", space_name="Ay")
 
@@ -3254,7 +3255,7 @@ class TestApplySpaceToGatewaySession:
 
     def test_reports_daemon_running(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
-        monkeypatch.setattr(gw, "active_gateway_pid", lambda: 4321)
+        monkeypatch.setattr("ax_cli.gateway_storage.active_gateway_pid", lambda: 4321)
         gw.save_gateway_session({"token": "axp_u_x", "space_id": "space-a"})
 
         out = gw.apply_space_to_gateway_session("space-b", space_name="Bee")
@@ -3276,10 +3277,10 @@ class TestGatewaySpaceDivergenceWarning:
         session = {"token": "axp_u_x", "base_url": "https://paxai.app"}
         if session_space is not None:
             session["space_id"] = session_space
-        monkeypatch.setattr(gw_cmd, "load_gateway_session", lambda: dict(session))
+        monkeypatch.setattr(gw_auth, "load_gateway_session", lambda: dict(session))
         self._set_cli_space(monkeypatch, cli_space)
         # Keep the sibling token-staleness check silent.
-        monkeypatch.setattr(gw_cmd, "_warn_if_gateway_session_stale", lambda: None)
+        monkeypatch.setattr(gw_auth, "_warn_if_gateway_session_stale", lambda: None)
 
     def _set_cli_space(self, monkeypatch, cli_space):
         monkeypatch.setattr(
@@ -3289,7 +3290,7 @@ class TestGatewaySpaceDivergenceWarning:
 
     def test_warns_when_spaces_differ(self, monkeypatch, tmp_path, capsys):
         self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-b")
-        gw_cmd._load_gateway_user_client()
+        gw_auth._load_gateway_user_client()
         stderr = capsys.readouterr().err
         assert "Gateway space (space-a) differs from your CLI space (space-b)" in stderr
         # Rich may wrap "ax" onto the previous line; match the unwrapped tail.
@@ -3297,42 +3298,42 @@ class TestGatewaySpaceDivergenceWarning:
 
     def test_no_warning_when_aligned(self, monkeypatch, tmp_path, capsys):
         self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-a")
-        gw_cmd._load_gateway_user_client()
+        gw_auth._load_gateway_user_client()
         assert "differs from your CLI space" not in capsys.readouterr().err
 
     def test_no_warning_when_cli_space_unset(self, monkeypatch, tmp_path, capsys):
         self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space=None)
-        gw_cmd._load_gateway_user_client()
+        gw_auth._load_gateway_user_client()
         assert "differs from your CLI space" not in capsys.readouterr().err
 
     def test_warns_only_once_for_same_divergence(self, monkeypatch, tmp_path, capsys):
         # issue #159: the same divergence state should warn once, then stay quiet.
         self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-b")
-        gw_cmd._warn_if_gateway_space_divergent()
+        gw_auth._warn_if_gateway_space_divergent()
         assert "differs from your CLI space" in capsys.readouterr().err
-        gw_cmd._warn_if_gateway_space_divergent()
+        gw_auth._warn_if_gateway_space_divergent()
         assert "differs from your CLI space" not in capsys.readouterr().err
 
     def test_rewarns_when_divergence_state_changes(self, monkeypatch, tmp_path, capsys):
         self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-b")
-        gw_cmd._warn_if_gateway_space_divergent()
+        gw_auth._warn_if_gateway_space_divergent()
         capsys.readouterr()  # drain the first warning
         # CLI space moves to a different value → new divergence state → warn again.
         self._set_cli_space(monkeypatch, "space-c")
-        gw_cmd._warn_if_gateway_space_divergent()
+        gw_auth._warn_if_gateway_space_divergent()
         assert "differs from your CLI space (space-c)" in capsys.readouterr().err
 
     def test_realignment_resets_then_rewarns(self, monkeypatch, tmp_path, capsys):
         self._setup(monkeypatch, tmp_path, session_space="space-a", cli_space="space-b")
-        gw_cmd._warn_if_gateway_space_divergent()
+        gw_auth._warn_if_gateway_space_divergent()
         capsys.readouterr()
         # Re-align: no warning, and the marker is cleared.
         self._set_cli_space(monkeypatch, "space-a")
-        gw_cmd._warn_if_gateway_space_divergent()
+        gw_auth._warn_if_gateway_space_divergent()
         assert "differs from your CLI space" not in capsys.readouterr().err
         # Diverging again re-warns because the marker was cleared on realignment.
         self._set_cli_space(monkeypatch, "space-b")
-        gw_cmd._warn_if_gateway_space_divergent()
+        gw_auth._warn_if_gateway_space_divergent()
         assert "differs from your CLI space" in capsys.readouterr().err
 
     def test_divergence_check_failure_logs_debug_and_stays_silent(self, monkeypatch, tmp_path, capsys, caplog):
@@ -3345,7 +3346,7 @@ class TestGatewaySpaceDivergenceWarning:
 
         monkeypatch.setattr("ax_cli.config._load_config", _boom)
         with caplog.at_level(logging.DEBUG, logger="ax.gateway"):
-            gw_cmd._warn_if_gateway_space_divergent()  # must not raise
+            gw_auth._warn_if_gateway_space_divergent()  # must not raise
         assert "differs from your CLI space" not in capsys.readouterr().err
         assert any("space-divergence check failed" in r.message for r in caplog.records)
 
@@ -3439,14 +3440,14 @@ class TestAgentTokenFilePortability:
 class TestLocalOriginSignature:
     def test_excludes_agent_name(self):
         fp = {"exe_path": "/usr/bin/python3", "cwd": "/home/user", "user": "testuser"}
-        sig1 = gw_cmd._local_origin_signature(fp)
+        sig1 = gw_session._local_origin_signature(fp)
         assert sig1.startswith("sha256:")
 
 
 class TestLocalProcessFingerprint:
     def test_returns_expected_keys(self, monkeypatch):
         monkeypatch.setattr(gw, "_file_sha256", lambda p: "sha256:abc")
-        fp = gw_cmd._local_process_fingerprint(agent_name="test-agent")
+        fp = gw_session._local_process_fingerprint(agent_name="test-agent")
         assert fp["agent_name"] == "test-agent"
         assert "pid" in fp
         assert "cwd" in fp
@@ -3458,8 +3459,8 @@ class TestLocalProcessFingerprint:
 class TestLocalTrustSignature:
     def test_deterministic(self):
         fp = {"exe_path": "/usr/bin/python3", "cwd": "/home/user", "user": "testuser"}
-        sig1 = gw_cmd._local_trust_signature("agent", fp)
-        sig2 = gw_cmd._local_trust_signature("agent", fp)
+        sig1 = gw_session._local_trust_signature("agent", fp)
+        sig2 = gw_session._local_trust_signature("agent", fp)
         assert sig1 == sig2
         assert sig1.startswith("sha256:")
 
@@ -3610,7 +3611,7 @@ class TestUpstreamRateLimitedError:
         request = httpx.Request("GET", "https://paxai.app/api/v1/spaces")
         response = httpx.Response(429, request=request, headers={"retry-after": "30"})
         exc = httpx.HTTPStatusError("429", request=request, response=response)
-        rate_err = gw_cmd.UpstreamRateLimitedError(exc, retries_attempted=3)
+        rate_err = gw_auth.UpstreamRateLimitedError(exc, retries_attempted=3)
         assert rate_err.retries_attempted == 3
         assert rate_err.retry_after_seconds == 30
         assert "3 retries" in str(rate_err)
@@ -3621,5 +3622,5 @@ class TestUpstreamRateLimitedError:
         request = httpx.Request("GET", "https://paxai.app")
         response = httpx.Response(429, request=request)
         exc = httpx.HTTPStatusError("429", request=request, response=response)
-        rate_err = gw_cmd.UpstreamRateLimitedError(exc, retries_attempted=2)
+        rate_err = gw_auth.UpstreamRateLimitedError(exc, retries_attempted=2)
         assert rate_err.retry_after_seconds is None

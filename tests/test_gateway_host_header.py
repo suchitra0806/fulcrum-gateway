@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from ax_cli.commands import gateway as gateway_cmd
+from ax_cli.commands import gateway_ui as gateway_cmd
 
 
 def _make_handler(host_header, *, method="GET", path="/healthz", body=b""):
