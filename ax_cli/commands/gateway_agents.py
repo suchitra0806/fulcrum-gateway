@@ -717,6 +717,8 @@ def _update_managed_agent(
     if not entry:
         raise LookupError(f"Managed agent not found: {name}")
 
+    # _UNSET defaults let callers (manifest apply) omit these without clearing
+    # them; downstream treats None as "leave unchanged", so normalize here.
     if template_id is _UNSET:
         template_id = None
     if runtime_type is _UNSET:
