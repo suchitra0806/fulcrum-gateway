@@ -131,8 +131,8 @@ agent-bound token. User-level tokens are rejected by the platform.
 Connection paths are defined in
 [GATEWAY-AGENT-REGISTRY-001](../GATEWAY-AGENT-REGISTRY-001/spec.md). The
 bolded grouping names below are the signaling-contract agent classes,
-formalised in ADR-007 (lands with PR #205); the heartbeat behavior keys on
-the connection path either way.
+formalised in [ADR-007](../../docs/adr/ADR-007-agent-classes-and-signals.md)
+(PR #297); the heartbeat behavior keys on the connection path either way.
 
 | Connection path | Platform heartbeat mechanism |
 | --- | --- |
