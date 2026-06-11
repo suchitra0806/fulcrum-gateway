@@ -17,8 +17,12 @@ jobs:
           fetch-depth: 0
 
       - name: Check for GitHub-UI revert commit messages
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          bad=$(git log --format="%s" origin/${{ github.base_ref }}..HEAD | grep -E '^Revert "' || true)
+          set -euo pipefail
+          subjects=$(git log --format="%s" "origin/${BASE_REF}..HEAD")
+          bad=$(printf '%s\n' "$subjects" | grep -E '^Revert "' || true)
           if [ -n "$bad" ]; then
             echo "Found GitHub-UI revert commit message(s):"
             echo "$bad"
