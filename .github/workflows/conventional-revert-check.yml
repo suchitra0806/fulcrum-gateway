@@ -1,0 +1,35 @@
+name: Conventional Commits — Revert Check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-revert-commits:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for GitHub-UI revert commit messages
+        run: |
+          bad=$(git log --format="%s" origin/${{ github.base_ref }}..HEAD | grep -E '^Revert "' || true)
+          if [ -n "$bad" ]; then
+            echo "Found GitHub-UI revert commit message(s):"
+            echo "$bad"
+            echo ""
+            echo "Release Please does not recognize this format — reverted features"
+            echo "will remain in the changelog and appear in published release notes."
+            echo ""
+            echo "Rewrite to Conventional Commits form before merging:"
+            echo "  revert(scope): original summary"
+            echo ""
+            echo "See CONTRIBUTING.md for details."
+            exit 1
+          fi
+          echo "No GitHub-UI revert commit messages found."
