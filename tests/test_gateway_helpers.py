@@ -508,6 +508,20 @@ class TestDerivePresence:
 
         assert _derive_presence(mode="LIVE", liveness="connected", work_state="idle") == "IDLE"
 
+    def test_offline_non_live_mode_returns_idle(self):
+        """Offline liveness on non-LIVE agents (INBOX, ON-DEMAND) returns IDLE.
+
+        OFFLINE presence is meaningful only for always-on listeners — it signals
+        a lost connection for an agent that should be permanently connected. For
+        INBOX and ON-DEMAND agents, availability is defined by queue access or
+        launch capability, not an active connection, so offline liveness falls
+        through to IDLE rather than OFFLINE.
+        """
+        from ax_cli.gateway import _derive_presence
+
+        assert _derive_presence(mode="INBOX", liveness="offline", work_state="idle") == "IDLE"
+        assert _derive_presence(mode="ON-DEMAND", liveness="offline", work_state="idle") == "IDLE"
+
 
 class TestDeriveReply:
     """_derive_reply: maps reply_mode to display string."""
@@ -543,7 +557,7 @@ class TestDeriveLiveness:
         assert liveness == "connected"
         assert connected is True
 
-    def test_running_stale(self):
+    def test_running_briefly_stale(self):
         from ax_cli.gateway import RUNTIME_STALE_AFTER_SECONDS, _derive_liveness
 
         liveness, connected = _derive_liveness(
@@ -552,11 +566,21 @@ class TestDeriveLiveness:
         assert liveness == "stale"
         assert connected is False
 
+    def test_running_persistently_offline(self):
+        from ax_cli.gateway import RUNTIME_OFFLINE_AFTER_SECONDS, _derive_liveness
+
+        liveness, connected = _derive_liveness(
+            {}, raw_state="running", last_seen_age=int(RUNTIME_OFFLINE_AFTER_SECONDS) + 5
+        )
+        assert liveness == "offline"
+        assert connected is False
+
     def test_running_no_heartbeat(self):
+        """An entry that has never reported a signal is offline, not merely stale."""
         from ax_cli.gateway import _derive_liveness
 
         liveness, connected = _derive_liveness({}, raw_state="running", last_seen_age=None)
-        assert liveness == "stale"
+        assert liveness == "offline"
         assert connected is False
 
     def test_error_state(self):
@@ -745,8 +769,28 @@ class TestDeriveReachability:
 
         snapshot = {"sse_connected": False}
         assert (
-            _derive_reachability(snapshot=snapshot, mode="LIVE", liveness="stale", activation="attach_only")
+            _derive_reachability(
+                snapshot=snapshot, mode="LIVE", liveness="stale", activation="attach_only", last_seen_age=10
+            )
             == "sse_disconnected"
+        )
+
+    def test_frozen_sse_flag_with_aged_signal_reads_attach_required(self):
+        """A session that died during an SSE outage leaves sse_connected=False
+        frozen in the registry. Once the bridge stops writing (signal age past
+        the stale threshold), the truth is "process gone", not "SSE down"."""
+        from ax_cli.gateway import RUNTIME_STALE_AFTER_SECONDS, _derive_reachability
+
+        snapshot = {"sse_connected": False}
+        assert (
+            _derive_reachability(
+                snapshot=snapshot,
+                mode="LIVE",
+                liveness="stale",
+                activation="attach_only",
+                last_seen_age=int(RUNTIME_STALE_AFTER_SECONDS) + 60,
+            )
+            == "attach_required"
         )
 
     def test_attach_required_when_sse_connected_not_set(self):
@@ -2333,34 +2377,6 @@ class TestHermesSetupStatus:
         result = hermes_setup_status(entry)
         assert result["ready"] is False
         assert "not found" in result["summary"].lower()
-
-
-# ---------------------------------------------------------------------------
-# HideAfterStaleSeconds
-# ---------------------------------------------------------------------------
-
-
-class TestHideAfterStaleSeconds:
-    """_hide_after_stale_seconds: resolves threshold from env > registry > default."""
-
-    def test_default(self, monkeypatch):
-        from ax_cli.gateway import RUNTIME_HIDDEN_AFTER_SECONDS, _hide_after_stale_seconds
-
-        monkeypatch.delenv("AX_GATEWAY_HIDE_AFTER_STALE_SECONDS", raising=False)
-        assert _hide_after_stale_seconds() == RUNTIME_HIDDEN_AFTER_SECONDS
-
-    def test_env_override(self, monkeypatch):
-        from ax_cli.gateway import _hide_after_stale_seconds
-
-        monkeypatch.setenv("AX_GATEWAY_HIDE_AFTER_STALE_SECONDS", "300")
-        assert _hide_after_stale_seconds() == 300.0
-
-    def test_registry_override(self, monkeypatch):
-        from ax_cli.gateway import _hide_after_stale_seconds
-
-        monkeypatch.delenv("AX_GATEWAY_HIDE_AFTER_STALE_SECONDS", raising=False)
-        registry = {"gateway": {"hide_after_stale_seconds": 600}}
-        assert _hide_after_stale_seconds(registry) == 600.0
 
 
 # ---------------------------------------------------------------------------

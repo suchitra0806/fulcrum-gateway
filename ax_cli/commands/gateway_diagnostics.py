@@ -232,7 +232,7 @@ def _gateway_alerts(payload: dict, *, limit: int = 6) -> list[dict]:
                 agent.get("confidence_detail")
                 or "Expected a live runtime, but Gateway does not currently have a working path."
             )
-            push("warning", f"@{name} is offline", detail, agent_name=name)
+            push("error", f"@{name} is offline", detail, agent_name=name)
         if setup_error_preview and presence != "ERROR":
             push("error", f"@{name} has a runtime setup error", preview[:180], agent_name=name)
         if int(agent.get("backlog_depth") or 0) > 0 and presence in {"OFFLINE", "ERROR", "STALE"}:

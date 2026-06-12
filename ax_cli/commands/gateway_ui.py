@@ -137,9 +137,9 @@ def _reachability_copy(agent: dict) -> str:
     if reachability == "launch_available":
         return "Gateway can launch this runtime on send."
     if reachability == "sse_disconnected":
-        return "Claude Code is attached but the SSE subscription is down — messages will not be delivered."
+        return "The attached session's SSE subscription is down — messages will not be delivered."
     if reachability == "attach_required":
-        return "Start Claude Code before sending."
+        return "Start the attached session before sending."
     if mode == "INBOX":
         return "Queue path is unavailable."
     return "Gateway does not currently have a working path."

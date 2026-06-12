@@ -16,6 +16,7 @@ from .gateway_constants import (
     _CONTROLLED_IDENTITY_STATUSES,
     _CONTROLLED_SPACE_STATUSES,
     _WORKING_STATUSES,
+    RUNTIME_OFFLINE_AFTER_SECONDS,
     RUNTIME_STALE_AFTER_SECONDS,
     _normalized_optional_controlled,
 )
@@ -37,7 +38,15 @@ def _derive_liveness(snapshot: dict[str, Any], *, raw_state: str, last_seen_age:
     if _looks_like_setup_error(snapshot, raw_state):
         return "setup_error", False
     if raw_state == "running":
-        if last_seen_age is None or last_seen_age > RUNTIME_STALE_AFTER_SECONDS:
+        # Two-threshold staleness escalation: brief gap (>75s) → stale (yellow,
+        # may self-heal); persistent gap (>5min) → offline (red, needs operator
+        # attention). Applies to entries whose raw state stays "running" while
+        # registry signals age — e.g. a supervised runtime with a wedged loop.
+        # Attached sessions and external plugins are resolved by the sweep into
+        # raw "stale" and reach red via reachability instead (ADR-008).
+        if last_seen_age is None or last_seen_age > RUNTIME_OFFLINE_AFTER_SECONDS:
+            return "offline", False
+        if last_seen_age > RUNTIME_STALE_AFTER_SECONDS:
             return "stale", False
         # Channel agents report SSE subscription health separately from process
         # liveness. A running process with a dead SSE stream can't receive messages.
@@ -136,6 +145,10 @@ def _derive_presence(*, mode: str, liveness: str, work_state: str) -> str:
         return "BLOCKED"
     if liveness == "stale":
         return "STALE"
+    # OFFLINE presence is meaningful only for LIVE agents — it signals that an
+    # always-on listener has lost its connection. For INBOX/ON-DEMAND agents,
+    # availability is defined by queue access or launch capability, not by an
+    # active connection, so offline liveness falls through to IDLE below.
     if liveness == "offline" and mode == "LIVE":
         return "OFFLINE"
     if work_state == "working":
@@ -153,7 +166,14 @@ def _derive_reply(reply_mode: str) -> str:
     return "SUMMARY"
 
 
-def _derive_reachability(*, snapshot: dict[str, Any], mode: str, liveness: str, activation: str) -> str:
+def _derive_reachability(
+    *,
+    snapshot: dict[str, Any],
+    mode: str,
+    liveness: str,
+    activation: str,
+    last_seen_age: int | None = None,
+) -> str:
     attestation_state = _normalized_optional_controlled(
         snapshot.get("attestation_state"), _CONTROLLED_ATTESTATION_STATES
     )
@@ -176,7 +196,12 @@ def _derive_reachability(*, snapshot: dict[str, Any], mode: str, liveness: str, 
     if mode == "INBOX":
         return "queue_available"
     if activation == "attach_only" and liveness in {"stale", "offline"}:
-        if snapshot.get("sse_connected") is False:
+        # A frozen sse_connected=False from a session that died during an SSE
+        # outage must not mask "process gone". The channel bridge heartbeat
+        # loop writes every 30s while alive, so sse_disconnected is only
+        # trustworthy while the registry signal is fresh.
+        signal_fresh = last_seen_age is not None and last_seen_age <= RUNTIME_STALE_AFTER_SECONDS
+        if snapshot.get("sse_connected") is False and signal_fresh:
             return "sse_disconnected"
         return "attach_required"
     if mode == "LIVE" and liveness == "connected":
@@ -300,11 +325,11 @@ def _derive_confidence(
             return (
                 "LOW",
                 "sse_disconnected",
-                "Claude Code is attached but the platform SSE subscription is down — "
+                "The attached session's platform SSE subscription is down — "
                 "messages will not be delivered until it reconnects.",
             )
         if reachability == "attach_required":
-            return ("LOW", "attach_required", "Start Claude Code before sending.")
+            return ("LOW", "attach_required", "Start the attached session before sending.")
         return ("LOW", "unavailable", "Gateway does not currently have a healthy live path.")
     if liveness == "connected":
         return ("HIGH", "live_now", "A live runtime is ready to claim work.")
