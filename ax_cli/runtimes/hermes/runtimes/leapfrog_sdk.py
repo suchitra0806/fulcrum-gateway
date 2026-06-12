@@ -151,11 +151,11 @@ class LeapfrogSDKRuntime(BaseRuntime):
 
         try:
             from openai import (
-                OpenAI,
                 APIStatusError,
                 APITimeoutError,
                 AuthenticationError,
                 InternalServerError,
+                OpenAI,
                 PermissionDeniedError,
                 RateLimitError,
             )

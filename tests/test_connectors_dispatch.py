@@ -1,10 +1,9 @@
 """Tests for the connector dispatch layer.
 
-Covers list_tools total/matched/filtered/clipped semantics (#95) and
-execute_tool toolkit derivation / policy enforcement integration. The
-latter specifically covers the #128 regression where the Hermes
-``_connector_call`` path passed ``toolkit=None`` and got every call
-rejected when an ``allowed_toolkits`` allow-list was set."""
+Covers list_tools total/matched/filtered/clipped semantics (#95),
+execute_tool toolkit derivation / policy enforcement integration (#128),
+intent search routing, http_mcp local search fallback, and catalog pagination.
+"""
 
 from __future__ import annotations
 
@@ -103,6 +102,81 @@ class TestListToolsSemantics:
         finally:
             del dispatch._ADAPTERS["fake"]
         assert [t["name"] for t in result["items"]] == ["GITHUB_T_000", "GITHUB_T_001", "GITHUB_T_002"]
+
+
+class TestSearchToolsIntent:
+    def test_uses_intent_adapter_for_auto_mode(self, monkeypatch):
+        calls: dict[str, str] = {}
+
+        monkeypatch.setattr(
+            "ax_cli.connectors.providers.dispatch.has_capability",
+            lambda provider, capability: capability == "intent_search",
+        )
+
+        def _intent(query, auth_env, config, name, *, apps=None, limit=10, session_id=None):
+            calls["query"] = query
+            calls["limit"] = str(limit)
+            return {
+                "items": [{"name": "GITHUB_LIST_PRS", "displayName": "List PRs"}],
+                "mode": "intent",
+                "session_id": "sess-1",
+            }
+
+        adapter = SimpleNamespace(
+            search_tools_intent=_intent,
+            search_tools=lambda *a, **k: {"items": []},
+        )
+        monkeypatch.setitem(dispatch._ADAPTERS, "fake", adapter)
+        result = dispatch.search_tools(_row(), "list prs", {}, limit=3, mode="auto")
+        assert calls["query"] == "list prs"
+        assert result["mode"] == "intent"
+        assert result["session_id"] == "sess-1"
+        assert result["items"][0]["name"] == "GITHUB_LIST_PRS"
+
+    def test_catalog_mode_uses_get_search(self, monkeypatch):
+        calls: dict[str, str] = {}
+
+        def _catalog(query, auth_env, config, name, *, apps=None, limit=10, cursor=None):
+            calls["query"] = query
+            return {"items": [{"name": "GITHUB_LIST_PRS", "displayName": "List PRs"}]}
+
+        adapter = SimpleNamespace(
+            search_tools=_catalog,
+            search_tools_intent=lambda *a, **k: {"items": []},
+        )
+        monkeypatch.setitem(dispatch._ADAPTERS, "fake", adapter)
+        monkeypatch.setattr(
+            "ax_cli.connectors.providers.dispatch.has_capability",
+            lambda provider, capability: capability == "intent_search",
+        )
+        result = dispatch.search_tools(_row(), "list prs", {}, mode="catalog")
+        assert calls["query"] == "list prs"
+        assert result["mode"] == "catalog"
+        assert "session_id" not in result
+
+
+class TestSearchToolsLocalFallback:
+    def test_provider_without_catalog_search_filters_list_tools(self, monkeypatch):
+        tools = [
+            {"name": "get_weather", "displayName": "Get Weather", "description": "weather data"},
+            {"name": "send_email", "displayName": "Send Email", "description": "send mail"},
+        ]
+        adapter = SimpleNamespace(list_tools=lambda auth_env, config, name: {"tools": tools})
+        monkeypatch.setitem(dispatch._ADAPTERS, "http_mcp", adapter)
+        monkeypatch.setattr(
+            "ax_cli.connectors.providers.dispatch.has_capability",
+            lambda provider, capability: False,
+        )
+        row = ConnectorRow(
+            id="00000000-0000-0000-0000-000000000001",
+            name="mcp-local",
+            provider="http_mcp",
+            config={},
+        )
+        result = dispatch.search_tools(row, "weather", {}, mode="auto")
+        assert result["mode"] == "catalog"
+        assert len(result["items"]) == 1
+        assert result["items"][0]["name"] == "get_weather"
 
 
 class TestCatalogPagination:
@@ -239,3 +313,4 @@ class TestExecuteToolToolkitDerivation:
             )
             assert result == {"ok": True}
             mock_exec.assert_called_once()
+

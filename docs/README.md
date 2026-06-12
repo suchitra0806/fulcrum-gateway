@@ -45,6 +45,14 @@ Start here and follow in order:
 | [ADR-006](adr/ADR-006-use-admin-proxy-tiers.md) | use/admin tier model for proxy | Proposed |
 | [ADR-007](adr/ADR-007-agent-classes-and-signals.md) | Five agent classes and their gateway signaling contracts | Accepted |
 | [ADR-008](adr/ADR-008-agent-status-model.md) | Agent status model: operator intent priority, liveness escalation, UI tones | Accepted |
+| [ADR-009](adr/ADR-009-platform-heartbeat-contract.md) | Heartbeats sent by the identity they attest (agent-direct + gateway-presence) | Accepted |
+| [ADR-012](adr/ADR-012-vendor-sdk-security-cleanup.md) | sentinel_inference_sdk rename, CLI permission-bypass removal | Accepted |
+| [ADR-013](adr/ADR-013-hermes-plugin-platform-adapter.md) | Hermes platform plugin adapter | Accepted |
+| [ADR-014](adr/ADR-014-client-field-unification.md) | Single `client` field for inference-client identity | Accepted |
+| [ADR-015](adr/ADR-015-proactive-rate-limit-management.md) | Proactive shared rate-limit management and request logging | Accepted |
+
+ADR-007/008 (agent classes and status model) and ADR-010/011 are in flight on
+their own PRs and will join this table when they land.
 
 ## Other docs
 

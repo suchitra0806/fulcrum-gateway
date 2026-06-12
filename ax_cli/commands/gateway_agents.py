@@ -693,12 +693,12 @@ def _write_agent_workspace_config(entry: dict) -> None:
 def _update_managed_agent(
     *,
     name: str,
-    template_id: str | None = None,
-    runtime_type: str | None = None,
+    template_id: str | object = None,
+    runtime_type: str | object = None,
     exec_cmd: str | object = _UNSET,
     workdir: str | object = _UNSET,
-    provider: str | None = None,
-    description: str | None = None,
+    provider: str | object = _UNSET,
+    description: str | object = _UNSET,
     model: str | object = _UNSET,
     system_prompt: str | object = _UNSET,
     timeout_seconds: int | object = _UNSET,
@@ -717,6 +717,16 @@ def _update_managed_agent(
     if not entry:
         raise LookupError(f"Managed agent not found: {name}")
 
+    # _UNSET defaults let callers (manifest apply) omit these without clearing
+    # them; downstream treats None as "leave unchanged", so normalize here.
+    if template_id is _UNSET:
+        template_id = None
+    if runtime_type is _UNSET:
+        runtime_type = None
+    if provider is _UNSET:
+        provider = None
+    if description is _UNSET:
+        description = None
     template = None
     if template_id:
         try:
@@ -1864,6 +1874,11 @@ def apply_manifest(
             err_console.print("[red]Refusing to apply non-interactively without --auto-confirm.[/red]")
             raise typer.Exit(1)
 
+    # Resolve relative workdir at apply time so "." means the directory the
+    # operator ran apply from, not the daemon's cwd when the process launches.
+    if "workdir" in manifest and manifest["workdir"]:
+        manifest["workdir"] = str(Path(manifest["workdir"]).expanduser().resolve())
+
     try:
         if current_entry is None:
             kwargs = build_register_kwargs(manifest)
@@ -2313,11 +2328,28 @@ def recover_agents(
 def remove_agent(name: str = typer.Argument(..., help="Managed agent name")):
     """Remove a managed agent from local Gateway control."""
     try:
-        _remove_managed_agent(name)
+        entry = _remove_managed_agent(name)
     except LookupError:
         err_console.print(f"[red]Managed agent not found:[/red] {name}")
         raise typer.Exit(1)
     err_console.print(f"[green]Removed managed agent:[/green] @{name}")
+    workdir = str(entry.get("workdir") or "").strip()
+    if workdir:
+        config_path = Path(workdir) / ".ax" / "config.toml"
+        if config_path.exists():
+            try:
+                try:
+                    import tomllib
+                except ImportError:
+                    import tomli as tomllib  # type: ignore[no-redef]
+                cfg = tomllib.loads(config_path.read_text())
+                if str(cfg.get("agent_name") or "").strip() == name:
+                    err_console.print(
+                        f"[yellow]Warning:[/yellow] {config_path} still references @{name}. "
+                        "Update or remove it to avoid errors when running commands from that directory."
+                    )
+            except Exception:
+                pass  # best-effort — never block the remove on a config read failure
 
 
 # Deferred cross-module imports (bottom-of-file to avoid import cycles; bound

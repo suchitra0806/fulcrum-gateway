@@ -105,6 +105,106 @@ def activity_log_path() -> Path:
     return gateway_dir() / "activity.jsonl"
 
 
+def api_requests_log_path() -> Path:
+    return gateway_dir() / "api-requests.log"
+
+
+_API_REQUESTS_LOG_MAX_BYTES = 10 * 1024 * 1024  # rotate at 10MB
+_API_REQUESTS_LOG_BACKUPS = 1  # keep one rotated file: api-requests.log.1
+
+
+class _RequestLogger:
+    """Logs every API request to api-requests.log unless AX_LOG_API_REQUESTS is disabled.
+
+    Each instance carries a role label and optional agent identity so log
+    records identify which process/client/agent made the request. All three
+    gateway destinations (daemon, UI server, CLI) write to the same file via
+    O_APPEND; a per-instance lock serialises writes (and rotation) within each
+    process. The log rotates at ``_API_REQUESTS_LOG_MAX_BYTES``, keeping one
+    backup file.
+    """
+
+    def __init__(self, role: str) -> None:
+        self.role = role
+        self._lock = threading.Lock()
+        self._enabled = os.environ.get("AX_LOG_API_REQUESTS", "").lower() not in {"0", "false", "no"}
+
+    def _rotate_if_needed(self, log_path: Path) -> None:
+        try:
+            if log_path.stat().st_size < _API_REQUESTS_LOG_MAX_BYTES:
+                return
+        except OSError:
+            return
+        backup_path = log_path.with_name(log_path.name + ".1")
+        try:
+            backup_path.unlink(missing_ok=True)
+            log_path.rename(backup_path)
+        except OSError:
+            pass
+
+    def make_callback(self, *, agent_name: str | None = None, agent_id: str | None = None):
+        """Return an on_request_complete callback capturing this logger's identity."""
+
+        def _cb(
+            method: str, path: str, status: int, remaining: int | None, reset_at: float | None, content_type: str = ""
+        ) -> None:
+            self._write(
+                method,
+                path,
+                status,
+                remaining,
+                reset_at,
+                agent_name=agent_name,
+                agent_id=agent_id,
+                content_type=content_type,
+            )
+
+        return _cb
+
+    def _write(
+        self,
+        method: str,
+        path: str,
+        status: int,
+        remaining: int | None,
+        reset_at: float | None,
+        *,
+        agent_name: str | None,
+        agent_id: str | None,
+        content_type: str = "",
+    ) -> None:
+        if not self._enabled:
+            return
+        record: dict = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "pid": os.getpid(),
+            "role": self.role,
+            "method": method,
+            "path": path,
+            "status": status,
+        }
+        record["content_type"] = content_type or None
+        record["agent_name"] = agent_name or None
+        record["agent_id"] = agent_id or None
+        record["remaining"] = remaining
+        record["reset_at"] = reset_at or None
+        line = json.dumps(record) + "\n"
+        log_path = api_requests_log_path()
+        try:
+            with self._lock:
+                self._rotate_if_needed(log_path)
+                with open(log_path, "a") as f:
+                    f.write(line)
+        except OSError as exc:
+            import sys
+
+            print(f"[ax-gateway] WARNING: api-requests.log write failed: {exc}", file=sys.stderr)
+
+
+_daemon_request_logger = _RequestLogger(role="daemon")
+_ui_request_logger = _RequestLogger(role="ui_server")
+
+
 def space_cache_path() -> Path:
     """Disk cache of {id, name, slug} triples for the user's visible spaces.
 

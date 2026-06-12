@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from ax_cli import gateway as gateway_core
 from ax_cli.commands import gateway_lifecycle as _gw_lifecycle
 from ax_cli.main import app
-from tests.gateway_cmd_testlib import _isolate_gateway_paths, _strip
+from tests.gateway_cmd_testlib import _isolate_gateway_paths, _SharedRuntimeClient, _strip
 
 runner = CliRunner()
 
@@ -407,3 +407,147 @@ class TestAgentsAttachTextRendering:
         output = _strip(result.output)
         assert "channel ready" in output.lower()
         assert "bot1" in output
+
+
+# ── agents restart ────────────────────────────────────────────────────────
+
+
+def test_agents_restart_refuses_when_daemon_stopped(monkeypatch, tmp_path):
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+
+    gateway_core.save_gateway_session({"token": "axp_u_test", "base_url": "https://paxai.app", "space_id": "space-1"})
+    registry = {
+        "agents": [
+            {
+                "name": "echo-demo",
+                "agent_id": "agent-echo",
+                "template_id": "echo_test",
+                "runtime_type": "echo",
+                "desired_state": "running",
+            }
+        ],
+    }
+    gateway_core.save_gateway_registry(registry)
+    monkeypatch.setattr(_gw_lifecycle, "active_gateway_pid", lambda: None)
+
+    result = runner.invoke(app, ["gateway", "agents", "restart", "echo-demo"])
+
+    assert result.exit_code == 1, result.output
+    assert "Gateway daemon is stopped" in result.output
+    assert "ax gateway start" in result.output
+    reloaded = gateway_core.load_gateway_registry()
+    entry = next(a for a in reloaded["agents"] if a["name"] == "echo-demo")
+    assert entry["desired_state"] == "running"
+
+
+def test_agents_restart_writes_nonce_and_signals_daemon(monkeypatch, tmp_path):
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+
+    gateway_core.save_gateway_session({"token": "axp_u_test", "base_url": "https://paxai.app", "space_id": "space-1"})
+    registry = {
+        "agents": [
+            {
+                "name": "echo-demo",
+                "agent_id": "agent-echo",
+                "template_id": "echo_test",
+                "runtime_type": "echo",
+                "desired_state": "running",
+            }
+        ],
+    }
+    gateway_core.save_gateway_registry(registry)
+    monkeypatch.setattr(_gw_lifecycle, "active_gateway_pid", lambda: 12345)
+
+    result = runner.invoke(app, ["gateway", "agents", "restart", "echo-demo"])
+
+    assert result.exit_code == 0, result.output
+    assert "Restart requested" in result.output
+    reloaded = gateway_core.load_gateway_registry()
+    entry = next(a for a in reloaded["agents"] if a["name"] == "echo-demo")
+    assert entry["desired_state"] == "running"
+    assert entry.get("restart_requested_at"), (
+        "restart_requested_at nonce must be written so the daemon reconciler forces a respawn"
+    )
+
+
+def test_agents_restart_unknown_agent(monkeypatch, tmp_path):
+    _isolate_gateway_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+
+    gateway_core.save_gateway_session({"token": "axp_u_test", "base_url": "https://paxai.app", "space_id": "space-1"})
+    gateway_core.save_gateway_registry({"agents": []})
+    monkeypatch.setattr(_gw_lifecycle, "active_gateway_pid", lambda: 12345)
+
+    result = runner.invoke(app, ["gateway", "agents", "restart", "no-such-agent"])
+
+    assert result.exit_code == 1, result.output
+    assert "Managed agent not found" in result.output
+
+
+def test_reconciler_forces_respawn_when_restart_requested_at_changes(monkeypatch, tmp_path):
+    """Daemon reconciler must stop and respawn a healthy running agent when restart_requested_at changes."""
+    monkeypatch.setenv("AX_CONFIG_DIR", str(tmp_path / "config"))
+    started: list[str] = []
+    stopped: list[str] = []
+
+    class FakeRuntime:
+        def __init__(self, entry, **kwargs):
+            self.entry = dict(entry)
+            self.started = False
+
+        def start(self):
+            if not self.started:
+                started.append(str(self.entry.get("name")))
+            self.started = True
+
+        def stop(self, timeout=None):
+            stopped.append(str(self.entry.get("name")))
+            self.started = False
+
+        def snapshot(self):
+            return {
+                "effective_state": "running" if self.started else "stopped",
+                "runtime_instance_id": f"runtime-{len(started)}",
+                "last_error": None,
+                "current_status": None,
+                "current_activity": None,
+                "current_tool": None,
+                "current_tool_call_id": None,
+                "backlog_depth": 0,
+            }
+
+    monkeypatch.setattr("ax_cli.gateway_daemon.ManagedAgentRuntime", FakeRuntime)
+    daemon = gateway_core.GatewayDaemon(client_factory=lambda **kwargs: _SharedRuntimeClient({}))
+
+    entry = {
+        "name": "echo-demo",
+        "agent_id": "agent-echo",
+        "space_id": "space-1",
+        "base_url": "https://paxai.app",
+        "runtime_type": "echo",
+        "desired_state": "running",
+        "attestation_state": "verified",
+        "approval_state": "approved",
+        "identity_status": "verified",
+        "environment_status": "environment_allowed",
+        "space_status": "active_allowed",
+    }
+
+    # First reconcile — establishes the running runtime.
+    daemon._reconcile_runtime(entry)
+    assert started == ["echo-demo"]
+    assert stopped == []
+
+    # Second reconcile with no changes — idempotent, no respawn.
+    daemon._reconcile_runtime(entry)
+    assert started == ["echo-demo"]
+    assert stopped == []
+
+    # Simulate `ax gateway agents restart`: write a new restart_requested_at nonce.
+    entry["restart_requested_at"] = "2026-06-10T12:00:00+00:00"
+    daemon._reconcile_runtime(entry)
+
+    assert stopped == ["echo-demo"], "runtime.stop() must be called when restart_requested_at changes"
+    assert started == ["echo-demo", "echo-demo"], "runtime must be respawned after stop"

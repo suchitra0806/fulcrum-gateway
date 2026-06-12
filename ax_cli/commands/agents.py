@@ -19,6 +19,7 @@ from ..config import (
     resolve_space_id,
 )
 from ..output import JSON_OPTION, console, err_console, handle_error, print_json, print_kv, print_table
+from .agent_profiles import profiles_app
 from .handoff import _wait_for_handoff_reply
 
 # Backend caps avatar_url at 512 chars (see ax-backend app/api/v1/agents.py
@@ -1006,6 +1007,8 @@ def check(
         if body:
             console.print(body)
 
+
+app.add_typer(profiles_app, name="profiles")
 
 placement_app = typer.Typer(
     name="placement",
