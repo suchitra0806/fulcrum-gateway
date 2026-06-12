@@ -474,7 +474,12 @@ def _sentinel_inference_sdk_venv_status(client: str) -> dict:
                     "summary": f"{pkg} not importable from {venv_python}. Run `{install_hint}`.",
                 }
         except Exception as exc:  # noqa: BLE001
-            return {"ready": False, "template_id": "sentinel_inference_sdk", "client": client, "summary": f"verify failed: {exc}"}
+            return {
+                "ready": False,
+                "template_id": "sentinel_inference_sdk",
+                "client": client,
+                "summary": f"verify failed: {exc}",
+            }
     return {
         "ready": True,
         "template_id": "sentinel_inference_sdk",
