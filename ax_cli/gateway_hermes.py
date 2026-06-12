@@ -47,18 +47,27 @@ def _sentinel_inference_sdk_script(entry: dict[str, Any]) -> Path:
     return bundled
 
 
+def sentinel_sdk_venv_root(client: str) -> Path:
+    """Gateway-owned venv root for sentinel_inference_sdk, scoped per client.
+
+    All agents on the same client share this venv — credentials and workdir
+    are per-agent and live elsewhere. Returns
+    ``~/.ax/runtimes/sentinel_inference_sdk/<client>``.
+    """
+    return Path.home() / ".ax" / "runtimes" / "sentinel_inference_sdk" / client
+
+
 def _sentinel_inference_sdk_python(entry: dict[str, Any]) -> str:
-    configured = str(entry.get("hermes_python") or entry.get("python") or "").strip()
+    # 1. Explicit per-agent override (set via `agents update --python`).
+    configured = str(entry.get("python") or "").strip()
     if configured:
         return configured
-    hermes_repo = str(entry.get("hermes_repo_path") or "").strip()
-    if hermes_repo:
-        candidate = Path(hermes_repo).expanduser() / ".venv" / "bin" / "python3"
+    # 2. Client-scoped shared venv under ~/.ax/runtimes/sentinel_inference_sdk/<client>.
+    client = str(entry.get("client") or "").strip()
+    if client:
+        candidate = sentinel_sdk_venv_root(client) / ".venv" / "bin" / "python3"
         if candidate.exists():
             return str(candidate)
-    default = Path("/home/ax-agent/shared/repos/hermes-agent/.venv/bin/python3")
-    if default.exists():
-        return str(default)
     return "python3"
 
 

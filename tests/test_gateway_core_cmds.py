@@ -2935,7 +2935,7 @@ def test_proactive_binary_check_catches_missing_python(monkeypatch, tmp_path):
             "base_url": "https://paxai.app",
             "runtime_type": "sentinel_inference_sdk",
             "token_file": str(tmp_path / "tok"),
-            "hermes_python": missing_python,
+            "python": missing_python,
             "last_runtime_error_at": long_ago,
             "consecutive_setup_errors": 0,
         },
