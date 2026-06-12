@@ -203,7 +203,14 @@ Expectations that make this work:
   roadmap lane looks light, lean harder into stability; if it's heavy,
   prioritize it.
 - **Reviews are free wins.** You can't go wrong reviewing an open PR before
-  pulling new work.
+  pulling new work. And if several of *your* PRs are sitting unreviewed,
+  that's usually the signal to go review other people's work — and to ask
+  for reviews directly on Slack rather than waiting to be noticed.
+  Reciprocity is how the queue stays short in both directions.
+- **A reviewed PR outranks new work.** If one of your PRs has changes
+  requested or an approval waiting, handling it — respond, fix, or merge —
+  comes before pulling anything new. Work that's one step from done is worth
+  more than a fresh start.
 - **When unsure, ping Sean or Mark.**
 
 ---
@@ -290,6 +297,9 @@ gh label create "epic: <name>" --color 5319e7 --description "<one-line epic summ
 - Picking work? → `P0` first; `roadmap` until you've hit your minimum; past
   that, judgment between more roadmap and bugs — read the week. Self-assign
   immediately.
+- Changes requested or approval waiting on your PR? Handle that before
+  pulling new work. PRs of yours piling up unreviewed? Review others' PRs
+  and ask for reviews on Slack.
 - One self-assigned issue at a time, unless blocked (including awaiting
   review) or pulled onto something higher priority.
 - One base lane per issue (`P1`–`P5`, or roadmap via `roadmap` and/or
