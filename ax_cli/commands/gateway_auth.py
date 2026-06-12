@@ -5,6 +5,7 @@ Extracted from ``ax_cli/commands/gateway.py`` (issue #28 Phase 1).
 
 from __future__ import annotations
 
+import contextvars
 import os
 import socket
 import time
@@ -14,10 +15,18 @@ import httpx
 import typer
 
 from .. import gateway as gateway_core
-from ..client import AxClient
+from ..client import (
+    RATE_LIMIT_INTERACTIVE_LOW_WATER,
+    RATE_LIMIT_LOW_WATER,
+    RATE_LIMIT_MAX_WAIT,
+    AxClient,
+    _RateLimitState,
+)
 from ..commands import auth as auth_cmd
 from ..config import resolve_space_id, resolve_user_token
 from ..gateway import (
+    _RequestLogger,
+    _ui_request_logger,
     gateway_dir,
     load_gateway_registry,
     load_gateway_session,
@@ -193,7 +202,27 @@ def _guard_gateway_exchange(client: AxClient) -> None:
     client._get_jwt = guarded
 
 
-def _load_gateway_user_client() -> AxClient:
+_gateway_rate_limit_state = _RateLimitState()
+_cli_request_logger = _RequestLogger(role="cli")
+_is_ui_server_process = False  # set to True at UI server startup for correct log attribution
+
+# Human-initiated work gets the aggressive low-water threshold; automated
+# traffic yields early. CLI invocations approximate "human". In the UI server
+# everything is automated polling except dashboard mutations, which the
+# request handler marks via this context flag (per-thread under
+# ThreadingHTTPServer; the contextvar default applies to each new request).
+_interactive_request: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "ax_gateway_interactive_request", default=False
+)
+
+
+def _rate_limit_low_water_for_caller() -> int:
+    if _is_ui_server_process and not _interactive_request.get():
+        return RATE_LIMIT_LOW_WATER
+    return RATE_LIMIT_INTERACTIVE_LOW_WATER
+
+
+def _load_gateway_user_client(request_logger: "_RequestLogger | None" = None) -> AxClient:
     if os.environ.get("AX_OFFLINE"):
         from ax_cli.offline_client import OfflineAxClient
 
@@ -210,9 +239,27 @@ def _load_gateway_user_client() -> AxClient:
     if not token.startswith("axp_u_"):
         err_console.print("[red]Gateway bootstrap currently requires a user PAT (axp_u_).[/red]")
         raise typer.Exit(1)
+    import datetime
+
+    def _on_rate_limit_wait(wait_seconds: float, reset_at: float) -> None:
+        reset_str = datetime.datetime.fromtimestamp(reset_at).strftime("%H:%M:%S")
+        err_console.print(
+            f"[yellow]Rate limit reached — waiting {wait_seconds:.0f}s until {reset_str} before next request.[/yellow]"
+        )
+        record_gateway_activity("rate_limit_wait", wait_seconds=wait_seconds, reset_at=reset_str)
+
+    logger = request_logger or (_ui_request_logger if _is_ui_server_process else _cli_request_logger)
     _warn_if_gateway_session_stale()
     _warn_if_gateway_space_divergent()
-    client = AxClient(base_url=str(session.get("base_url") or auth_cmd.DEFAULT_LOGIN_BASE_URL), token=token)
+    client = AxClient(
+        base_url=str(session.get("base_url") or auth_cmd.DEFAULT_LOGIN_BASE_URL),
+        token=token,
+        on_rate_limit_wait=_on_rate_limit_wait,
+        max_rate_limit_wait=RATE_LIMIT_MAX_WAIT,
+        rate_limit_state=_gateway_rate_limit_state,
+        rate_limit_low_water=_rate_limit_low_water_for_caller(),
+        on_request_complete=logger.make_callback(),
+    )
     _guard_gateway_exchange(client)
     return client
 
@@ -288,7 +335,8 @@ class UpstreamRateLimitedError(RuntimeError):
         except (ValueError, AttributeError, TypeError):
             retry_after = None
         self.retry_after_seconds = retry_after
-        super().__init__(f"Upstream rate-limited after {retries_attempted} retries")
+        wait_hint = f" — retry after {retry_after}s" if retry_after else ""
+        super().__init__(f"Upstream rate-limited after {retries_attempted} retries{wait_hint}")
 
 
 def _with_upstream_429_retry(
@@ -296,7 +344,7 @@ def _with_upstream_429_retry(
     *,
     max_retries: int,
     base_wait: float = 1.0,
-    max_wait: float = 120.0,
+    max_wait: float = RATE_LIMIT_MAX_WAIT,
 ):
     """Run ``call`` and retry on httpx 429, honoring ``Retry-After`` when present.
 
@@ -305,6 +353,12 @@ def _with_upstream_429_retry(
     per-user rate-limit responses; ignoring it and falling back to a 1s/2s
     exponential backoff exhausts the retry budget far below the server's
     cooldown and surfaces as a spurious ``UpstreamRateLimitedError``.
+
+    If ``Retry-After`` exceeds ``max_wait``, raises ``UpstreamRateLimitedError``
+    immediately rather than sleeping for less than the server's requested
+    cooldown — retrying below the server's window risks circuit-breaker
+    escalation. Callers receive an actionable error with
+    ``retry_after_seconds`` and ``reset_at``.
 
     Other httpx exceptions (4xx/5xx that aren't 429, network errors) propagate
     immediately. After the configured retry budget is exhausted on a
@@ -325,6 +379,8 @@ def _with_upstream_429_retry(
                 hint = float(retry_after_raw) if retry_after_raw is not None else 0.0
             except (TypeError, ValueError):
                 hint = 0.0
+            if hint > max_wait:
+                raise UpstreamRateLimitedError(exc, attempts) from exc
             exp = base_wait * (2**attempts)
             wait = min(max(exp, hint), max_wait)
             time.sleep(wait)

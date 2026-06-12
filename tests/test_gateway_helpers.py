@@ -3624,3 +3624,51 @@ class TestUpstreamRateLimitedError:
         exc = httpx.HTTPStatusError("429", request=request, response=response)
         rate_err = gw_auth.UpstreamRateLimitedError(exc, retries_attempted=2)
         assert rate_err.retry_after_seconds is None
+
+
+# ---------------------------------------------------------------------------
+# _RequestLogger
+# ---------------------------------------------------------------------------
+
+
+class TestRequestLogger:
+    """_RequestLogger writes structured records, rotates, and handles I/O failures gracefully."""
+
+    def test_write_failure_prints_to_stderr(self, monkeypatch, capsys):
+        monkeypatch.setenv("AX_LOG_API_REQUESTS", "1")
+        logger = gw._RequestLogger(role="test")
+
+        monkeypatch.setattr("builtins.open", lambda *a, **kw: (_ for _ in ()).throw(OSError("disk full")))
+        logger._write("GET", "/test", 200, 99, None, agent_name=None, agent_id=None)
+        captured = capsys.readouterr()
+        assert "api-requests.log write failed" in captured.err
+        assert "disk full" in captured.err
+
+    def test_enabled_by_default(self, monkeypatch):
+        monkeypatch.delenv("AX_LOG_API_REQUESTS", raising=False)
+        assert gw._RequestLogger(role="test")._enabled is True
+
+    def test_disabled_by_env(self, monkeypatch):
+        monkeypatch.setenv("AX_LOG_API_REQUESTS", "0")
+        logger = gw._RequestLogger(role="test")
+        assert logger._enabled is False
+        logger._write("GET", "/test", 200, 99, None, agent_name=None, agent_id=None)
+        assert not gw.api_requests_log_path().exists()
+
+    def test_rotates_at_size_threshold(self, monkeypatch):
+        from ax_cli import gateway_storage as gw_storage
+
+        monkeypatch.setenv("AX_LOG_API_REQUESTS", "1")
+        monkeypatch.setattr(gw_storage, "_API_REQUESTS_LOG_MAX_BYTES", 64)
+        logger = gw._RequestLogger(role="test")
+        log_path = gw.api_requests_log_path()
+        log_path.write_text("x" * 128 + "\n")
+
+        logger._write("GET", "/test", 200, 99, None, agent_name=None, agent_id=None)
+
+        backup = log_path.with_name(log_path.name + ".1")
+        assert backup.exists()
+        assert backup.read_text().startswith("x" * 64)
+        records = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+        assert len(records) == 1
+        assert records[0]["path"] == "/test"

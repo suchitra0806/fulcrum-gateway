@@ -12,7 +12,7 @@ import time
 import uuid
 from typing import Any, Callable
 
-from .client import AxClient
+from .client import AxClient, _RateLimitState
 from .gateway_constants import (
     _CONTROLLED_APPROVAL_STATES,
     _CONTROLLED_ATTESTATION_STATES,
@@ -42,6 +42,7 @@ class GatewayDaemon:
         self.poll_interval = poll_interval
         self._runtimes: dict[str, ManagedAgentRuntime] = {}
         self._stop = threading.Event()
+        self._rate_limit_state = _RateLimitState()
 
     def _log(self, message: str) -> None:
         self.logger(message)
@@ -227,7 +228,12 @@ class GatewayDaemon:
                     self._runtimes.pop(name, None)
                     runtime = None
             if runtime is None:
-                runtime = ManagedAgentRuntime(entry, client_factory=self.client_factory, logger=self.logger)
+                runtime = ManagedAgentRuntime(
+                    entry,
+                    client_factory=self.client_factory,
+                    logger=self.logger,
+                    rate_limit_state=self._rate_limit_state,
+                )
                 self._runtimes[name] = runtime
                 runtime.start()
             else:
@@ -402,6 +408,8 @@ class GatewayDaemon:
             return self.client_factory(
                 base_url=session.get("base_url"),
                 token=token,
+                rate_limit_state=self._rate_limit_state,
+                on_request_complete=_daemon_request_logger.make_callback(agent_name="sweep"),
             )
         except Exception:  # noqa: BLE001
             return None
@@ -493,9 +501,27 @@ class GatewayDaemon:
                 _gw_heartbeat_client = self.client_factory(
                     base_url=str(session.get("base_url") or ""),
                     token=str(session.get("token") or ""),
+                    rate_limit_state=self._rate_limit_state,
+                    on_request_complete=_daemon_request_logger.make_callback(agent_name="gateway_heartbeat"),
                 )
             except Exception:
                 _gw_heartbeat_client = None
+
+        # Cold-start pre-warm: the first gateway heartbeat doubles as the
+        # warm — its response headers populate the shared rate-limit window
+        # before the first burst of runtime traffic, and gateway presence
+        # registers at startup instead of one reconcile tick later. Fall back
+        # to a lightweight GET for sessions that predate gateway registration.
+        if _gw_heartbeat_client and _gw_heartbeat_id:
+            try:
+                _gw_heartbeat_client.send_gateway_heartbeat(_gw_heartbeat_id)
+                _gw_last_heartbeat = time.monotonic()
+            except Exception:
+                pass
+        else:
+            sweep_client = self._sweep_client(session)
+            if sweep_client:
+                self._rate_limit_state.warm(sweep_client)
 
         try:
             while not self._stop.is_set():
@@ -567,6 +593,7 @@ from .gateway_identity import (  # noqa: E402
 from .gateway_runtime import ManagedAgentRuntime, RuntimeLogger, _is_hermes_plugin_runtime  # noqa: E402
 from .gateway_state import _external_runtime_connected, _external_runtime_expected  # noqa: E402
 from .gateway_storage import (  # noqa: E402
+    _daemon_request_logger,
     active_gateway_pids,
     clear_gateway_pid,
     load_gateway_registry,
