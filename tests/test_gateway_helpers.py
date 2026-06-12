@@ -2392,13 +2392,24 @@ class TestHermesSetupStatus:
             "ax_cli.gateway_assets._hermes_repo_candidates",
             lambda entry=None: [fake_path],
         )
+        # sentinel_inference_sdk no longer requires a hermes-agent checkout —
+        # it uses a gateway-owned venv under ~/.ax/runtimes/sentinel_inference_sdk.
+        # hermes_setup_status short-circuits to ready for this runtime.
         entry = {
             "template_id": "hermes",
             "runtime_type": "sentinel_inference_sdk",
         }
         result = hermes_setup_status(entry)
-        assert result["ready"] is False
-        assert "not found" in result["summary"].lower()
+        assert result["ready"] is True
+
+        # The hermes-not-found gate still applies for bare hermes template entries.
+        entry_hermes = {
+            "template_id": "hermes",
+            "runtime_type": "hermes",
+        }
+        result_hermes = hermes_setup_status(entry_hermes)
+        assert result_hermes["ready"] is False
+        assert "not found" in result_hermes["summary"].lower()
 
 
 # ---------------------------------------------------------------------------
