@@ -53,6 +53,7 @@ queue is then a separate, explicit decision.
 | `enhancement`, `documentation`, `question` | The filer | At creation |
 | `roadmap`, `epic: <name>` | Leadership (Sean + Mark) | Weekly grooming pass |
 | `P0` | Leadership (Sean + Mark) | When a commitment depends on it |
+| `re-evaluating` | Leadership (Sean + Mark) | When sprint fit of a roadmap-lane item is being reconsidered |
 | Resolution labels (`duplicate`, `invalid`, `wontfix`, `deferred`) | Whoever closes/parks the issue | At close or park |
 | Automation labels (see [section 5](#5-orthogonal-labels)) | Bots | Never by hand |
 
@@ -153,6 +154,20 @@ it to the member issues during grooming.
   When the epic ships, the label stays on the closed issues as the record of
   what it covered.
 
+#### `re-evaluating` — roadmap membership under review
+
+When the team is reconsidering whether a roadmap-lane item still belongs in
+the sprint, leadership stacks `re-evaluating` on it. The issue is **not
+deferred** — it keeps its `roadmap` / `epic: <name>` label(s) and stays in the
+lane — but it is **not a good pull** while the label is on: don't self-assign
+it. Grooming resolves it one of two ways: remove `re-evaluating` (the issue is
+fair game again) or park it with `deferred` (which, as usual, removes its lane
+labels).
+
+- **Who applies it:** leadership only, like `roadmap` and epic labels.
+- **What it is not:** a severity or resolution call. It says nothing about how
+  important the work is — only that sprint membership is an open question.
+
 ---
 
 ## 4. Consuming issues: the pull order
@@ -162,8 +177,9 @@ Finished something? Walk the lanes top-down, then self-assign:
 1. **Any `P0` unassigned?** Grab it. You can't go wrong picking one up when you
    spot it.
 2. **Haven't hit your roadmap minimum yet?** Pull a roadmap-lane issue
-   (`roadmap` or `epic: <name>`) that fits the sprint direction. Roadmap is
-   the default thing we work on, and the minimum is a floor — not the target.
+   (`roadmap` or `epic: <name>`) that fits the sprint direction — skipping
+   anything marked `re-evaluating`. Roadmap is the default thing we work on,
+   and the minimum is a floor — not the target.
 3. **Past the minimum, read the week.** It's a judgment call between another
    roadmap item and a bug, given where we are: if the roadmap lane is heavy or
    the sprint direction needs the push, take more roadmap; if P1/P2s are
@@ -223,6 +239,7 @@ pipeline.
 | `invalid` | Doesn't seem right / not actionable as filed. |
 | `wontfix` | Deliberate decision not to do this; say why when closing. |
 | `deferred` | Parked: real, but consciously not now. A deferred issue keeps its type label but leaves its lane (remove the pipeline label). Re-entry happens via grooming. |
+| `re-evaluating` | Roadmap item under review: not deferred, but not a pull candidate while the team decides whether it still belongs in the sprint. Keeps its lane label(s); resolved in grooming. See [section 3](#3-pipeline-labels-the-swimlanes). |
 
 ### Automation labels — hands off
 
@@ -251,6 +268,7 @@ gh label create "P4"      --color d4c5f9 --description "Low: cosmetic or low-imp
 gh label create "P5"      --color c2e0c6 --description "Trivial: polish, fixed when capacity allows"
 gh label create "roadmap" --color 2da44e --description "Planned work queued in grooming (leadership-applied)"
 gh label create "ux"      --color bfd4f2 --description "User experience is the heart of the issue: ergonomics, errors, output, friction"
+gh label create "re-evaluating" --color d4a72c --description "Roadmap item under review: not deferred, but not a pull candidate while sprint fit is reconsidered"
 ```
 
 Epic labels are created on demand by leadership as epics are opened, all with
@@ -275,6 +293,8 @@ gh label create "epic: <name>" --color 5319e7 --description "<one-line epic summ
 - One base lane per issue (`P1`–`P5`, or roadmap via `roadmap` and/or
   `epic: <name>`); `P0` may stack on top. No pipeline label at all = awaiting
   grooming.
+- `re-evaluating` on a roadmap item = leave it alone for now. It's neither
+  deferred nor pullable; grooming will settle it.
 - `P0` ≠ severity. It means a commitment depends on it, and it outranks
   whatever label sits under it.
 - Never touch bot labels.
