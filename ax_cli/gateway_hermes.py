@@ -161,6 +161,7 @@ def _compose_agent_system_prompt(entry: dict[str, Any]) -> str | None:
 # hermes_sdk is intentionally excluded: use sentinel_hermes_sdk runtime type.
 _INFERENCE_SDK_CLIENTS = {
     "openai_sdk",
+    "openrouter_sdk",
     "groq_sdk",
     "gemini_sdk",
     "leapfrog_sdk",
