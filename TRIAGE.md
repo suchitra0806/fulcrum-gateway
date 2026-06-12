@@ -192,10 +192,12 @@ Expectations that make this work:
   duplicate effort. An unassigned issue is available; an assigned one is taken.
 - **One self-assigned issue at a time.** Self-assignment means "actively
   working on this," so in general you should hold only one. The exceptions are
-  real: you're blocked on an issue, or you had to pause it for something
-  higher priority (a `P0` pull is the typical case). If you're holding more
-  than one for any other reason, unassign what you're not actually working —
-  it's hiding available work from the rest of the team.
+  real: you're blocked on an issue; your issue's PR is awaiting review (really
+  a subcategory of blocked, but worth calling out explicitly — don't sit idle
+  while a review turns around); or you had to pause it for something higher
+  priority (a `P0` pull is the typical case). If you're holding more than one
+  for any other reason, unassign what you're not actually working — it's
+  hiding available work from the rest of the team.
 - **At least one `roadmap` issue per person, per one-week sprint.** Beyond
   that, use judgment on the roadmap-vs-bug mix — read the week's signal. If the
   roadmap lane looks light, lean harder into stability; if it's heavy,
@@ -288,8 +290,8 @@ gh label create "epic: <name>" --color 5319e7 --description "<one-line epic summ
 - Picking work? → `P0` first; `roadmap` until you've hit your minimum; past
   that, judgment between more roadmap and bugs — read the week. Self-assign
   immediately.
-- One self-assigned issue at a time, unless blocked or pulled onto something
-  higher priority.
+- One self-assigned issue at a time, unless blocked (including awaiting
+  review) or pulled onto something higher priority.
 - One base lane per issue (`P1`–`P5`, or roadmap via `roadmap` and/or
   `epic: <name>`); `P0` may stack on top. No pipeline label at all = awaiting
   grooming.
