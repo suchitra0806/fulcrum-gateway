@@ -45,13 +45,15 @@ _STATE_STYLES = {
     "error": "red",
     "stopped": "dim",
 }
+# Tone contract (ADR-008): gray is reserved for operator-intent off states;
+# desired=running but broken renders red — so BLOCKED and OFFLINE are red.
 _PRESENCE_STYLES = {
     "IDLE": "green",
     "QUEUED": "cyan",
     "WORKING": "green",
-    "BLOCKED": "yellow",
+    "BLOCKED": "red",
     "STALE": "yellow",
-    "OFFLINE": "dim",
+    "OFFLINE": "red",
     "ERROR": "red",
 }
 _CONFIDENCE_STYLES = {

@@ -145,24 +145,160 @@ def _check_honeypot(token: str, base_url: str) -> None:
             return
 
 
+RATE_LIMIT_MAX_WAIT = 120.0  # shared cap for proactive and reactive rate-limit waits
+RATE_LIMIT_LOW_WATER = 10  # automated traffic (daemon, UI polling): yield early, leave headroom
+RATE_LIMIT_INTERACTIVE_LOW_WATER = 2  # human-initiated actions: run the window nearly to empty
+
+
+class _RateLimitState:
+    """Shareable rate-limit window facts for coordinating across client instances.
+
+    Holds only what the server said — ``remaining`` and ``reset_at``. Whether
+    that means "wait" is the *caller's* policy: each client checks against its
+    own low-water threshold (human-initiated actions run the window nearly to
+    empty; automated traffic yields early), so one shared state can serve
+    callers of differing urgency in the same process.
+
+    Thread safety: record() is lock-protected for writes. wait_if_needed()
+    reads without the lock — relying on CPython's GIL for atomic attribute
+    access. A stale read at worst fires one extra request, which the reactive
+    429 path already handles. Sleeping while holding a lock would be worse.
+    """
+
+    def __init__(self) -> None:
+        import threading
+
+        self._lock = threading.Lock()
+        self.reset_at: float = 0.0
+        self.remaining: int = 9999  # unknown until first response
+
+    def record(self, remaining: int, reset_at: float) -> None:
+        import time as _time
+
+        with self._lock:
+            self.remaining = remaining
+            if reset_at:
+                self.reset_at = reset_at
+            elif remaining <= RATE_LIMIT_LOW_WATER:
+                # Low window with no reset header: assume the window is about
+                # to turn over so waiters sleep the 0.5s buffer, not a stale
+                # reset timestamp from a previous window.
+                self.reset_at = _time.time()
+
+    def exhausted_for(self, low_water: int) -> bool:
+        """Whether a caller with this threshold should wait before sending."""
+        import time as _time
+
+        return self.remaining <= low_water and _time.time() < self.reset_at + 0.5
+
+    def warm(self, client: "AxClient", path: str = "/api/v1/agents") -> None:
+        """Issue a lightweight GET to populate rate-limit state before a burst."""
+        try:
+            client._http.get(path, params={"limit": 1})
+        except Exception:
+            pass  # best-effort — don't block startup on a warm failure
+
+    def wait_if_needed(self, max_wait: float, on_wait=None, *, low_water: int = RATE_LIMIT_LOW_WATER) -> None:
+        if self.remaining > low_water:
+            return
+        import time as _time
+
+        reset_at = self.reset_at
+        wait = max(0.0, reset_at - _time.time() + 0.5)
+        if wait == 0.0:
+            return  # window already turned over; next response refreshes the facts
+        if wait > max_wait:
+            raise RateLimitPreemptedError(wait, reset_at)
+        if on_wait:
+            on_wait(wait, reset_at)
+        _time.sleep(wait)
+
+
+class RateLimitPreemptedError(RuntimeError):
+    """Raised when the rate-limit reset window exceeds the caller's max wait.
+
+    Carries ``retry_after_seconds`` and ``reset_at`` so callers can surface
+    an actionable message: "rate limited — try again at <time>".
+    """
+
+    def __init__(self, wait_seconds: float, reset_at: float) -> None:
+        self.retry_after_seconds = wait_seconds
+        self.reset_at = reset_at
+        import datetime
+
+        reset_str = datetime.datetime.fromtimestamp(reset_at).strftime("%H:%M:%S")
+        super().__init__(f"Rate limit window ({wait_seconds:.0f}s) exceeds maximum wait — try again after {reset_str}.")
+
+
 class _RetryOnAuthClient:
-    """Wraps httpx.Client to retry on 401 with fresh JWT + exponential backoff.
+    """Wraps httpx.Client to retry on 401 with fresh JWT + exponential backoff,
+    and proactively waits when the rate-limit window is exhausted to avoid 429s.
 
     Intercepts all HTTP methods. On 401:
     1. Clear cached JWT, force re-exchange
     2. Retry with backoff (0.5s, 1s, 2s)
     3. Give up after 3 retries
+
+    Rate-limit tracking: after each response, records x-ratelimit-remaining and
+    x-ratelimit-reset. Before the next request, if the window is exhausted:
+    - raises RateLimitPreemptedError if the wait exceeds max_rate_limit_wait
+    - otherwise sleeps until the reset timestamp and calls on_rate_limit_wait
+      so callers can notify the user via CLI and UI.
     """
 
     _MAX_RETRIES = 3
     _BACKOFF_BASE = 1.0  # seconds — retries at 1s, 2s, 4s
+    _RATE_LIMIT_BUFFER = 0.5  # extra seconds after reset to avoid edge races
 
-    def __init__(self, inner: httpx.Client, get_fresh_jwt):
+    def __init__(
+        self,
+        inner: httpx.Client,
+        get_fresh_jwt,
+        *,
+        on_rate_limit_wait=None,
+        max_rate_limit_wait: float = RATE_LIMIT_MAX_WAIT,
+        rate_limit_state: _RateLimitState | None = None,
+        rate_limit_low_water: int = RATE_LIMIT_LOW_WATER,
+        on_request_complete=None,
+    ):
         self._inner = inner
         self._get_fresh_jwt = get_fresh_jwt
+        self._on_rate_limit_wait = on_rate_limit_wait
+        self._max_rate_limit_wait = max_rate_limit_wait
+        self._rl = rate_limit_state or _RateLimitState()
+        self._rate_limit_low_water = rate_limit_low_water
+        self._on_request_complete = on_request_complete
+
+    def _record_rate_limit(self, r: httpx.Response) -> None:
+        try:
+            remaining_hdr = r.headers.get("x-ratelimit-remaining")
+            reset_hdr = r.headers.get("x-ratelimit-reset")
+            if remaining_hdr is not None:
+                remaining: int | None = int(remaining_hdr)
+                reset_ts = float(reset_hdr or "0")
+                self._rl.record(remaining, reset_ts)
+            else:
+                remaining = None
+                reset_ts = float(reset_hdr or "0")
+            if self._on_request_complete:
+                method = r.request.method if r.request else "?"
+                path = r.request.url.path if r.request else "?"
+                content_type = r.headers.get("content-type", "")
+                self._on_request_complete(method, path, r.status_code, remaining, reset_ts or None, content_type)
+        except (ValueError, TypeError):
+            pass
+
+    def _wait_if_rate_limited(self) -> None:
+        self._rl.wait_if_needed(
+            self._max_rate_limit_wait,
+            self._on_rate_limit_wait,
+            low_water=self._rate_limit_low_water,
+        )
 
     def _retry(self, method: str, *args, **kwargs) -> httpx.Response:
+        self._wait_if_rate_limited()
         r = getattr(self._inner, method)(*args, **kwargs)
+        self._record_rate_limit(r)
         if r.status_code != 401 or not self._get_fresh_jwt:
             return r
 
@@ -175,7 +311,9 @@ class _RetryOnAuthClient:
             headers = kwargs.get("headers") or {}
             headers["Authorization"] = f"Bearer {fresh_jwt}"
             kwargs["headers"] = headers
+            self._wait_if_rate_limited()
             r = getattr(self._inner, method)(*args, **kwargs)
+            self._record_rate_limit(r)
             if r.status_code != 401:
                 return r
         return r  # final 401 after all retries
@@ -196,7 +334,16 @@ class _RetryOnAuthClient:
         return self._retry("delete", *args, **kwargs)
 
     def stream(self, *args, **kwargs):
-        return self._inner.stream(*args, **kwargs)
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _tracked_stream():
+            self._wait_if_rate_limited()
+            with self._inner.stream(*args, **kwargs) as response:
+                self._record_rate_limit(response)
+                yield response
+
+        return _tracked_stream()
 
     def close(self):
         self._inner.close()
@@ -224,7 +371,19 @@ def _block_user_token(context: str) -> None:
 
 
 class AxClient:
-    def __init__(self, base_url: str, token: str, *, agent_name: str | None = None, agent_id: str | None = None):
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        *,
+        agent_name: str | None = None,
+        agent_id: str | None = None,
+        on_rate_limit_wait=None,
+        max_rate_limit_wait: float = RATE_LIMIT_MAX_WAIT,
+        rate_limit_state: _RateLimitState | None = None,
+        rate_limit_low_water: int = RATE_LIMIT_LOW_WATER,
+        on_request_complete=None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.agent_id = agent_id  # Used for exchange parameters, NOT headers (§13)
@@ -263,7 +422,15 @@ class AxClient:
         )
         # Wrap with 401 retry — on auth failure, force re-exchange and retry with backoff
         get_fresh = (lambda: self._get_jwt(force_refresh=True)) if self._use_exchange else None
-        self._http = _RetryOnAuthClient(inner, get_fresh)
+        self._http = _RetryOnAuthClient(
+            inner,
+            get_fresh,
+            on_rate_limit_wait=on_rate_limit_wait,
+            max_rate_limit_wait=max_rate_limit_wait,
+            rate_limit_state=rate_limit_state,
+            rate_limit_low_water=rate_limit_low_water,
+            on_request_complete=on_request_complete,
+        )
 
     def _get_jwt(self, *, force_refresh: bool = False) -> str:
         """Get a JWT from the exchanger with appropriate token class.

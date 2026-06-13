@@ -380,7 +380,11 @@ def _register_managed_agent(
         max_retries=INTERACTIVE_429_MAX_RETRIES,
         base_wait=INTERACTIVE_429_BASE_WAIT,
     )
-    token_file = _save_agent_token(name, token)
+    # Saves the token to the canonical <gateway_dir>/agents/<name>/token. The
+    # return path is intentionally not captured: recovery derives it from the
+    # agent name (agent_token_path / agent_token_relpath), so it is neither
+    # stored in the registry as an absolute path nor recorded in the event.
+    _save_agent_token(name, token)
 
     requires_approval = bool((template or {}).get("requires_approval", False))
     entry_payload = {
@@ -444,7 +448,6 @@ def _register_managed_agent(
         "managed_agent_added",
         entry=entry,
         space_id=selected_space,
-        token_file=str(token_file),
     )
     return annotate_runtime_health(entry, registry=registry)
 
@@ -693,12 +696,12 @@ def _write_agent_workspace_config(entry: dict) -> None:
 def _update_managed_agent(
     *,
     name: str,
-    template_id: str | None = None,
-    runtime_type: str | None = None,
+    template_id: str | object = None,
+    runtime_type: str | object = None,
     exec_cmd: str | object = _UNSET,
     workdir: str | object = _UNSET,
-    provider: str | None = None,
-    description: str | None = None,
+    provider: str | object = _UNSET,
+    description: str | object = _UNSET,
     model: str | object = _UNSET,
     system_prompt: str | object = _UNSET,
     timeout_seconds: int | object = _UNSET,
@@ -717,6 +720,16 @@ def _update_managed_agent(
     if not entry:
         raise LookupError(f"Managed agent not found: {name}")
 
+    # _UNSET defaults let callers (manifest apply) omit these without clearing
+    # them; downstream treats None as "leave unchanged", so normalize here.
+    if template_id is _UNSET:
+        template_id = None
+    if runtime_type is _UNSET:
+        runtime_type = None
+    if provider is _UNSET:
+        provider = None
+    if description is _UNSET:
+        description = None
     template = None
     if template_id:
         try:
@@ -1010,9 +1023,12 @@ def _read_recovery_evidence(name: str) -> dict | None:
 
     - Activity log: most recent managed_agent_added for ``name`` →
       agent_id, asset_id, install_id, gateway_id, runtime_type,
-      transport, space_id, token_file, credential_source, ts.
+      transport, space_id, credential_source, ts.
     - Token directory: ``~/.ax/gateway/agents/<name>/token`` must exist
-      (we don't fabricate credentials).
+      (we don't fabricate credentials). The token path is derived from
+      ``name`` (agent_token_path / agent_token_relpath), never read from
+      the event — older records may still carry a ``token_file`` value,
+      but it is ignored.
     - Workdir ``.ax/AGENT_CONTEXT.md`` if present, for the workdir hint.
 
     Returns None if no managed_agent_added event is recorded or the
@@ -1863,6 +1879,11 @@ def apply_manifest(
         else:
             err_console.print("[red]Refusing to apply non-interactively without --auto-confirm.[/red]")
             raise typer.Exit(1)
+
+    # Resolve relative workdir at apply time so "." means the directory the
+    # operator ran apply from, not the daemon's cwd when the process launches.
+    if "workdir" in manifest and manifest["workdir"]:
+        manifest["workdir"] = str(Path(manifest["workdir"]).expanduser().resolve())
 
     try:
         if current_entry is None:
