@@ -626,6 +626,50 @@ def agent_template_catalog() -> dict[str, dict[str, Any]]:
                 "supports_command_override": True,
             },
         },
+        "pydantic_ai": {
+            "id": "pydantic_ai",
+            "label": "Pydantic AI",
+            "description": "Pydantic AI agent runtime managed by Gateway.",
+            "availability": "ready",
+            "launchable": True,
+            "runtime_type": "exec",
+            "asset_class": "interactive_agent",
+            "intake_model": "launch_on_send",
+            "trigger_sources": ["direct_message"],
+            "return_paths": ["inline_reply"],
+            "telemetry_shape": "basic",
+            "suggested_name": "pydantic-ai-bot",
+            "operator_summary": (
+                "Gateway-managed Pydantic AI bridge. Real LLM path via Groq over the "
+                "OpenAI-compatible endpoint when pydantic-ai is installed AND "
+                "GROQ_API_KEY is set. Otherwise a stub ack reply (Pydantic AI is not "
+                "invoked) so the round trip still completes in credential-less or "
+                "partial-install environments. V1 ships plain-text outputs; structured "
+                "Pydantic-validated outputs are a follow-up."
+            ),
+            "recommended_test_message": "Reply with: Pydantic AI round trip OK.",
+            "what_you_need": [
+                "Python 3.11+ on this machine (the bridge runs as a Gateway-managed subprocess).",
+                (
+                    "For real agent execution: install pydantic-ai and "
+                    "set GROQ_API_KEY. Without these the bridge returns a stub ack "
+                    "(Pydantic AI is not invoked)."
+                ),
+            ],
+            "setup_skill": "gateway-agent-setup",
+            "setup_skill_path": str(skill_path),
+            "defaults": {
+                "runtime_type": "exec",
+                "exec_command": f"{_bridge_python()} {repo_root / 'examples' / 'gateway_pydantic_ai' / 'pydantic_ai_bridge.py'}",
+                "bridge_source": str(repo_root / "examples" / "gateway_pydantic_ai" / "pydantic_ai_bridge.py"),
+                "workdir": str(repo_root),
+            },
+            "signals": runtime_signals["exec"],
+            "advanced": {
+                "adapter_label": "Gateway-managed Pydantic AI bridge",
+                "supports_command_override": True,
+            },
+        },
         "strands": {
             "id": "strands",
             "label": "Strands",
@@ -878,6 +922,7 @@ def agent_template_list(*, include_advanced: bool = False) -> list[dict[str, Any
         "langgraph",
         "langgraph_composio",
         "autogen",
+        "pydantic_ai",
         "strands",
         "echo_test",
         "service_account",
