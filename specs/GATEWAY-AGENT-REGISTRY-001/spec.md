@@ -1,9 +1,9 @@
 # GATEWAY-AGENT-REGISTRY-001: Agent Registry, Local Binding, and Self-Profile
 
-**Status:** v1 draft
-**Owner:** @pulse, reviewer @orion
+**Status:** v1 draft — sections added 2026-06-10: *Runtime State and Signaling Fields*, *`sse_connected`*, *What agents must not do* (verified against the implementation the same day). The *Connection paths* taxonomy below remains design-stage; see the caveat in that section.
+**Owner:** @markgalpin (transferred from @pulse / @orion, 2026-06-03)
 **Date:** 2026-04-26
-**Related:** CONNECTED-ASSET-GOVERNANCE-001, GATEWAY-IDENTITY-SPACE-001, GATEWAY-PASS-THROUGH-MAILBOX-001, GATEWAY-ACTIVITY-VISIBILITY-001, RUNTIME-CONFIG-001
+**Related:** [CONNECTED-ASSET-GOVERNANCE-001](../CONNECTED-ASSET-GOVERNANCE-001/spec.md), [GATEWAY-IDENTITY-SPACE-001](../GATEWAY-IDENTITY-SPACE-001/spec.md), [GATEWAY-PASS-THROUGH-MAILBOX-001](../GATEWAY-PASS-THROUGH-MAILBOX-001/spec.md), [GATEWAY-ACTIVITY-VISIBILITY-001](../GATEWAY-ACTIVITY-VISIBILITY-001/spec.md), [RUNTIME-CONFIG-001](../RUNTIME-CONFIG-001/spec.md)
 
 ## Why this exists
 
@@ -47,7 +47,7 @@ must use the Gateway-managed agent credential for that identity.
 - Full organization RBAC.
 - Remote attestation that proves every process fact cryptographically.
 - A plugin marketplace.
-- Offline-only local message exchange. That belongs in GATEWAY-AUTH-TIERS-001.
+- Offline-only local message exchange. That belongs in [GATEWAY-AUTH-TIERS-001](../GATEWAY-AUTH-TIERS-001/spec.md).
 
 ## Core objects
 
@@ -144,7 +144,66 @@ agent_id + install_id + gateway_id + base_url + host_fingerprint + user + cwd + 
 `pid`, `parent_pid`, current command arguments, and timestamps are audit fields,
 not stable matching fields.
 
+## Runtime State and Signaling Fields
+
+Beyond stable identity, the Gateway registry stores ephemeral runtime state.
+These fields are written by the agent process or daemon and read by the daemon
+sweep to derive operator-visible health signals (`liveness`, `presence`,
+`confidence`, `reachability`). Agents must not set derived fields directly.
+
+### Fields by agent class
+
+Agent classes are defined in
+[ADR-007](../../docs/adr/ADR-007-agent-classes-and-signals.md); the rows key on
+the implemented registration fields (`intake_model`, `placement`,
+`activation`), not the design-stage connection-path taxonomy below. All
+first-party writers share the 30-second signal cadence
+(`RUNTIME_HEARTBEAT_INTERVAL_SECONDS`).
+
+| Agent class | Runtime type examples | Key runtime fields | Who sets them |
+| --- | --- | --- | --- |
+| Daemon-managed (in-daemon listener) | `echo` | `effective_state`, `last_seen_at`, `current_status`, `current_tool`, `current_tool_call_id` | Daemon (state); runtime listener loop on the 30s cadence, plus tool events |
+| Daemon-managed (supervised subprocess) | `sentinel_inference_sdk`, `sentinel_hermes_sdk`, `sentinel_cli` | `effective_state`, `last_seen_at` | Monitor thread (exit detection ≤5s); adapter heartbeats via `/local/heartbeat`. Caveat: the monitor currently also stamps `last_seen_at` from PID existence — [#295](https://github.com/FulcrumDefense/fulcrum-gateway/issues/295) |
+| Attached session | `claude_code_channel` | `effective_state`, `last_seen_at`, `sse_connected` | Channel bridge — 30s heartbeat loop independent of message activity, plus edge-triggered `sse_connected` writes on SSE connect/disconnect |
+| On-demand | `exec` bridges | `effective_state` | Daemon at launch and exit; no continuous heartbeat between launches |
+| Polling mailbox | `inbox` | `backlog_depth`, `last_work_received_at` | Gateway updates `backlog_depth` on message arrival; agent updates `last_work_received_at` on each poll |
+| External plugin | `hermes_plugin` | `external_runtime_state`, `external_runtime_kind`, `external_runtime_instance_id`, `last_seen_at` | Plugin heartbeats to `/local/heartbeat`; daemon observes arrival and age |
+
+### `sse_connected`
+
+A boolean field specific to attached sessions. Reports whether the agent's SSE
+subscription to the platform is currently active, independently of process
+liveness. An attached session with `sse_connected=false` cannot receive
+messages and must be treated as stale even if `last_seen_at` is fresh — MCP
+pings and the bridge heartbeat loop keep `last_seen_at` current regardless of
+SSE subscription health.
+
+### What agents must not do
+
+- Set `effective_state=running` while a critical subsystem is broken. Report
+  subsystem health via dedicated fields (e.g. `sse_connected=false`).
+- Set derived fields (`liveness`, `presence`, `confidence`, `reachability`)
+  directly. These are computed by the daemon sweep.
+- Rely on the UI to infer agent class from raw registry fields. The daemon
+  must translate class-specific signals into generic derived fields before
+  the UI reads them.
+
+The same rules bind the daemon when it writes on an agent's behalf: the
+supervised-sentinel monitor currently violates the first rule by laundering
+PID existence into `last_seen_at` freshness
+([#295](https://github.com/FulcrumDefense/fulcrum-gateway/issues/295)).
+
 ## Connection paths
+
+> **Status caveat (2026-06-10):** this taxonomy is design-stage. `connection_path`
+> is not a registry field in the implementation; `tool_listener`,
+> `attached_channel`, and `doorbell_watcher` have no code presence, and the
+> name collides with the AVAIL-CONTRACT v4 `connection_path` DTO field
+> (`gateway_managed` / `mcp_only` / `direct_cli` / `direct_sse`), which is an
+> unrelated platform-side concept. The implemented keying is `intake_model`
+> plus `placement`/`activation` (see *Runtime State and Signaling Fields*
+> above). Implement-or-retire decision tracked in
+> [#296](https://github.com/FulcrumDefense/fulcrum-gateway/issues/296).
 
 One agent identity may have multiple approved connection paths, but Gateway must
 show them as one identity with multiple bindings rather than several unrelated

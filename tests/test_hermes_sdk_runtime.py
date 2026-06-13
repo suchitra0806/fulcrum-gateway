@@ -107,6 +107,12 @@ def test_install_secure_tools_surfaces_failure_via_callback(monkeypatch, tmp_pat
     assert len(cb.status_calls) == 1, f"expected exactly one on_status, got {cb.status_calls!r}"
     assert "security_wrapper_degraded" in cb.status_calls[0]
     assert "No module named 'tools'" in cb.status_calls[0]
+    # Enriched payload mirrors the stderr framing so SSE-only operators get
+    # the same impact context — the wrapped tool list and the credential-exfil
+    # consequence — not just the exception repr (#208).
+    assert "read_file" in cb.status_calls[0]
+    assert "unsandboxed" in cb.status_calls[0]
+    assert "credential-bearing" in cb.status_calls[0]
 
     # Channel 2: stderr. Operators running the runtime directly without a
     # callback consumer see a WARNING line in their terminal.
@@ -138,10 +144,12 @@ def test_install_secure_tools_does_not_raise_when_callback_is_none(monkeypatch, 
     assert "tool security setup failed" in captured.err
 
 
-def test_install_secure_tools_tolerates_callback_error(monkeypatch, tmp_path, capsys):
+def test_install_secure_tools_tolerates_callback_error(monkeypatch, tmp_path, capsys, caplog):
     """A misbehaving callback (e.g. raises inside on_status) must not let the
     helper raise — the stderr WARNING is the defense-in-depth path and the
-    helper still returns False so the caller proceeds correctly."""
+    helper still returns False so the caller proceeds correctly. The swallow
+    is intentional but no longer silent: it logs a WARNING naming the
+    third-order callback failure (#208)."""
 
     def _boom(workdir):
         raise ImportError("tools package missing")
@@ -152,12 +160,19 @@ def test_install_secure_tools_tolerates_callback_error(monkeypatch, tmp_path, ca
 
     monkeypatch.setattr(hermes_sdk, "_secure_hermes_tools", _boom)
 
-    result = hermes_sdk._install_secure_tools(str(tmp_path), cb=_ExplodingCallback())
+    with caplog.at_level(logging.WARNING, logger="runtime.hermes_sdk"):
+        result = hermes_sdk._install_secure_tools(str(tmp_path), cb=_ExplodingCallback())
 
     assert result is False
     captured = capsys.readouterr()
     assert "WARNING" in captured.err
     assert "tool security setup failed" in captured.err
+
+    # The on_status swallow keeps the degradation path alive, but a WARNING
+    # now surfaces the broken consumer to operators at elevated log levels.
+    assert any(
+        "on_status callback raised" in record.message and record.levelno == logging.WARNING for record in caplog.records
+    ), f"expected an on_status-callback WARNING, got {[(r.levelname, r.message) for r in caplog.records]}"
 
 
 # ── AX_HERMES_STRICT_SECURITY=1: opt-in fail-closed mode (follow-up to #151) ──

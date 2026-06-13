@@ -5,6 +5,17 @@ credentials, supervises managed runtimes, and keeps lightweight desired vs
 effective state in a registry file. The first slice intentionally uses
 filesystem state plus a foreground daemon so it can ship quickly without
 introducing a second backend.
+
+Feature flags
+-------------
+AX_LOG_API_REQUESTS (default on)
+    Set to ``0`` / ``false`` / ``no`` to disable logging of outbound API
+    requests to ``~/.ax/gateway/api-requests.log`` (JSON lines). Each record
+    includes timestamp, pid, client role (daemon/ui_server/cli), method,
+    path, HTTP status, rate-limit remaining, reset timestamp, and agent
+    identity where known. Useful for diagnosing rate-limit budget consumption
+    and finding worst-offender request patterns. The log rotates at 10MB,
+    keeping one backup file (``api-requests.log.1``).
 """
 
 from __future__ import annotations
@@ -69,7 +80,7 @@ from .gateway_constants import (
     MIN_HANDLER_TIMEOUT_SECONDS,
     REPLY_ANCHOR_MAX,
     RUNTIME_HEARTBEAT_INTERVAL_SECONDS,
-    RUNTIME_HIDDEN_AFTER_SECONDS,
+    RUNTIME_OFFLINE_AFTER_SECONDS,
     RUNTIME_STALE_AFTER_SECONDS,
     SEEN_IDS_MAX,
     SETUP_ERROR_BACKOFF_SCHEDULE,
@@ -78,7 +89,6 @@ from .gateway_constants import (
     _asset_type_label,
     _bool_with_fallback,
     _format_daemon_log_line,
-    _hide_after_stale_seconds,
     _is_passive_runtime,
     _is_sentinel_hermes_sdk_runtime,
     _is_sentinel_inference_sdk_runtime,
@@ -235,14 +245,17 @@ from .gateway_storage import (
     _OPERATOR_AUTHORITATIVE_FIELDS,
     _SPACE_UUID_RE,
     _chmod_quiet,
+    _daemon_request_logger,
     _default_pending_queue,
     _default_registry,
     _default_ui_state,
     _pid_alive,
     _read_json,
+    _RequestLogger,
     _scan_gateway_process_pids,
     _scan_gateway_ui_process_pids,
     _scan_process_pids,
+    _ui_request_logger,
     _write_json,
     active_gateway_pid,
     active_gateway_pids,
@@ -253,6 +266,7 @@ from .gateway_storage import (
     agent_pending_queue_path,
     agent_token_path,
     agent_token_relpath,
+    api_requests_log_path,
     append_agent_pending_message,
     apply_space_to_gateway_session,
     clear_gateway_pid,
@@ -316,7 +330,7 @@ __all__ = [
     "ManagedAgentRuntime",
     "REPLY_ANCHOR_MAX",
     "RUNTIME_HEARTBEAT_INTERVAL_SECONDS",
-    "RUNTIME_HIDDEN_AFTER_SECONDS",
+    "RUNTIME_OFFLINE_AFTER_SECONDS",
     "RUNTIME_STALE_AFTER_SECONDS",
     "RuntimeLogger",
     "SEEN_IDS_MAX",
@@ -416,7 +430,6 @@ __all__ = [
     "_hermes_plugin_home",
     "_hermes_plugin_workdir",
     "_hermes_repo_candidates",
-    "_hide_after_stale_seconds",
     "_host_fingerprint",
     "_identity_bindings_for_asset",
     "_is_hermes_plugin_runtime",
@@ -485,6 +498,10 @@ __all__ = [
     "active_gateway_ui_pid",
     "active_gateway_ui_pids",
     "activity_log_path",
+    "api_requests_log_path",
+    "_RequestLogger",
+    "_daemon_request_logger",
+    "_ui_request_logger",
     "agent_dir",
     "agent_pending_queue_path",
     "agent_token_path",

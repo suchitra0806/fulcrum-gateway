@@ -94,6 +94,20 @@ version bump correctly:
 - Use `!` or a `BREAKING CHANGE:` footer only when the operator-facing contract
   changes incompatibly
 
+### Reverting commits
+
+When reverting via the GitHub UI, rewrite the auto-generated commit message before merging. GitHub generates:
+
+```
+Revert "feat(scope): original summary"
+```
+
+Release Please does not recognize this format and will keep the reverted feature in the changelog. Use Conventional Commits form instead:
+
+```
+revert(scope): original summary
+```
+
 ## Security and Credentials
 
 `axctl` handles user PATs, agent PATs, exchanged JWTs, and profile metadata.
