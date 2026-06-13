@@ -55,6 +55,7 @@ class ManifestDict(TypedDict, total=False):
     exec_command: str  # → exec_cmd
     client: str
     connector_ref: str
+    provider: str  # hermes provider (e.g. openai-codex); hermes template only
     audience: str  # PAT audience for register-time only
 
 
@@ -78,6 +79,7 @@ FIELD_TO_KWARG: dict[str, str] = {
     "exec_command": "exec_cmd",
     "client": "agent_client",
     "connector_ref": "connector_ref",
+    "provider": "provider",
     "audience": "audience",
 }
 
@@ -99,6 +101,7 @@ ENTRY_TO_MANIFEST: dict[str, str] = {
     "exec_command": "exec_command",
     "client": "client",
     "connector_ref": "connector_ref",
+    "provider": "provider",
 }
 
 #: Fields whose ``register`` shape needs special handling — they don't pass
@@ -351,6 +354,7 @@ def build_update_kwargs(manifest: ManifestDict, *, unset_sentinel: Any) -> dict[
         "exec_command",
         "client",
         "connector_ref",
+        "provider",
     }
     kwargs: dict[str, Any] = {}
     for m_field in update_capable:
