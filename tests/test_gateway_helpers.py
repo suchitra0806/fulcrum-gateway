@@ -2167,6 +2167,28 @@ class TestLoadGatewayManagedAgentToken:
         with pytest.raises(ValueError, match="agent_id"):
             load_gateway_managed_agent_token(entry)
 
+    def test_rejects_offline_token_when_online(self, monkeypatch, tmp_path):
+        from ax_cli.gateway import load_gateway_managed_agent_token
+
+        monkeypatch.delenv("AX_OFFLINE", raising=False)
+        token_file = tmp_path / "token"
+        token_file.write_text("axp_a_offline_deadbeef\n")
+        entry = {"token_file": str(token_file), "agent_id": "aid1", "name": "claude-test"}
+        with pytest.raises(ValueError, match="stale offline-mode token") as excinfo:
+            load_gateway_managed_agent_token(entry)
+        # actionable: names the agent and the real recovery command
+        assert "@claude-test" in str(excinfo.value)
+        assert "ax gateway agents remove claude-test" in str(excinfo.value)
+
+    def test_allows_offline_token_when_offline(self, monkeypatch, tmp_path):
+        from ax_cli.gateway import load_gateway_managed_agent_token
+
+        monkeypatch.setenv("AX_OFFLINE", "1")
+        token_file = tmp_path / "token"
+        token_file.write_text("axp_a_offline_deadbeef\n")
+        entry = {"token_file": str(token_file), "agent_id": "aid1", "name": "claude-test"}
+        assert load_gateway_managed_agent_token(entry) == "axp_a_offline_deadbeef"
+
 
 class TestFormatDaemonLogLine:
     """_format_daemon_log_line: prepends ISO timestamp to a log line."""
