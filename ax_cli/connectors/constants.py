@@ -10,7 +10,9 @@ READ_TIMEOUT = 30.0
 
 DEFAULT_TOOLS_LIMIT = 50
 MAX_TOOLS_LIMIT = 200
-# Safety cap for catalog page loops (MAX_TOOLS_LIMIT items per page).
+# Composio GET /tools documented max; used only for catalog drain page size.
+CATALOG_PAGE_SIZE = 1000
+# Safety cap for catalog page loops (CATALOG_PAGE_SIZE items per page).
 MAX_CATALOG_PAGES = 50
 MAX_ACTIVITY_ERROR_LEN = 1024
 

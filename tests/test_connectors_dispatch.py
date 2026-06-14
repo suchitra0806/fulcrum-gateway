@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
+from ax_cli.connectors.constants import CATALOG_PAGE_SIZE
 from ax_cli.connectors.errors import ConnectorPolicyError
 from ax_cli.connectors.providers import dispatch
 from ax_cli.connectors.types import ConnectorRow
@@ -180,6 +181,27 @@ class TestSearchToolsLocalFallback:
 
 
 class TestCatalogPagination:
+    def test_catalog_drain_uses_catalog_page_size(self, monkeypatch):
+        limits: list[int] = []
+
+        def search_tools(
+            query,
+            auth_env,
+            config,
+            name,
+            *,
+            limit=10,
+            cursor=None,
+            apps=None,
+        ):
+            limits.append(limit)
+            return {"items": [], "next_cursor": None}
+
+        adapter = SimpleNamespace(search_tools=search_tools)
+        monkeypatch.setitem(dispatch._ADAPTERS, "fake", adapter)
+        dispatch.list_tools(_row(), {})
+        assert limits == [CATALOG_PAGE_SIZE]
+
     def test_drains_all_catalog_pages(self, fake_catalog_adapter):
         pages = [
             {
