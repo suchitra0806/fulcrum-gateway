@@ -227,11 +227,11 @@ class AxAdapter(BasePlatformAdapter):
         except Exception as exc:
             logger.warning(
                 "processing-status auth failed: msg=%s status=%s err=%s",
-                message_id, status, exc,
+                message_id,
+                status,
+                exc,
             )
-            await self._announce_local_gateway(
-                status, activity=activity, message_id=message_id, current_tool=tool_name
-            )
+            await self._announce_local_gateway(status, activity=activity, message_id=message_id, current_tool=tool_name)
             return
         body: Dict[str, Any] = {
             "message_id": message_id,
@@ -263,16 +263,19 @@ class AxAdapter(BasePlatformAdapter):
             if resp.status_code >= 400:
                 logger.warning(
                     "processing-status post failed: msg=%s status=%s http=%s body=%s",
-                    message_id, status, resp.status_code, resp.text[:200],
+                    message_id,
+                    status,
+                    resp.status_code,
+                    resp.text[:200],
                 )
         except Exception as exc:
             logger.warning(
                 "processing-status post failed: msg=%s status=%s err=%s",
-                message_id, status, exc,
+                message_id,
+                status,
+                exc,
             )
-        await self._announce_local_gateway(
-            status, activity=activity, message_id=message_id, current_tool=tool_name
-        )
+        await self._announce_local_gateway(status, activity=activity, message_id=message_id, current_tool=tool_name)
 
     @property
     def name(self) -> str:
