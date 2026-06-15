@@ -135,7 +135,7 @@ def _drain_catalog_tools(
                 auth_env,
                 config,
                 connector_name,
-                limit=MAX_TOOLS_LIMIT,
+                limit=CATALOG_PAGE_SIZE,
                 cursor=cursor,
             )
         except Exception as exc:
