@@ -20,10 +20,12 @@ Design notes
   PAT → JWT exchange via ``/auth/exchange`` (cached, refreshed on expiry)
   per AUTH-SPEC-001 §13.
 
-- **chat_id mapping.** ``chat_id`` is the thread root: ``parent_id`` if
-  the inbound message is itself a reply, else the mention's own
-  ``message_id``. Replies pass ``parent_id=chat_id`` so threading is
-  preserved across multi-turn conversations.
+- **chat_id mapping.** ``chat_id`` is the thread root: ``conversation_id``
+  if aX supplies it, else ``parent_id`` (a direct reply), else the mention's
+  own ``message_id``. Keying the whole conversation on the root keeps every
+  turn — including a reply to the agent's own approval prompt — on one
+  session, and lets out-of-thread ``/approve`` / ``/deny`` commands be routed
+  back to the blocked session (see ``_approval_redirect_root``).
 
 - **Filtering.** Only inbound events that (a) are not self-authored AND
   (b) explicitly @-mention this agent are dispatched. The aX SSE stream
@@ -51,7 +53,7 @@ from gateway.platforms.base import (
     MessageType,
     SendResult,
 )
-from gateway.session import SessionSource
+from gateway.session import SessionSource, build_session_key
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +73,81 @@ LOCAL_GATEWAY_ANNOUNCE_TIMEOUT = 1.5
 SEEN_MESSAGE_LRU_MAX = 1024
 AGENT_RUNTIME_SCOPE = "tasks:read tasks:write messages:read messages:write agents:read"
 DEFAULT_AUDIENCE = "ax-api"
+# How many recently-dispatched run sessions to remember for approval-command
+# redirect (Part 2 of the #72 fix). Bounded so a long-lived listener can't grow
+# this map without limit; an aX agent only has a handful of live threads at once.
+MAX_REMEMBERED_SESSIONS = 64
+
+# Bare /approve and /deny gateway commands (matched AFTER the leading
+# "@agent" trigger mention is stripped by _clean_agent_trigger_text). These
+# resolve a *pending* dangerous-command approval parked under the blocked
+# session's key (gateway/slash_commands.py _handle_approve_command /
+# _handle_deny_command). Accept the "!" alias prefix some clients rewrite to,
+# and the optional all/session/always arguments — but only when the WHOLE
+# message is the command, never when "/approve" appears mid-sentence.
+_APPROVAL_COMMAND_RE = re.compile(
+    r"^[/!](?:approve|deny)(?:\s+(?:all|session|ses|always|permanent|permanently))*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_approval_command(text: str) -> bool:
+    """Return True if ``text`` is a bare /approve or /deny gateway command.
+
+    aX threading means these commands frequently arrive on a different
+    session key than the one holding the pending approval (a fresh
+    top-level "@agent /approve" is the root of its own thread), so the
+    adapter redirects them to the blocked session — see
+    :meth:`AxAdapter._approval_redirect_root`.
+    """
+    return bool(_APPROVAL_COMMAND_RE.match((text or "").strip()))
+
+
+def _resolve_thread_root(data: Dict[str, Any], message_id: str) -> str:
+    """Resolve the stable conversation/thread root used for session keying.
+
+    aX delivers ``conversation_id`` = the thread root for every message in a
+    thread (the vendored sentinel relies on it for memory continuity — see
+    ``ax_cli/runtimes/hermes/sentinel.py``). Preferring it keeps every turn
+    of a conversation — including a reply to the agent's own approval prompt
+    — on ONE session key, instead of splitting per replied-to message.
+
+    Falls back to ``parent_id`` (the direct reply target) then the message's
+    own id (a brand-new top-level mention is the root of its own thread).
+    When ``conversation_id`` is absent this preserves the previous
+    ``parent_id or message_id`` behavior, additionally tolerating the
+    ``parentId`` / ``thread_id`` aliases some payloads use for the reply
+    target.
+    """
+    conversation_id = str(data.get("conversation_id") or "").strip()
+    if conversation_id:
+        return conversation_id
+    parent_id = data.get("parent_id") or data.get("parentId") or data.get("thread_id")
+    if parent_id:
+        return str(parent_id)
+    return message_id
+
+
+def _select_approval_redirect(current_key, candidate_keys, is_blocked) -> Optional[str]:
+    """Pick the session key an out-of-thread approval command should resolve.
+
+    Returns a redirect target only when it is *unambiguous*:
+
+      * the command's own session (``current_key``) has no blocking approval
+        (an in-thread /approve already works — never redirect those), and
+      * exactly ONE remembered session is currently blocked on an approval.
+
+    Fails closed on ambiguity (zero or 2+ blocked sessions → ``None``), so we
+    never guess which of several pending approvals the user meant. ``is_blocked``
+    is a predicate so this stays pure and unit-testable without the gateway's
+    runtime approval state.
+    """
+    if is_blocked(current_key):
+        return None
+    blocked = [k for k in dict.fromkeys(candidate_keys) if k != current_key and is_blocked(k)]
+    if len(blocked) == 1:
+        return blocked[0]
+    return None
 
 
 class AxAdapter(BasePlatformAdapter):
@@ -134,6 +211,10 @@ class AxAdapter(BasePlatformAdapter):
         )
         # See SEEN_MESSAGE_LRU_MAX for why we need this.
         self._seen_message_ids: "OrderedDict[str, None]" = OrderedDict()
+        # Recently-dispatched run sessions: session_key -> thread root (chat_id).
+        # An approval command that lands outside the blocked thread uses this to
+        # find the session holding the pending approval (#72). Bounded LRU.
+        self._recent_roots: "OrderedDict[str, str]" = OrderedDict()
 
     async def _announce_local_gateway(
         self,
@@ -508,9 +589,11 @@ class AxAdapter(BasePlatformAdapter):
         sender_name = str(data.get("sender") or data.get("agent_name") or "user")
         sender_id = str(data.get("sender_id") or data.get("agent_id") or "")
         parent_id = data.get("parent_id")
-        # Thread root = parent_id (if reply) else the mention's own message_id.
-        # Reply path uses chat_id as parent_id so subsequent turns thread.
-        chat_id = str(parent_id) if parent_id else message_id
+        # Thread root = conversation_id (the aX thread root, if present) else
+        # parent_id (a direct reply target) else the mention's own message_id.
+        # Resolving to the conversation root keeps every turn — including a
+        # reply to the agent's own approval prompt — on one session key.
+        chat_id = _resolve_thread_root(data, message_id)
 
         # chat_type is always "thread": every aX message lives in a thread
         # (a top-level mention is the root of one). Letting it flip between
@@ -518,17 +601,28 @@ class AxAdapter(BasePlatformAdapter):
         # build_session_key output mid-conversation and split a single thread
         # across two Hermes sessions, breaking continuity and the
         # active-session guard.
-        source = SessionSource(
-            platform=self.platform,
-            chat_id=chat_id,
-            chat_name=f"@{self.agent_name} / {self.space_id[:8]}",
-            chat_type="thread",
-            user_id=sender_id or sender_name,
-            user_name=sender_name,
-            thread_id=chat_id,
-            guild_id=self.space_id,
-            message_id=message_id,
-        )
+        source = self._make_source(chat_id, sender_id, sender_name, message_id)
+        session_key = build_session_key(source)
+
+        # Approval commands (/approve, /deny) resolve a *pending* dangerous
+        # command parked under the BLOCKED session's key. In aX a bare
+        # "@agent /approve" is the root of its own thread, so it lands on a
+        # fresh session that has nothing pending → "No pending command to
+        # approve" (#72). Redirect it to the blocked session when that target
+        # is unambiguous; otherwise fall through unchanged.
+        if _is_approval_command(text):
+            redirect_root = self._approval_redirect_root(session_key)
+            if redirect_root:
+                logger.info(
+                    "[ax] Routing approval command from session %s to blocked session root %s",
+                    session_key,
+                    redirect_root,
+                )
+                source = self._make_source(redirect_root, sender_id, sender_name, message_id)
+        else:
+            # Remember this run so a later out-of-thread approval can find it.
+            self._remember_session(session_key, chat_id)
+
         event = MessageEvent(
             text=text,
             message_type=MessageType.TEXT,
@@ -543,6 +637,55 @@ class AxAdapter(BasePlatformAdapter):
         # /approve, /deny) apply. handle_message itself returns quickly by
         # spawning its own background task, so the SSE loop is not blocked.
         await self.handle_message(event)
+
+    def _make_source(self, chat_id: str, sender_id: str, sender_name: str, message_id: str) -> SessionSource:
+        """Build the SessionSource for an inbound aX message.
+
+        ``chat_id`` and ``thread_id`` are both the thread root, so
+        ``build_session_key`` keys the whole conversation on that root (aX
+        threads are shared, so user_id is not part of the key — which is why
+        an approval redirect only needs to swap the root, not the sender).
+
+        This rests on hermes keying aX threads as *shared*
+        (``thread_sessions_per_user=False``, the default). If that ever flips
+        to per-user threads, the remembered key stops matching the gateway's
+        blocked key, so the approval redirect simply no-ops (fails closed)
+        rather than routing an approval to the wrong session.
+        """
+        return SessionSource(
+            platform=self.platform,
+            chat_id=chat_id,
+            chat_name=f"@{self.agent_name} / {self.space_id[:8]}",
+            chat_type="thread",
+            user_id=sender_id or sender_name,
+            user_name=sender_name,
+            thread_id=chat_id,
+            guild_id=self.space_id,
+            message_id=message_id,
+        )
+
+    def _remember_session(self, session_key: str, root: str) -> None:
+        """Record a dispatched run's session as a candidate for approval redirect."""
+        self._recent_roots[session_key] = root
+        self._recent_roots.move_to_end(session_key)
+        while len(self._recent_roots) > MAX_REMEMBERED_SESSIONS:
+            self._recent_roots.popitem(last=False)
+
+    def _approval_redirect_root(self, current_key: str) -> Optional[str]:
+        """Return the thread root an approval command should be routed to, or None.
+
+        Looks across recently-dispatched run sessions for the one currently
+        blocked on a dangerous-command approval. Returns None when the command
+        already targets the blocked session, when the target is ambiguous, or
+        when the gateway's approval state isn't importable (defensive — keeps
+        the adapter usable outside a full Hermes runtime).
+        """
+        try:
+            from tools.approval import has_blocking_approval
+        except Exception:  # pragma: no cover - only in a full Hermes runtime
+            return None
+        target = _select_approval_redirect(current_key, list(self._recent_roots.keys()), has_blocking_approval)
+        return self._recent_roots.get(target) if target else None
 
     # ----------------------------------------------------------- send (out)
 
