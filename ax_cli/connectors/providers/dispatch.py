@@ -115,11 +115,12 @@ def _drain_catalog_tools(
     auth_env: dict[str, str],
     config: dict[str, Any],
     connector_name: str,
-) -> tuple[list[dict[str, Any]], int | None]:
+) -> tuple[list[dict[str, Any]], int | None, bool]:
     """Drain paginated catalog search results (Composio and similar providers)."""
     items: list[dict[str, Any]] = []
     cursor: str | None = None
     provider_total: int | None = None
+    catalog_bounded = False
 
     for page_idx in range(MAX_CATALOG_PAGES):
         result = adapter.search_tools(
@@ -139,13 +140,17 @@ def _drain_catalog_tools(
             break
         cursor = str(next_cursor)
     else:
+        catalog_bounded = True
         log.warning(
-            "Catalog drain for %r hit MAX_CATALOG_PAGES (%s); inventory may be truncated",
+            "%r catalog drain hit MAX_CATALOG_PAGES=%d (%d tools fetched%s). "
+            "Policy matching used only the drained subset.",
             connector_name,
             MAX_CATALOG_PAGES,
+            len(items),
+            f"; provider total_items={provider_total}" if provider_total is not None else "",
         )
 
-    return items, provider_total
+    return items, provider_total, catalog_bounded
 
 
 def list_tools(
@@ -157,13 +162,15 @@ def list_tools(
         result = adapter.list_tools(auth_env, connector.config, connector.name)
         items = result.get("tools", [])
         provider_total = None
+        catalog_bounded = False
     else:
-        items, provider_total = _drain_catalog_tools(
+        items, provider_total, catalog_bounded = _drain_catalog_tools(
             adapter,
             auth_env,
             connector.config,
             connector.name,
         )
+    catalog_drained = len(items)
     policy = from_config(connector.config)
     # Match the full policy first (apply_limit=False) so we can report how many
     # tools were clipped by tools_limit. Sort by name so the clip is
@@ -179,6 +186,8 @@ def list_tools(
         "filtered": len(filtered),
         "limit": policy.tools_limit,
         "clipped": len(matched) > len(filtered),
+        "catalog_bounded": catalog_bounded,
+        "catalog_drained": catalog_drained,
     }
 
 
