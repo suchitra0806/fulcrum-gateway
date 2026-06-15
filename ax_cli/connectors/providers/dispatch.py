@@ -115,7 +115,7 @@ def _drain_catalog_tools(
     auth_env: dict[str, str],
     config: dict[str, Any],
     connector_name: str,
-) -> tuple[list[dict[str, Any]], int | None, bool, str | None]:
+) -> tuple[list[dict[str, Any]], int | None, bool, bool, str | None]:
     """Drain paginated catalog search results (Composio and similar providers).
 
     Mid-drain provider errors degrade with a warning: pages fetched before the
@@ -125,6 +125,7 @@ def _drain_catalog_tools(
     items: list[dict[str, Any]] = []
     cursor: str | None = None
     provider_total: int | None = None
+    catalog_bounded = False
     catalog_partial = False
     drain_error: str | None = None
 
@@ -163,13 +164,17 @@ def _drain_catalog_tools(
             break
         cursor = str(next_cursor)
     else:
+        catalog_bounded = True
         log.warning(
-            "Catalog drain for %r hit MAX_CATALOG_PAGES (%s); inventory may be truncated",
+            "%r catalog drain hit MAX_CATALOG_PAGES=%d (%d tools fetched%s). "
+            "Policy matching used only the drained subset.",
             connector_name,
             MAX_CATALOG_PAGES,
+            len(items),
+            f"; provider total_items={provider_total}" if provider_total is not None else "",
         )
 
-    return items, provider_total, catalog_partial, drain_error
+    return items, provider_total, catalog_bounded, catalog_partial, drain_error
 
 
 def list_tools(
@@ -183,8 +188,9 @@ def list_tools(
         result = adapter.list_tools(auth_env, connector.config, connector.name)
         items = result.get("tools", [])
         provider_total = None
+        catalog_bounded = False
     else:
-        items, provider_total, catalog_partial, catalog_drain_error = _drain_catalog_tools(
+        items, provider_total, catalog_bounded, catalog_partial, catalog_drain_error = _drain_catalog_tools(
             adapter,
             auth_env,
             connector.config,
@@ -209,6 +215,7 @@ def list_tools(
         "filtered": len(filtered),
         "limit": policy.tools_limit,
         "clipped": len(matched) > len(filtered),
+        "catalog_bounded": catalog_bounded,
         "catalog_drained": catalog_drained,
         "catalog_partial": catalog_partial,
         "catalog_drain_error": catalog_drain_error,
