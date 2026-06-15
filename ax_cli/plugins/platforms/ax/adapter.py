@@ -174,8 +174,11 @@ class AxAdapter(BasePlatformAdapter):
                     json=body,
                     headers={"Content-Type": "application/json"},
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            # Local Gateway is optional (a hosted plugin may run without one),
+            # so this is expected-down and only logged at debug — but never
+            # silently swallowed.
+            logger.debug("local-gateway announce failed: status=%s err=%s", status, exc)
 
     async def _post_processing_status(
         self,
@@ -183,14 +186,31 @@ class AxAdapter(BasePlatformAdapter):
         status: str,
         *,
         activity: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        progress: Optional[Any] = None,
+        detail: Optional[str] = None,
+        error_message: Optional[str] = None,
     ) -> None:
-        """Best-effort POST to aX's original-message activity stream."""
+        """Best-effort POST to aX's original-message activity stream.
+
+        Honors GATEWAY-ACTIVITY-VISIBILITY-001: forwards the lifecycle status
+        plus optional structured fields (``tool_name``, ``progress``, ``detail``)
+        so the aX UI can render a live "thinking…" bubble. Failures are logged,
+        never silently swallowed (spec §177-180) — a silent drop here is the
+        difference between a working activity bubble and a stuck "waiting" chip.
+        """
         try:
             jwt = await self._get_jwt()
-        except Exception:
-            await self._announce_local_gateway(status, activity=activity, message_id=message_id)
+        except Exception as exc:
+            logger.warning(
+                "processing-status auth failed: msg=%s status=%s err=%s",
+                message_id, status, exc,
+            )
+            await self._announce_local_gateway(
+                status, activity=activity, message_id=message_id, current_tool=tool_name
+            )
             return
-        body = {
+        body: Dict[str, Any] = {
             "message_id": message_id,
             "agent_name": self.agent_name,
             "agent_id": self.agent_id,
@@ -199,9 +219,17 @@ class AxAdapter(BasePlatformAdapter):
         }
         if activity:
             body["activity"] = activity
+        if tool_name:
+            body["tool_name"] = tool_name
+        if progress is not None:
+            body["progress"] = progress
+        if detail:
+            body["detail"] = detail
+        if error_message:
+            body["error_message"] = error_message
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                await client.post(
+                resp = await client.post(
                     f"{self.base_url}/api/v1/agents/processing-status",
                     json=body,
                     headers={
@@ -209,9 +237,19 @@ class AxAdapter(BasePlatformAdapter):
                         "Content-Type": "application/json",
                     },
                 )
-        except Exception:
-            pass
-        await self._announce_local_gateway(status, activity=activity, message_id=message_id)
+            if resp.status_code >= 400:
+                logger.warning(
+                    "processing-status post failed: msg=%s status=%s http=%s body=%s",
+                    message_id, status, resp.status_code, resp.text[:200],
+                )
+        except Exception as exc:
+            logger.warning(
+                "processing-status post failed: msg=%s status=%s err=%s",
+                message_id, status, exc,
+            )
+        await self._announce_local_gateway(
+            status, activity=activity, message_id=message_id, current_tool=tool_name
+        )
 
     @property
     def name(self) -> str:
@@ -538,6 +576,13 @@ class AxAdapter(BasePlatformAdapter):
             reply_to_message_id=str(parent_id) if parent_id else None,
         )
 
+        # Surface the "thinking…" bubble the instant we pick up the message,
+        # rather than waiting for Hermes's first send_typing (which lags behind
+        # model spin-up). Keyed on chat_id (the thread root) so it matches the
+        # anchor used by send_typing/stop_typing and by the final reply's
+        # parent_id. Best-effort: failures are logged inside the helper.
+        await self._post_processing_status(chat_id, "thinking")
+
         # Dispatch through the base adapter so the level-1 active-session
         # guard (queue/interrupt) and inline command bypass (/stop, /new,
         # /approve, /deny) apply. handle_message itself returns quickly by
@@ -597,6 +642,17 @@ class AxAdapter(BasePlatformAdapter):
             )
 
         retryable = r.status_code in (429,) or 500 <= r.status_code < 600
+        if not retryable:
+            # Final delivery failed and won't be retried — emit a terminal
+            # error so the aX activity bubble clears instead of spinning
+            # forever. Retryable failures are left alone: Hermes will retry
+            # and the eventual completed/error covers them.
+            anchor = str(reply_to).strip() if reply_to else str(chat_id or "").strip()
+            await self._post_processing_status(
+                anchor,
+                "error",
+                error_message=f"reply delivery failed: status {r.status_code}",
+            )
         return SendResult(
             success=False,
             error=f"status {r.status_code}: {r.text[:200]}",
@@ -614,10 +670,16 @@ class AxAdapter(BasePlatformAdapter):
         metadata = metadata or {}
         status = str(metadata.get("status") or "thinking")
         activity = metadata.get("activity")
+        tool_name = metadata.get("tool_name") or metadata.get("current_tool")
+        progress = metadata.get("progress")
+        detail = metadata.get("detail")
         await self._post_processing_status(
             chat_id,
             status,
             activity=str(activity) if activity else None,
+            tool_name=str(tool_name) if tool_name else None,
+            progress=progress,
+            detail=str(detail) if detail else None,
         )
 
     async def stop_typing(self, chat_id: str) -> None:
