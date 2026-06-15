@@ -11,6 +11,7 @@ its pure helpers and redirect selection directly.
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 import types
@@ -263,3 +264,81 @@ class TestApprovalRedirectRoot:
         monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
         sys.modules.pop("tools.approval", None)
         assert adapter._approval_redirect_root("agent:main:ax:thread:NEW:NEW") is None
+
+
+# ── _dispatch_inbound wiring (the redirect/remember integration) ───────────
+
+
+def _dispatch_adapter(captured: list) -> "AxAdapter":
+    """An adapter wired for _dispatch_inbound: real helpers under test, the
+    surrounding I/O (filtering, trigger-strip, handoff) stubbed to no-ops."""
+    adapter = _adapter()
+    adapter._seen_message_ids = OrderedDict()
+    adapter._is_self_authored = lambda data: False
+    adapter._is_for_me = lambda data: True
+    # _clean_agent_trigger_text strips the "@agent" trigger; here the test
+    # data already carries the bare command/text, so pass it through.
+    adapter._clean_agent_trigger_text = lambda text: text
+
+    async def _capture(event):
+        captured.append(event)
+
+    adapter.handle_message = _capture
+    return adapter
+
+
+class TestDispatchInbound:
+    def test_approval_command_redirects_source_to_blocked_root(self, monkeypatch):
+        captured: list = []
+        adapter = _dispatch_adapter(captured)
+        # A run was dispatched earlier on thread root R2 and is now blocked.
+        adapter._remember_session("agent:main:ax:thread:R2:R2", "R2")
+        approval = types.ModuleType("tools.approval")
+        approval.has_blocking_approval = lambda key: key == "agent:main:ax:thread:R2:R2"
+        monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
+        monkeypatch.setitem(sys.modules, "tools.approval", approval)
+
+        # Fresh top-level "@agent /approve" — its own root NEW has nothing pending.
+        asyncio.run(
+            adapter._dispatch_inbound({"id": "NEW", "content": "/approve", "sender": "alice", "sender_id": "u_alice"})
+        )
+
+        assert len(captured) == 1
+        # Source was rewritten to the blocked session's root, not NEW.
+        assert captured[0].source.chat_id == "R2"
+        assert captured[0].source.thread_id == "R2"
+        # An approval command is not itself remembered as a candidate run.
+        assert "agent:main:ax:thread:NEW:NEW" not in adapter._recent_roots
+
+    def test_non_approval_message_is_remembered(self, monkeypatch):
+        captured: list = []
+        adapter = _dispatch_adapter(captured)
+        monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
+        monkeypatch.setitem(sys.modules, "tools.approval", types.ModuleType("tools.approval"))
+
+        asyncio.run(
+            adapter._dispatch_inbound(
+                {"id": "M1", "conversation_id": "ROOT", "content": "do the thing", "sender": "bob"}
+            )
+        )
+
+        assert len(captured) == 1
+        assert captured[0].source.chat_id == "ROOT"
+        # The run is now a redirect candidate keyed on its thread root.
+        assert adapter._recent_roots.get("agent:main:ax:thread:ROOT:ROOT") == "ROOT"
+
+    def test_approval_command_with_no_blocked_session_is_not_redirected(self, monkeypatch):
+        captured: list = []
+        adapter = _dispatch_adapter(captured)
+        approval = types.ModuleType("tools.approval")
+        approval.has_blocking_approval = lambda key: False  # nothing pending anywhere
+        monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
+        monkeypatch.setitem(sys.modules, "tools.approval", approval)
+
+        asyncio.run(
+            adapter._dispatch_inbound({"id": "NEW", "content": "/approve", "sender": "alice", "sender_id": "u_alice"})
+        )
+
+        assert len(captured) == 1
+        # Fails closed: source stays on the command's own root (current behavior).
+        assert captured[0].source.chat_id == "NEW"

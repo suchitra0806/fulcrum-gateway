@@ -114,8 +114,10 @@ def _resolve_thread_root(data: Dict[str, Any], message_id: str) -> str:
 
     Falls back to ``parent_id`` (the direct reply target) then the message's
     own id (a brand-new top-level mention is the root of its own thread).
-    When ``conversation_id`` is absent this is byte-for-byte the previous
-    ``parent_id or message_id`` behavior.
+    When ``conversation_id`` is absent this preserves the previous
+    ``parent_id or message_id`` behavior, additionally tolerating the
+    ``parentId`` / ``thread_id`` aliases some payloads use for the reply
+    target.
     """
     conversation_id = str(data.get("conversation_id") or "").strip()
     if conversation_id:
@@ -643,6 +645,12 @@ class AxAdapter(BasePlatformAdapter):
         ``build_session_key`` keys the whole conversation on that root (aX
         threads are shared, so user_id is not part of the key — which is why
         an approval redirect only needs to swap the root, not the sender).
+
+        This rests on hermes keying aX threads as *shared*
+        (``thread_sessions_per_user=False``, the default). If that ever flips
+        to per-user threads, the remembered key stops matching the gateway's
+        blocked key, so the approval redirect simply no-ops (fails closed)
+        rather than routing an approval to the wrong session.
         """
         return SessionSource(
             platform=self.platform,
