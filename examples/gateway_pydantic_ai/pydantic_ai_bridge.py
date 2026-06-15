@@ -19,8 +19,9 @@ a Gateway agent runs.
      ~1s activity events with a rolling preview, keeping the operator's
      activity feed live during the call. Env overrides:
      AX_BRIDGE_LLM_MODEL (default llama-3.3-70b-versatile),
-     AX_BRIDGE_SYSTEM_PROMPT (default "Reply concisely.", appended to
-     the agent's system prompt).
+     AX_BRIDGE_SYSTEM_PROMPT (default "Reply concisely.", overrides
+     the default trailing instruction in the agent's system prompt
+     when set).
 
   2. Stub agent path. If `pydantic-ai` is importable but Groq is not
      configured, the bridge emits an activity event explaining the
@@ -158,9 +159,7 @@ async def _run_agent_stream(agent, prompt: str, model: str) -> str:
                 emit_event(
                     {
                         "kind": "activity",
-                        "activity": (
-                            f"{model}: {preview}" if preview else f"Streaming response from {model}..."
-                        ),
+                        "activity": (f"{model}: {preview}" if preview else f"Streaming response from {model}..."),
                     }
                 )
                 last_activity_at = now
