@@ -553,6 +553,25 @@ class AxAdapter(BasePlatformAdapter):
             self._seen_message_ids.popitem(last=False)
         return False
 
+    @staticmethod
+    def _is_inline_bypass_command(event: MessageEvent) -> bool:
+        """True if this is an inline command the gateway dispatches WITHOUT
+        producing a threaded reply (`/stop`, `/new`, `/approve`, `/deny`, …).
+
+        Those bypass the active-session guard and never emit a reply that would
+        clear an activity bubble, so the immediate "thinking" must be skipped for
+        them — otherwise the spinner hangs until the 180s TTL. Delegates to the
+        gateway's own bypass predicate so this never drifts from the real set.
+        """
+        if not event.is_command():
+            return False
+        try:
+            from hermes_cli.commands import should_bypass_active_session
+
+            return bool(should_bypass_active_session(event.get_command()))
+        except Exception:
+            return False
+
     async def _dispatch_inbound(self, data: Dict[str, Any]) -> None:
         if self._is_self_authored(data):
             return
@@ -607,7 +626,13 @@ class AxAdapter(BasePlatformAdapter):
         # model spin-up). Keyed on chat_id (the thread root) so it matches the
         # anchor used by send_typing/stop_typing and by the final reply's
         # parent_id. Best-effort: failures are logged inside the helper.
-        await self._post_processing_status(chat_id, "thinking")
+        #
+        # Skip it for inline bypass commands (/stop, /new, /approve, /deny):
+        # those are dispatched inline by handle_message and never produce a
+        # threaded reply, so a "thinking" bubble here would hang until the 180s
+        # TTL — a phantom spinner on the most common control commands.
+        if not self._is_inline_bypass_command(event):
+            await self._post_processing_status(chat_id, "thinking")
 
         # Dispatch through the base adapter so the level-1 active-session
         # guard (queue/interrupt) and inline command bypass (/stop, /new,

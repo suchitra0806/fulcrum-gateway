@@ -216,6 +216,43 @@ def test_dispatch_inbound_dedupes_double_event(monkeypatch):
     assert len(captured) == 1, "second SSE event for same message_id must be dropped"
 
 
+def test_dispatch_inbound_skips_thinking_for_inline_bypass_command(monkeypatch):
+    """Inline bypass commands (/stop, /new, /approve, /deny) are dispatched
+    inline and never produce a threaded reply, so the immediate 'thinking'
+    bubble would hang until the TTL. _dispatch_inbound must skip the bubble for
+    them while still dispatching the command."""
+    from types import SimpleNamespace
+
+    adapter = _adapter()
+    adapter.platform = SimpleNamespace(value="ax")
+    handled: list = []
+    status_posts: list = []
+
+    async def fake_handle_message(event):
+        handled.append(event)
+
+    async def fake_post(message_id, status, **kwargs):
+        status_posts.append({"message_id": message_id, "status": status})
+
+    monkeypatch.setattr(adapter, "handle_message", fake_handle_message)
+    monkeypatch.setattr(adapter, "_post_processing_status", fake_post)
+
+    asyncio.run(
+        adapter._dispatch_inbound(
+            {
+                "id": "msg-stop",
+                "content": "@nova /stop",
+                "sender": "alice",
+                "sender_id": "u-1",
+                "parent_id": None,
+            }
+        )
+    )
+
+    assert len(handled) == 1, "command must still be dispatched"
+    assert status_posts == [], "no phantom 'thinking' bubble for a bypass command"
+
+
 def test_dispatch_inbound_strips_leading_agent_mention_before_command(monkeypatch):
     """Telegram strips its own bot trigger before dispatch so `@bot /cmd`
     still reaches Hermes as a slash command. aX should do the same; Hermes
