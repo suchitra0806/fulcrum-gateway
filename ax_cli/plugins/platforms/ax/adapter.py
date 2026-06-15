@@ -693,14 +693,17 @@ class AxAdapter(BasePlatformAdapter):
             )
 
         retryable = r.status_code in (429,) or 500 <= r.status_code < 600
-        if not retryable:
+        if not retryable and thread_anchor:
             # Final delivery failed and won't be retried — emit a terminal
             # error so the aX activity bubble clears instead of spinning
-            # forever. Retryable failures are left alone: Hermes will retry
-            # and the eventual completed/error covers them.
-            anchor = str(reply_to).strip() if reply_to else str(chat_id or "").strip()
+            # forever. Anchor on thread_anchor (the same target the reply body
+            # used): it already applies the chat_id != space_id guard, so a
+            # home-channel send (chat_id == space_id, no activity bubble) posts
+            # nothing instead of orphaning an error on the space itself.
+            # Retryable failures are left alone: Hermes retries and the eventual
+            # completed/error covers them.
             await self._post_processing_status(
-                anchor,
+                thread_anchor,
                 "error",
                 error_message=f"reply delivery failed: status {r.status_code}",
             )

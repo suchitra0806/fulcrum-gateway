@@ -586,6 +586,31 @@ def test_send_posts_terminal_error_on_non_retryable_failure(monkeypatch):
     assert "error_message" in status_posts[0]
 
 
+def test_send_omits_terminal_error_for_space_level_home_channel(monkeypatch):
+    """A home-channel send (chat_id == space_id) has no activity bubble, so a
+    non-retryable failure must NOT post a terminal 'error' anchored on the space
+    id — that would orphan a status on a non-message target."""
+    adapter = _adapter()
+    status_posts: list = []
+    posts: list = []
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    async def fake_post(message_id, status, **kwargs):
+        status_posts.append({"message_id": message_id, "status": status})
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(adapter, "_post_processing_status", fake_post)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", _capturing_client(posts, status_code=400))
+
+    result = asyncio.run(adapter.send(adapter.space_id, "proactive note"))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert status_posts == [], "no terminal error anchored on the space id"
+
+
 def test_send_does_not_post_error_on_retryable_failure(monkeypatch):
     """Retryable failures (5xx/429) are left for Hermes to retry — emitting a
     premature 'error' would clear the bubble even though work continues."""
