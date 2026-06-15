@@ -616,7 +616,12 @@ def connectors_tools_list(
 
     matched = result.get("matched", len(items))
     clipped = bool(result.get("clipped"))
+    catalog_bounded = bool(result.get("catalog_bounded"))
+    catalog_drained = result.get("catalog_drained")
     policy_limit = result.get("limit")
+    catalog_partial = bool(result.get("catalog_partial"))
+    catalog_drain_error = result.get("catalog_drain_error")
+    total_reported = result.get("total")
 
     if as_json:
         print_json(
@@ -628,31 +633,57 @@ def connectors_tools_list(
                 "matched": matched,
                 "limit": policy_limit,
                 "clipped": clipped,
+                "catalog_bounded": catalog_bounded,
+                "catalog_drained": catalog_drained,
+                "catalog_partial": catalog_partial,
+                "catalog_drain_error": catalog_drain_error,
+                "total": total_reported,
             }
         )
         return
-    if not items:
+    if not items and not catalog_bounded and not catalog_partial:
         err_console.print(f"No tools found for connector {row.name!r}.")
         return
-    err_console.print(f"[bold]{row.name}[/bold] ({row.provider}) — {len(items)} tools:")
-    if clipped:
+    if items:
+        err_console.print(f"[bold]{row.name}[/bold] ({row.provider}) — {len(items)} tools:")
+    if catalog_partial:
+        drained_note = (
+            f"{catalog_drained} tools fetched" if catalog_drained is not None else "catalog partially fetched"
+        )
+        err_console.print(
+            f"[yellow]Note:[/yellow] Catalog drain failed mid-pagination ({drained_note}). "
+            f"Listing is partial — matched/total are lower bounds only."
+        )
+        if catalog_drain_error:
+            err_console.print(f"[dim]Provider error:[/dim] {catalog_drain_error}")
+    if catalog_bounded:
+        drained_note = (
+            f"{catalog_drained} tools fetched" if catalog_drained is not None else "catalog partially fetched"
+        )
+        total_note = f"; provider reports {total_reported} total" if total_reported is not None else ""
+        err_console.print(
+            f"[yellow]Note:[/yellow] Catalog drain hit MAX_CATALOG_PAGES ({drained_note}{total_note}). "
+            f"matched/total reflect only the drained catalog — not the full provider inventory."
+        )
+    if clipped and items:
         err_console.print(
             f"[yellow]Note:[/yellow] {matched} tools matched policy but only {policy_limit} are shown "
             f"(tools_limit={policy_limit}). Narrow with allowed_tools/allowed_toolkits, raise tools_limit, "
             f"or run `tools search` with a use case to find specific tools."
         )
-    print_table(
-        ["Name", "Display Name", "Description"],
-        [
-            {
-                "name": str(i.get("name") or i.get("enum") or ""),
-                "displayName": str(i.get("displayName") or ""),
-                "description": str(i.get("description") or "")[:80],
-            }
-            for i in items
-        ],
-        keys=["name", "displayName", "description"],
-    )
+    if items:
+        print_table(
+            ["Name", "Display Name", "Description"],
+            [
+                {
+                    "name": str(i.get("name") or i.get("enum") or ""),
+                    "displayName": str(i.get("displayName") or ""),
+                    "description": str(i.get("description") or "")[:80],
+                }
+                for i in items
+            ],
+            keys=["name", "displayName", "description"],
+        )
 
 
 @connectors_tools_app.command("search")

@@ -164,7 +164,7 @@ A contribution is complete when:
 
 ### Issues are the backlog — pick them up
 
-Open issues are fair game. If something is unassigned and you have capacity, take it. No need to ask permission — just assign yourself and start a branch.
+Open issues are fair game. If something is unassigned and you have capacity, take it. No need to ask permission — just assign yourself and start a branch. See [TRIAGE.md](./TRIAGE.md) for how issues are labeled, prioritized, and pulled.
 
 ### Don't let review feedback sit
 

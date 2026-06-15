@@ -116,6 +116,24 @@ def _build_model(model_name: str):
     return OpenAIChatModel(model_name, provider=provider)
 
 
+def _close_provider_client_best_effort(model: Any) -> None:
+    """Close the httpx AsyncClient under the OpenAIProvider attached to
+    the model, if discoverable. Best-effort, swallows all exceptions so
+    a missing-attribute path on an older pydantic-ai release does not
+    leak through to the caller. The bridge process exits immediately
+    after the reply lands, so any unclosed connection would terminate
+    with the process anyway; this just keeps the stderr clean.
+    """
+    try:
+        provider = getattr(model, "provider", None)
+        client = getattr(provider, "client", None) if provider is not None else None
+        aclose = getattr(client, "aclose", None) if client is not None else None
+        if callable(aclose):
+            asyncio.run(aclose())
+    except Exception:
+        pass
+
+
 async def _run_agent_stream(agent, prompt: str, model: str) -> str:
     """Send a single user message to the Pydantic AI agent and consume
     the streaming events, surfacing throttled activity events to the
@@ -158,21 +176,28 @@ async def _run_agent_stream(agent, prompt: str, model: str) -> str:
                 emit_event(
                     {
                         "kind": "activity",
-                        "activity": (
-                            f"{model}: {preview}" if preview else f"Streaming response from {model}..."
-                        ),
+                        "activity": (f"{model}: {preview}" if preview else f"Streaming response from {model}..."),
                     }
                 )
                 last_activity_at = now
 
         # Prefer the canonical final-output accessor if available, fall
         # back to accumulated chunks for older pydantic-ai versions that
-        # may not have get_output().
+        # may not have get_output(). Narrow the swallow to AttributeError
+        # (the version-skew case) so unexpected runtime errors surface as
+        # an activity event instead of being silently absorbed.
         final_text = ""
         try:
             final_text = str(await result.get_output() or "")
-        except (AttributeError, Exception):
+        except AttributeError:
             pass
+        except Exception as exc:
+            emit_event(
+                {
+                    "kind": "activity",
+                    "activity": f"final output accessor failed ({exc!r}); using accumulated stream chunks",
+                }
+            )
 
     return final_text.strip() or "".join(chunks).strip()
 
@@ -252,7 +277,15 @@ def _run_pydantic_ai(prompt: str) -> RunResult:
         pydantic_model,
         system_prompt=system_message,
     )
-    reply = asyncio.run(_run_agent_stream(agent, prompt, model))
+    try:
+        reply = asyncio.run(_run_agent_stream(agent, prompt, model))
+    finally:
+        # Pydantic AI's OpenAIProvider wraps an httpx AsyncClient that
+        # should be closed to avoid "unclosed connection" warnings on
+        # subprocess exit. Best-effort, the bridge is one-shot so leaks
+        # would not accumulate across runs. Mirrors the autogen bridge's
+        # model_client cleanup pattern.
+        _close_provider_client_best_effort(pydantic_model)
     return RunResult(reply=reply.strip(), used_llm=True)
 
 
