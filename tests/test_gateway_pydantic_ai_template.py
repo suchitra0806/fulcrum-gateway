@@ -135,8 +135,7 @@ def _install_fake_pydantic_ai(
 def test_pydantic_ai_template_is_registered() -> None:
     catalog = agent_template_catalog()
     assert "pydantic_ai" in catalog, (
-        "pydantic_ai template missing from agent_template_catalog. "
-        "Should sit alongside langgraph / autogen / strands."
+        "pydantic_ai template missing from agent_template_catalog. Should sit alongside langgraph / autogen / strands."
     )
 
     template = agent_template_definition("pydantic_ai")
@@ -219,9 +218,7 @@ def test_pydantic_ai_bridge_emits_lifecycle_events_in_stub_path(monkeypatch, cap
 
     reply_lines = [line for line in captured.out.splitlines() if line and not line.startswith(bridge.EVENT_PREFIX)]
     assert reply_lines, "bridge did not print a reply line on stdout"
-    assert "test prompt" in reply_lines[-1], (
-        f"stub reply should echo the prompt. last line: {reply_lines[-1]!r}"
-    )
+    assert "test prompt" in reply_lines[-1], f"stub reply should echo the prompt. last line: {reply_lines[-1]!r}"
 
 
 # Real LLM path
@@ -263,12 +260,9 @@ def test_pydantic_ai_bridge_calls_groq_llm_when_configured(monkeypatch, capsys) 
 
     # Provider was wired with the Groq endpoint + API key.
     provider_kwargs = captured["providers"][0].kwargs
-    assert provider_kwargs["api_key"] == "gsk_test", (
-        "bridge should pass GROQ_API_KEY through to the OpenAIProvider"
-    )
+    assert provider_kwargs["api_key"] == "gsk_test", "bridge should pass GROQ_API_KEY through to the OpenAIProvider"
     assert provider_kwargs["base_url"] == "https://api.groq.com/openai/v1", (
-        "bridge should point the OpenAIProvider at Groq's OpenAI-compatible endpoint, "
-        "not the OpenAI default URL"
+        "bridge should point the OpenAIProvider at Groq's OpenAI-compatible endpoint, not the OpenAI default URL"
     )
 
     # Model was constructed with the configured model name + provider.
@@ -276,9 +270,7 @@ def test_pydantic_ai_bridge_calls_groq_llm_when_configured(monkeypatch, capsys) 
     assert model.model_name == "test-model-x", (
         f"bridge should forward AX_BRIDGE_LLM_MODEL to OpenAIChatModel. got {model.model_name!r}"
     )
-    assert model.provider is captured["providers"][0], (
-        "Model should be wired to the constructed Groq-pointed provider"
-    )
+    assert model.provider is captured["providers"][0], "Model should be wired to the constructed Groq-pointed provider"
 
     # Agent was wired with the model and a system_prompt that names the agent.
     agent_kwargs = captured["agents"][0]
@@ -390,8 +382,7 @@ def test_pydantic_ai_bridge_streams_activity_events_during_llm_call(monkeypatch,
     )
     # Preview should reflect accumulated content as the stream progressed.
     assert any("Light" in act or "travels" in act for act in streaming_activities), (
-        f"streaming activity events should carry a preview of the accumulated text. "
-        f"got: {streaming_activities!r}"
+        f"streaming activity events should carry a preview of the accumulated text. got: {streaming_activities!r}"
     )
 
     # Sanity: agent was driven via the streaming run_stream, not a sync call.
@@ -438,6 +429,61 @@ def test_pydantic_ai_bridge_falls_back_to_stub_when_no_groq_key(monkeypatch, cap
     )
     assert completed is not None
     assert completed["detail"]["used_llm"] is False
+
+
+def test_pydantic_ai_bridge_falls_back_to_stub_when_openai_components_missing(monkeypatch, capsys) -> None:
+    """If GROQ_API_KEY is set and pydantic_ai itself is importable, but
+    the OpenAI provider/model components (pydantic_ai.models.openai and
+    pydantic_ai.providers.openai) are NOT importable, the bridge should
+    fall back to the stub agent path cleanly and emit an activity event
+    explaining the fallback. Mirrors the autogen partial-install parity
+    test for the autogen-ext-missing case.
+    """
+    _install_fake_pydantic_ai(monkeypatch)
+
+    sys.path.insert(0, str(BRIDGE_PATH.parent))
+    try:
+        import pydantic_ai_bridge as bridge
+    finally:
+        sys.path.pop(0)
+
+    # Force `from pydantic_ai.models.openai import OpenAIChatModel` and
+    # `from pydantic_ai.providers.openai import OpenAIProvider` to raise
+    # ImportError by setting their sys.modules entries to None. This
+    # simulates a partial install where pydantic_ai is present but the
+    # OpenAI extras are not.
+    monkeypatch.setitem(sys.modules, "pydantic_ai.models.openai", None)
+    monkeypatch.setitem(sys.modules, "pydantic_ai.providers.openai", None)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.setattr(sys, "argv", ["pydantic_ai_bridge.py", "test prompt"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    monkeypatch.setenv("AX_GATEWAY_AGENT_NAME", "pydantic-ai-test")
+
+    rc = bridge.main()
+    out = capsys.readouterr()
+
+    assert rc == 0
+    event_lines = [line for line in out.out.splitlines() if line.startswith(bridge.EVENT_PREFIX)]
+    activities = []
+    completed_detail = None
+    for line in event_lines:
+        payload = json.loads(line[len(bridge.EVENT_PREFIX) :])
+        if payload.get("kind") == "activity":
+            activities.append(payload.get("activity"))
+        if payload.get("kind") == "status" and payload.get("status") == "completed":
+            completed_detail = payload.get("detail") or {}
+
+    assert any("OpenAI components not importable" in a for a in activities), (
+        f"fallback activity event should mention the missing OpenAI components. got: {activities!r}"
+    )
+    assert completed_detail is not None
+    assert completed_detail.get("used_llm") is False, (
+        "partial-install fallback should report used_llm=False in the completed event detail"
+    )
+
+    reply_lines = [line for line in out.out.splitlines() if line and not line.startswith(bridge.EVENT_PREFIX)]
+    assert reply_lines
+    assert "test prompt" in reply_lines[-1], "fallback reply should echo the prompt via the stub agent path"
 
 
 def test_pydantic_ai_bridge_falls_back_to_string_when_package_missing(monkeypatch, capsys) -> None:
@@ -493,9 +539,10 @@ def test_pydantic_ai_bridge_falls_back_to_string_when_package_missing(monkeypatc
 
 
 def test_pydantic_ai_bridge_threads_ax_bridge_system_prompt(monkeypatch, capsys) -> None:
-    """AX_BRIDGE_SYSTEM_PROMPT should be appended to the agent's
-    system_prompt so operators can steer the agent's tone without
-    editing the bridge."""
+    """AX_BRIDGE_SYSTEM_PROMPT overrides the default trailing instruction
+    ("Reply concisely.") in the agent's system_prompt so operators can
+    steer the agent's tone without editing the bridge.
+    """
     captured = _install_fake_pydantic_ai(monkeypatch, run_stream_output="ok")
     sys.path.insert(0, str(BRIDGE_PATH.parent))
     try:
@@ -517,4 +564,7 @@ def test_pydantic_ai_bridge_threads_ax_bridge_system_prompt(monkeypatch, capsys)
     system_prompt = captured["agents"][0].system_prompt or ""
     assert "Be very terse." in system_prompt, (
         f"AX_BRIDGE_SYSTEM_PROMPT should land in the Agent system_prompt. got: {system_prompt!r}"
+    )
+    assert "Reply concisely." not in system_prompt, (
+        "default tail should be replaced, not appended, when AX_BRIDGE_SYSTEM_PROMPT is set"
     )
