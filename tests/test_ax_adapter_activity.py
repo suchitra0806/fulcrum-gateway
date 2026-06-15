@@ -573,5 +573,74 @@ def test_send_does_not_post_error_on_retryable_failure(monkeypatch):
     assert status_posts == []
 
 
+def test_post_processing_status_strips_codex_autoraise_notice(monkeypatch):
+    """Hermes replays its Codex gpt-5.5 compaction-autoraise notice on every
+    prompt (the agent is rebuilt per turn), so its text must be stripped from
+    the activity stream instead of spamming a bubble each turn. The status
+    transition must still POST so the bubble never gets stuck (spec §177-180)."""
+    adapter = _adapter()
+    posts: list = []
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", _capturing_client(posts))
+    monkeypatch.setattr(adapter, "_announce_local_gateway", lambda *a, **k: _noop())
+
+    notice = (
+        "ℹ Codex gpt-5.5 caps context at 272K, so auto-compaction was raised "
+        "to 85% (from 50%) to use more of the window before summarizing.\n"
+        "  Opt back out: hermes config set compression.codex_gpt55_autoraise false"
+    )
+
+    asyncio.run(
+        adapter._post_processing_status(
+            "msg-root",
+            "thinking",
+            activity=notice,
+            tool_name="read_file",
+        )
+    )
+
+    ax_posts = [p for p in posts if p["url"].endswith("/api/v1/agents/processing-status")]
+    assert len(ax_posts) == 1, "status transition must still be POSTed"
+    body = ax_posts[0]["json"]
+    assert body["status"] == "thinking"
+    # The noisy notice text is stripped from the activity label...
+    assert "activity" not in body
+    # ...while unrelated structured fields ride through untouched.
+    assert body["tool_name"] == "read_file"
+
+
+def test_post_processing_status_strips_codex_notice_from_detail(monkeypatch):
+    """The notice is suppressed whether hermes delivers it as the activity
+    label or the detail line, and a genuine activity is left intact."""
+    adapter = _adapter()
+    posts: list = []
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", _capturing_client(posts))
+    monkeypatch.setattr(adapter, "_announce_local_gateway", lambda *a, **k: _noop())
+
+    asyncio.run(
+        adapter._post_processing_status(
+            "msg-root",
+            "processing",
+            activity="Reading adapter.py",
+            detail="auto-compaction was raised to 85% (from 50%)",
+        )
+    )
+
+    body = [
+        p for p in posts if p["url"].endswith("/api/v1/agents/processing-status")
+    ][0]["json"]
+    assert body["activity"] == "Reading adapter.py"  # genuine activity untouched
+    assert "detail" not in body  # notice text in detail is stripped
+
+
 async def _noop():
     return None

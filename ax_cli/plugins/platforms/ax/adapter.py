@@ -58,6 +58,15 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://paxai.app"
 DEFAULT_LOCAL_GATEWAY_URL = "http://127.0.0.1:8765"
 SSE_RECONNECT_BACKOFF_MAX = 60.0
+
+# Substrings that identify hermes's Codex gpt-5.5 compaction-autoraise lifecycle
+# notice. It is meant to fire once per session, but because each prompt rebuilds
+# the hermes agent it re-fires every turn; we suppress its text in the activity
+# stream (see _post_processing_status and NousResearch/hermes-agent#46786).
+_CODEX_AUTORAISE_NOTICE_MARKERS = (
+    "caps context at 272K",
+    "auto-compaction was raised",
+)
 SSE_IDLE_TIMEOUT = 90.0
 JWT_REFRESH_BUFFER_SECONDS = 30
 HEARTBEAT_INTERVAL_SECONDS = 30.0
@@ -198,7 +207,21 @@ class AxAdapter(BasePlatformAdapter):
         so the aX UI can render a live "thinking…" bubble. Failures are logged,
         never silently swallowed (spec §177-180) — a silent drop here is the
         difference between a working activity bubble and a stuck "waiting" chip.
+
+        Carve-out: hermes replays a one-time Codex gpt-5.5 compaction-autoraise
+        notice ("ℹ Codex gpt-5.5 caps context at 272K, so auto-compaction was
+        raised to 85% …") through this lifecycle channel. Because each prompt
+        rebuilds the hermes agent, that "once per session" notice re-fires on
+        every turn and renders as a noisy activity bubble. We can't change the
+        upstream cadence (NousResearch/hermes-agent#46786), so we strip just
+        that text here. We null the offending field rather than dropping the
+        whole POST so the status transition still lands and the bubble never
+        gets stuck (per §177-180 above).
         """
+        if activity and any(m in activity for m in _CODEX_AUTORAISE_NOTICE_MARKERS):
+            activity = None
+        if detail and any(m in detail for m in _CODEX_AUTORAISE_NOTICE_MARKERS):
+            detail = None
         try:
             jwt = await self._get_jwt()
         except Exception as exc:
