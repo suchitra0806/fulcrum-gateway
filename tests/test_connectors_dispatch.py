@@ -307,6 +307,52 @@ class TestCatalogPagination:
         assert result["filtered"] == 200
         assert result["clipped"] is True
 
+    def test_mid_drain_failure_returns_partial_catalog(self, monkeypatch, caplog):
+        calls: list[str | None] = []
+
+        def search_tools(
+            query,
+            auth_env,
+            config,
+            name,
+            *,
+            limit=10,
+            cursor=None,
+            apps=None,
+        ):
+            calls.append(cursor)
+            if cursor is None:
+                return {
+                    "items": [{"name": "TOOL_A", "appName": "github"}],
+                    "next_cursor": "page-2",
+                    "total_items": 5000,
+                }
+            raise RuntimeError("provider timeout")
+
+        adapter = SimpleNamespace(search_tools=search_tools)
+        monkeypatch.setitem(dispatch._ADAPTERS, "fake", adapter)
+        with caplog.at_level(logging.WARNING, logger="connectors.dispatch"):
+            result = dispatch.list_tools(_row({"tools_limit": 50}), {})
+
+        assert calls == [None, "page-2"]
+        assert result["catalog_partial"] is True
+        assert result["catalog_drained"] == 1
+        assert result["catalog_drain_error"] == "provider timeout"
+        assert result["total"] == 1
+        assert result["matched"] == 1
+        assert [t["name"] for t in result["items"]] == ["TOOL_A"]
+        assert "mid-pagination" in caplog.text
+        assert "provider timeout" in caplog.text
+
+    def test_first_page_drain_failure_still_raises(self, monkeypatch):
+        def search_tools(*args, **kwargs):
+            raise RuntimeError("provider unavailable")
+
+        adapter = SimpleNamespace(search_tools=search_tools)
+        monkeypatch.setitem(dispatch._ADAPTERS, "fake", adapter)
+        with pytest.raises(RuntimeError, match="provider unavailable"):
+            dispatch.list_tools(_row({"tools_limit": 50}), {})
+
 
 @pytest.fixture()
 def composio_row_with_github_allowlist() -> ConnectorRow:

@@ -115,22 +115,46 @@ def _drain_catalog_tools(
     auth_env: dict[str, str],
     config: dict[str, Any],
     connector_name: str,
-) -> tuple[list[dict[str, Any]], int | None, bool]:
-    """Drain paginated catalog search results (Composio and similar providers)."""
+) -> tuple[list[dict[str, Any]], int | None, bool, bool, str | None]:
+    """Drain paginated catalog search results (Composio and similar providers).
+
+    Mid-drain provider errors degrade with a warning: pages fetched before the
+    failure are returned and ``catalog_partial`` is set (#285). Fail-closed when
+    the first page fails (nothing usable to return).
+    """
     items: list[dict[str, Any]] = []
     cursor: str | None = None
     provider_total: int | None = None
     catalog_bounded = False
+    catalog_partial = False
+    drain_error: str | None = None
 
     for page_idx in range(MAX_CATALOG_PAGES):
-        result = adapter.search_tools(
-            "",
-            auth_env,
-            config,
-            connector_name,
-            limit=CATALOG_PAGE_SIZE,
-            cursor=cursor,
-        )
+        try:
+            result = adapter.search_tools(
+                "",
+                auth_env,
+                config,
+                connector_name,
+                limit=CATALOG_PAGE_SIZE,
+                cursor=cursor,
+            )
+        except Exception as exc:
+            if not items:
+                raise
+            catalog_partial = True
+            drain_error = str(exc)
+            provider_total = None
+            log.warning(
+                "%r catalog drain failed mid-pagination after page %d (%d tools fetched): %s. "
+                "Returning partial catalog; matched/total are lower bounds only.",
+                connector_name,
+                page_idx + 1,
+                len(items),
+                drain_error,
+            )
+            break
+
         items.extend(result.get("items", []))
         if provider_total is None and result.get("total_items") is not None:
             provider_total = int(result["total_items"])
@@ -150,7 +174,7 @@ def _drain_catalog_tools(
             f"; provider total_items={provider_total}" if provider_total is not None else "",
         )
 
-    return items, provider_total, catalog_bounded
+    return items, provider_total, catalog_bounded, catalog_partial, drain_error
 
 
 def list_tools(
@@ -158,13 +182,15 @@ def list_tools(
     auth_env: dict[str, str],
 ) -> dict[str, Any]:
     adapter = _get_adapter(connector.provider)
+    catalog_partial = False
+    catalog_drain_error: str | None = None
     if hasattr(adapter, "list_tools"):
         result = adapter.list_tools(auth_env, connector.config, connector.name)
         items = result.get("tools", [])
         provider_total = None
         catalog_bounded = False
     else:
-        items, provider_total, catalog_bounded = _drain_catalog_tools(
+        items, provider_total, catalog_bounded, catalog_partial, catalog_drain_error = _drain_catalog_tools(
             adapter,
             auth_env,
             connector.config,
@@ -178,7 +204,10 @@ def list_tools(
     matched = filter_tools(items, policy, apply_limit=False)
     matched.sort(key=tool_sort_key)
     filtered = matched[: policy.tools_limit]
-    total = provider_total if provider_total is not None else len(items)
+    if catalog_partial:
+        total = catalog_drained
+    else:
+        total = provider_total if provider_total is not None else catalog_drained
     return {
         "items": filtered,
         "total": total,
@@ -188,6 +217,8 @@ def list_tools(
         "clipped": len(matched) > len(filtered),
         "catalog_bounded": catalog_bounded,
         "catalog_drained": catalog_drained,
+        "catalog_partial": catalog_partial,
+        "catalog_drain_error": catalog_drain_error,
     }
 
 
