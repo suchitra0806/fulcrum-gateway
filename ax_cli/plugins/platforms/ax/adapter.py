@@ -636,9 +636,7 @@ class AxAdapter(BasePlatformAdapter):
         # spawning its own background task, so the SSE loop is not blocked.
         await self.handle_message(event)
 
-    def _make_source(
-        self, chat_id: str, sender_id: str, sender_name: str, message_id: str
-    ) -> SessionSource:
+    def _make_source(self, chat_id: str, sender_id: str, sender_name: str, message_id: str) -> SessionSource:
         """Build the SessionSource for an inbound aX message.
 
         ``chat_id`` and ``thread_id`` are both the thread root, so
@@ -678,9 +676,7 @@ class AxAdapter(BasePlatformAdapter):
             from tools.approval import has_blocking_approval
         except Exception:  # pragma: no cover - only in a full Hermes runtime
             return None
-        target = _select_approval_redirect(
-            current_key, list(self._recent_roots.keys()), has_blocking_approval
-        )
+        target = _select_approval_redirect(current_key, list(self._recent_roots.keys()), has_blocking_approval)
         return self._recent_roots.get(target) if target else None
 
     # ----------------------------------------------------------- send (out)
