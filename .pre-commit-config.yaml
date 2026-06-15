@@ -9,16 +9,17 @@
 #   - python -m build
 #   - twine check dist/*
 #
-# These hooks run the same gates locally on every git commit. If a commit
-# would fail in CI, it fails locally first — no more red PRs from things that
-# could have been caught at commit time.
+# These hooks run the same gates locally. Ruff (lint + format) runs on every
+# commit AND again on push; the heavier tests/build run on commit. If a commit
+# or push would fail in CI, it fails locally first — no more red PRs from
+# things that could have been caught here.
 #
 # Setup (one-time, per developer/agent):
 #
-#     pip install pre-commit
-#     pre-commit install
+#     pip install pre-commit   # or: pip install -e ".[dev]"
+#     pre-commit install       # installs both the commit and push hooks
 #
-# Now `git commit` runs the hooks automatically. To run against all files
+# Now `git commit` and `git push` run the hooks automatically. To run against all files
 # without committing:
 #
 #     pre-commit run --all-files
@@ -31,6 +32,13 @@
 #
 #     pre-commit autoupdate
 
+# Install BOTH the commit-time and push-time hooks from a single
+# `pre-commit install` (the default installs the pre-commit stage only).
+default_install_hook_types: [pre-commit, pre-push]
+# Hooks default to commit-time only, so the heavy ci-test-build below stays on
+# commit and does not run on every push. Fast hooks opt into pre-push below.
+default_stages: [pre-commit]
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Pin matches the local ruff version being used (0.15.9 as of 2026-04-07).
@@ -42,8 +50,13 @@ repos:
         # (channel/, tests/, docs/) intentionally excluded — CI doesn't
         # check them either, so don't drift.
         files: ^ax_cli/.*\.py$
+        # Run at commit AND push. The push gate catches changes that were
+        # committed with --no-verify (or by tooling that bypassed the commit
+        # hook) before they reach CI. Ruff is fast, so the redundancy is cheap.
+        stages: [pre-commit, pre-push]
       - id: ruff-format
         files: ^ax_cli/.*\.py$
+        stages: [pre-commit, pre-push]
 
   - repo: local
     hooks:

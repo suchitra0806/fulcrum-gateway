@@ -43,11 +43,16 @@ If you are joining the project for the first time:
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+pre-commit install            # wire up the commit + push gates (lint/format/tests)
 pytest tests/ -v --tb=short
 ruff check ax_cli/
 ruff format --check ax_cli/
 python -m build
 ```
+
+`pre-commit install` is required, not optional: it installs both the commit-time
+hooks (ruff + tests/build) and a push-time ruff gate, so a lint/format issue
+fails locally instead of turning a PR red. See `.pre-commit-config.yaml`.
 
 Use `pipx install axctl` for normal CLI use. Use editable installs only for
 local development.
