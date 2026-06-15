@@ -1,0 +1,17 @@
+id = "echo_test"
+label = "Echo (Test)"
+description = "Fastest way to prove the Gateway is connected and replying correctly."
+runtime_type = "echo"
+asset_class = "interactive_agent"
+intake_model = "live_listener"
+trigger_sources = ["direct_message"]
+return_paths = ["inline_reply"]
+telemetry_shape = "basic"
+suggested_name = "echo-bot"
+operator_summary = "Best first test. No local setup required."
+recommended_test_message = "gateway test ping"
+what_you_need = []
+
+[advanced]
+adapter_label = "Built-in echo runtime"
+supports_command_override = false

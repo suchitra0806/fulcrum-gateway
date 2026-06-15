@@ -1,0 +1,18 @@
+id = "hermes"
+label = "Hermes"
+description = "Long-running Hermes agent managed by Gateway via the native aX platform plugin (ax_cli/plugins/platforms/ax/). Gateway scaffolds HERMES_HOME and supervises `hermes gateway run`."
+runtime_type = "hermes_plugin"
+asset_class = "interactive_agent"
+intake_model = "live_listener"
+trigger_sources = ["direct_message"]
+return_paths = ["inline_reply"]
+telemetry_shape = "rich"
+suggested_name = "hermes-bot"
+operator_summary = "Best path for a capable Hermes-backed agent with continuity and rich progress, via the supported plugin path."
+recommended_test_message = "Remember the word cobalt, reply briefly, then I will ask you what word I gave you."
+what_you_need = ["A local hermes-agent install (hermes CLI on PATH, or HERMES_BIN env var, or ~/hermes-agent/.venv/bin/hermes).", "Hermes provider credentials in ~/.hermes/auth.json (Gateway will symlink to <workdir>/.hermes if not already present)."]
+setup_skill = "gateway-agent-setup"
+
+[advanced]
+adapter_label = "Gateway-supervised Hermes plugin"
+supports_command_override = false

@@ -1,0 +1,18 @@
+id = "ollama"
+label = "Ollama"
+description = "Local model runtime managed by Gateway."
+runtime_type = "exec"
+asset_class = "interactive_agent"
+intake_model = "launch_on_send"
+trigger_sources = ["direct_message"]
+return_paths = ["inline_reply"]
+telemetry_shape = "basic"
+suggested_name = "ollama-bot"
+operator_summary = "Good for a local model with pickup, liveness, and streaming activity."
+recommended_test_message = "Reply naturally that the Gateway round trip worked, then mention which local model answered."
+what_you_need = ["Run a local Ollama server on this machine.", "Have at least one Ollama model pulled locally. Gateway can suggest an installed model when the server is reachable."]
+setup_skill = "gateway-agent-setup"
+
+[advanced]
+adapter_label = "Gateway command bridge"
+supports_command_override = true

@@ -1,0 +1,18 @@
+id = "claude_code_channel"
+label = "Claude Code Channel"
+description = "Live Claude Code session bridged through aX channel delivery."
+runtime_type = "claude_code_channel"
+asset_class = "interactive_agent"
+intake_model = "live_listener"
+trigger_sources = ["direct_message"]
+return_paths = ["inline_reply"]
+telemetry_shape = "basic"
+suggested_name = "cc-channel"
+operator_summary = "Gateway-registered Claude Code live channel. Gateway owns identity; ax-channel owns delivery."
+recommended_test_message = "Reply with exactly: Gateway test OK."
+what_you_need = ["Claude Code with development channels enabled.", "Run `ax channel setup <agent>` after Gateway registration to write .mcp.json."]
+setup_skill = "gateway-agent-setup"
+
+[advanced]
+adapter_label = "Gateway-registered ax-channel"
+supports_command_override = false

@@ -1,0 +1,21 @@
+id = "langgraph_composio"
+label = "LangGraph + Composio"
+description = "LangGraph bridge that searches and runs tools via Gateway connectors (Composio)."
+runtime_type = "exec"
+asset_class = "interactive_agent"
+intake_model = "launch_on_send"
+trigger_sources = ["direct_message"]
+return_paths = ["inline_reply"]
+telemetry_shape = "basic"
+suggested_name = "langgraph-composio-bot"
+operator_summary = "LangGraph round-trip with Composio intent search and optional RUN: tool execution through the Gateway connector registry (no secrets in agent config)."
+recommended_test_message = "List GitHub tools for listing repository stargazers."
+what_you_need = ["Python 3.11+ and a registered Composio connector (`ax gateway connectors add` + auth write).", "Pass `--connector-ref <name>` when adding this agent.", "Optional: `pip install langgraph` for a one-node StateGraph wrapper (same logic without it)."]
+setup_skill = "gateway-composio-connectors"
+
+[defaults_extra]
+bridge_source = "{{repo_root}}/examples/gateway_langgraph_composio/langgraph_composio_bridge.py"
+
+[advanced]
+adapter_label = "Gateway-managed LangGraph + Composio bridge"
+supports_command_override = true

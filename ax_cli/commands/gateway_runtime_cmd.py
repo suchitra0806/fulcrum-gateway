@@ -659,7 +659,10 @@ def runtime_types(as_json: bool = JSON_OPTION):
 
 @app.command("templates")
 def templates(as_json: bool = JSON_OPTION):
-    """List Gateway agent templates and what signals they provide."""
+    """List Gateway agent templates and what signals they provide.
+
+    Prefer ``ax gateway agents templates list`` for the manifest-library view.
+    """
     payload = _agent_templates_payload()
     if as_json:
         print_json(payload)

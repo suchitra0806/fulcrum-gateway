@@ -87,9 +87,9 @@ rather than escalating; see ADR-008).
 
 `asset_class` and `intake_model` values follow
 [GATEWAY-ASSET-TAXONOMY-001](../../specs/GATEWAY-ASSET-TAXONOMY-001/spec.md).
-The authoritative list lives in `agent_template_catalog()`
-(`ax_cli/gateway_runtime_types.py`); a discoverable manifest library is
-planned (#259). Snapshot as of 2026-06-10:
+The authoritative list is discovered from ``ax_cli/manifest_templates/`` and
+``~/.ax/templates/`` (see ``manifest_template_library.py``; closes #259).
+Snapshot as of 2026-06-15:
 
 | Signaling class | Template ID | Runtime type(s) | `asset_class` | `intake_model` | Notes |
 | --- | --- | --- | --- | --- | --- |

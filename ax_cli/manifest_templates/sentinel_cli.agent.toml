@@ -1,0 +1,3 @@
+name = "dev-sentinel"
+template = "sentinel_cli"
+workdir = "{{repo_root}}"

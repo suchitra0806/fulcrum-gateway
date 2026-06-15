@@ -1,0 +1,26 @@
+id = "pass_through"
+label = "Pass-through"
+description = "Polling mailbox identity for agents that check in through Gateway instead of listening live."
+runtime_type = "inbox"
+asset_class = "interactive_agent"
+intake_model = "polling_mailbox"
+worker_model = "agent_check_in"
+trigger_sources = ["mailbox_poll", "manual_check"]
+return_paths = ["manual_reply", "summary_post"]
+telemetry_shape = "basic"
+suggested_name = "pass-through"
+operator_summary = "Best fit for attached agents that need an inbox without pretending to be always online."
+recommended_test_message = "Mailbox check: acknowledge this when you next poll Gateway."
+what_you_need = ["A local agent workspace. Gateway fingerprints the folder, launch spec, agent identity, and Gateway id.", "Operator approval before this mailbox identity can pass work through."]
+setup_skill = "gateway-agent-setup"
+requires_approval = true
+
+[advanced]
+adapter_label = "Gateway pass-through mailbox"
+supports_command_override = false
+
+[signals]
+delivery = "Gateway stores inbound work in the mailbox until the agent checks it."
+liveness = "Gateway shows approval and mailbox state. The agent is not treated as a live listener."
+activity = "Mailbox depth and manual check-ins are the primary activity signal."
+tools = "No automatic tool telemetry. Tool activity belongs to the checking agent session."

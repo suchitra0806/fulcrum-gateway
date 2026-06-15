@@ -1,0 +1,21 @@
+id = "strands"
+label = "Strands"
+description = "Strands agent runtime managed by Gateway."
+runtime_type = "exec"
+asset_class = "interactive_agent"
+intake_model = "launch_on_send"
+trigger_sources = ["direct_message"]
+return_paths = ["inline_reply"]
+telemetry_shape = "basic"
+suggested_name = "strands-bot"
+operator_summary = "Gateway-managed Strands bridge. Initial cut ships with a stub reply; real Agent execution is a follow-up."
+recommended_test_message = "Reply with: Strands round trip OK."
+what_you_need = ["Python 3.11+ on this machine (the bridge runs as a Gateway-managed subprocess).", "For real Agent execution, install strands plus an LLM endpoint and credentials. The stub bridge runs without it."]
+setup_skill = "gateway-agent-setup"
+
+[defaults_extra]
+bridge_source = "{{repo_root}}/examples/gateway_strands/strands_bridge.py"
+
+[advanced]
+adapter_label = "Gateway-managed Strands bridge"
+supports_command_override = true

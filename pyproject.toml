@@ -86,4 +86,6 @@ ax_cli = [
     "static/*.html",
     "plugins/platforms/ax/*.yaml",
     "plugins/platforms/ax/*.md",
+    "manifest_templates/*.toml",
+    "agent_profiles/**/*.json",
 ]

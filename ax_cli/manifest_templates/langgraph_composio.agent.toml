@@ -1,0 +1,5 @@
+name = "langgraph-composio-bot"
+template = "langgraph_composio"
+type = "exec"
+exec_command = "{{bridge_python}} {{repo_root}}/examples/gateway_langgraph_composio/langgraph_composio_bridge.py"
+workdir = "{{repo_root}}"

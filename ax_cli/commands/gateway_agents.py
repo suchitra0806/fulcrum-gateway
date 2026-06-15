@@ -56,12 +56,14 @@ from ..gateway import (
     save_gateway_registry,
     upsert_agent_entry,
 )
-from ..gateway_runtime_types import (
-    _bridge_python,
+from ..gateway_runtime_types import _bridge_python
+from ..manifest_template_library import (
     agent_template_definition,
     agent_template_list,
+    copy_template_manifest,
+    template_manifest_path,
 )
-from ..output import JSON_OPTION, console, err_console, print_json, print_table
+from ..output import JSON_OPTION, console, err_console, print_json, print_kv, print_table
 from .gateway_app import _UNSET, agents_app
 
 # Agents-list cache: serves last-good upstream response when paxai.app
@@ -1967,6 +1969,117 @@ def export_manifest(
         # Print to stdout so the operator can pipe to a file. Use raw print
         # (not console.print) so Rich doesn't apply any styling.
         print(toml_text, end="")
+
+
+templates_app = typer.Typer(
+    name="templates",
+    help="Discover bundled and user-local agent manifest templates (closes #259)",
+    no_args_is_help=True,
+)
+agents_app.add_typer(templates_app)
+
+
+@templates_app.command("list")
+def list_manifest_templates(
+    as_json: bool = JSON_OPTION,
+    include_advanced: bool = typer.Option(
+        False,
+        "--advanced",
+        help="Include advanced-only templates (e.g. passive inbox).",
+    ),
+):
+    """List discoverable agent manifest templates."""
+    from ..commands.gateway_runtime_cmd import _agent_templates_payload
+
+    payload = _agent_templates_payload()
+    templates = payload["templates"]
+    if not include_advanced:
+        templates = [item for item in templates if str(item.get("availability") or "") != "advanced"]
+    payload = {"templates": templates, "count": len(templates)}
+    if as_json:
+        print_json(payload)
+        return
+    rows = []
+    for item in templates:
+        rows.append(
+            {
+                "id": item["id"],
+                "label": item["label"],
+                "availability": item.get("availability"),
+                "summary": item.get("operator_summary"),
+                "manifest": str(template_manifest_path(item["id"])),
+            }
+        )
+    print_table(
+        ["Template", "Label", "Status", "Why Pick It", "Manifest"],
+        rows,
+        keys=["id", "label", "availability", "summary", "manifest"],
+    )
+
+
+@templates_app.command("show")
+def show_manifest_template(
+    template_id: str = typer.Argument(..., help="Template id (e.g. hermes, ollama)"),
+    as_json: bool = JSON_OPTION,
+):
+    """Show template metadata and the bundled manifest path."""
+    try:
+        template = agent_template_definition(template_id)
+    except KeyError:
+        err_console.print(f"[red]Unknown template:[/red] {template_id}")
+        raise typer.Exit(1)
+    manifest_path = template_manifest_path(template_id)
+    if as_json:
+        print_json({"template": template, "manifest_path": str(manifest_path)})
+        return
+    print_kv(
+        {
+            "id": template["id"],
+            "label": template["label"],
+            "availability": template.get("availability"),
+            "runtime_type": template.get("runtime_type"),
+            "manifest": str(manifest_path),
+            "operator_summary": template.get("operator_summary"),
+        }
+    )
+    what_you_need = template.get("what_you_need") or []
+    if what_you_need:
+        err_console.print("[bold]What you need[/bold]")
+        for item in what_you_need:
+            err_console.print(f"  • {item}")
+
+
+@templates_app.command("copy")
+def copy_manifest_template(
+    template_id: str = typer.Argument(..., help="Template id to copy"),
+    output: str = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write manifest to this path instead of stdout",
+    ),
+    name: str = typer.Option(
+        None,
+        "--name",
+        help="Override the suggested agent name in the copied manifest",
+    ),
+):
+    """Copy a template manifest for editing and ``ax gateway agents apply``."""
+    try:
+        template = agent_template_definition(template_id)
+    except KeyError:
+        err_console.print(f"[red]Unknown template:[/red] {template_id}")
+        raise typer.Exit(1)
+    suggested = name or str(template.get("suggested_name") or template_id)
+    text = copy_template_manifest(template_id, suggested_name=suggested)
+    if output:
+        out_path = Path(output).expanduser()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text, encoding="utf-8")
+        err_console.print(f"[green]Wrote manifest:[/green] {out_path}")
+        err_console.print(f"[dim]Apply with:[/dim] ax gateway agents apply {out_path}")
+    else:
+        print(text, end="")
 
 
 @agents_app.command("list")
