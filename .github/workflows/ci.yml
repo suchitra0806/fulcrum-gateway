@@ -52,7 +52,7 @@ jobs:
           cache: 'pip'
 
       - name: Install ruff
-        run: pip install ruff
+        run: pip install ruff==0.15.15
 
       - name: Ruff check
         run: ruff check ax_cli/
