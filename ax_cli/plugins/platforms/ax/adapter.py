@@ -635,21 +635,27 @@ class AxAdapter(BasePlatformAdapter):
         return False
 
     @staticmethod
-    def _is_inline_bypass_command(event: MessageEvent) -> bool:
-        """True if this is an inline command the gateway dispatches WITHOUT
+    def _is_inline_bypass_command(text: str) -> bool:
+        """True if ``text`` is an inline command the gateway dispatches WITHOUT
         producing a threaded reply (`/stop`, `/new`, `/approve`, `/deny`, …).
 
         Those bypass the active-session guard and never emit a reply that would
         clear an activity bubble, so the immediate "thinking" must be skipped for
-        them — otherwise the spinner hangs until the 180s TTL. Delegates to the
-        gateway's own bypass predicate so this never drifts from the real set.
+        them — otherwise the spinner hangs until the 180s TTL. Parses the command
+        token straight from the cleaned text (mirroring :func:`_is_approval_command`,
+        so it doesn't depend on optional ``MessageEvent`` helpers) and delegates
+        the bypass decision to the gateway's canonical predicate to avoid drift.
         """
-        if not event.is_command():
+        stripped = (text or "").strip()
+        if not stripped.startswith("/"):
+            return False
+        cmd = stripped[1:].split(maxsplit=1)[0].split("@", 1)[0].lower()
+        if not cmd:
             return False
         try:
             from hermes_cli.commands import should_bypass_active_session
 
-            return bool(should_bypass_active_session(event.get_command()))
+            return bool(should_bypass_active_session(cmd))
         except Exception:
             return False
 
@@ -725,7 +731,7 @@ class AxAdapter(BasePlatformAdapter):
         # those are dispatched inline by handle_message and never produce a
         # threaded reply, so a "thinking" bubble here would hang until the 180s
         # TTL — a phantom spinner on the most common control commands.
-        if not self._is_inline_bypass_command(event):
+        if not self._is_inline_bypass_command(text):
             await self._post_processing_status(chat_id, "thinking")
 
         # Dispatch through the base adapter so the level-1 active-session
