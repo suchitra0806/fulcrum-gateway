@@ -3513,18 +3513,18 @@ def test_resolve_inference_client_reads_client_field():
     assert gateway_core._resolve_inference_client(entry) == "gemini_sdk"
 
 
-def test_resolve_inference_client_accepts_mistral_sdk():
-    """mistral_sdk is a registered client and must be selectable.
-    Regression guard for the allowlist gap where the runtime merged without
-    an entry in _INFERENCE_SDK_CLIENTS."""
-    entry = {"name": "ada", "client": "mistral_sdk"}
-    assert gateway_core._resolve_inference_client(entry) == "mistral_sdk"
-
-
-def test_resolve_inference_client_accepts_xai_sdk():
-    """xai_sdk is a registered client and must be selectable."""
-    entry = {"name": "ada", "client": "xai_sdk"}
-    assert gateway_core._resolve_inference_client(entry) == "xai_sdk"
+@pytest.mark.parametrize("client_name", sorted(gateway_core._INFERENCE_SDK_CLIENTS))
+def test_resolve_inference_client_accepts_every_allowlisted_client(client_name):
+    """Every name in `_INFERENCE_SDK_CLIENTS` must round-trip through the
+    resolver. Parameterized so adding a new runtime to the allowlist
+    automatically gets a regression test, closing the drift class Eugene
+    named in PR #307 (the hand-maintained `test_resolve_inference_client_
+    accepts_*` set covered two of seven runtimes). Matches the helper-
+    generated approach PR #332 used for the `--client` help text, same
+    single-source-of-truth pattern.
+    """
+    entry = {"name": "ada", "client": client_name}
+    assert gateway_core._resolve_inference_client(entry) == client_name
 
 
 def test_resolve_inference_client_returns_none_for_unknown_values():
