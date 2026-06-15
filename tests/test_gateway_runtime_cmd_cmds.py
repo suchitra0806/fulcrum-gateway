@@ -21,21 +21,22 @@ def test_gateway_templates_command_json():
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     ids = [item["id"] for item in payload["templates"]]
-    assert ids[:10] == [
+    assert ids[:11] == [
         "hermes",
         "ollama",
         "langgraph",
         "langgraph_composio",
         "autogen",
+        "pydantic_ai",
         "strands",
         "echo_test",
         "service_account",
         "pass_through",
         "sentinel_cli",
     ]
-    assert ids[10] == "claude_code_channel"
+    assert ids[11] == "claude_code_channel"
     assert "inbox" not in ids
-    assert payload["count"] == 11
+    assert payload["count"] == 12
     ollama = next(item for item in payload["templates"] if item["id"] == "ollama")
     assert ollama["runtime_type"] == "exec"
     assert ollama["launchable"] is True

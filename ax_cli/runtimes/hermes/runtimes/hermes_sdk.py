@@ -422,10 +422,19 @@ def _install_secure_tools(workdir: str, cb: StreamCallback | None = None) -> boo
         )
         log.error(warning)
         if cb is not None:
+            status_payload = (
+                f"security_wrapper_degraded: {exc!r}. "
+                "Tool calls (terminal, read_file, write_file, patch, "
+                "execute_code) will run unsandboxed. Agent can read "
+                "credential-bearing files outside its workdir."
+            )
             try:
-                cb.on_status(f"security_wrapper_degraded: {exc!r}")
-            except Exception:
-                pass
+                cb.on_status(status_payload)
+            except Exception as cb_exc:
+                log.warning(
+                    "on_status callback raised during security degradation: %r",
+                    cb_exc,
+                )
         print(f"WARNING: {warning}", file=sys.stderr, flush=True)
         if _strict_security_enabled():
             raise HermesSecuritySetupError(

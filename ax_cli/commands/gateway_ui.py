@@ -26,6 +26,7 @@ from rich.text import Text
 
 from .. import gateway as gateway_core
 from ..gateway import (
+    _ui_request_logger,
     activity_log_path,
     agent_token_path,
     annotate_runtime_health,
@@ -136,9 +137,9 @@ def _reachability_copy(agent: dict) -> str:
     if reachability == "launch_available":
         return "Gateway can launch this runtime on send."
     if reachability == "sse_disconnected":
-        return "Claude Code is attached but the SSE subscription is down — messages will not be delivered."
+        return "The attached session's SSE subscription is down — messages will not be delivered."
     if reachability == "attach_required":
-        return "Start Claude Code before sending."
+        return "Start the attached session before sending."
     if mode == "INBOX":
         return "Queue path is unavailable."
     return "Gateway does not currently have a working path."
@@ -2431,10 +2432,20 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
             )
             return True
 
+        def _mark_interactive(self, parsed, *, mutation: bool) -> None:
+            # Dashboard mutations are human clicks → aggressive rate-limit
+            # threshold. Everything else (auto-refresh GETs, /local/* and
+            # /api/v1/* programmatic agent calls) is automated. Set
+            # explicitly on every request: keep-alive reuses one thread (and
+            # its context) across sequential requests on a connection.
+            interactive = mutation and parsed.path.startswith("/api/") and not parsed.path.startswith("/api/v1/")
+            gateway_auth._interactive_request.set(interactive)
+
         def do_GET(self) -> None:  # noqa: N802
             if self._reject_unauthorized_host():
                 return
             parsed = urlparse(self.path)
+            self._mark_interactive(parsed, mutation=False)
             if os.environ.get("AX_OFFLINE"):
                 if parsed.path == "/api/v1/sse/messages":
                     from urllib.parse import parse_qs as _parse_qs
@@ -2585,6 +2596,7 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
             if self._reject_unauthorized_host():
                 return
             parsed = urlparse(self.path)
+            self._mark_interactive(parsed, mutation=True)
             try:
                 body = _read_json_request(self)
                 if os.environ.get("AX_OFFLINE"):
@@ -2967,6 +2979,7 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
             if self._reject_unauthorized_host():
                 return
             parsed = urlparse(self.path)
+            self._mark_interactive(parsed, mutation=True)
             try:
                 body = _read_json_request(self)
                 if parsed.path.startswith("/api/connectors/"):
@@ -3014,6 +3027,7 @@ def _build_gateway_ui_handler(*, activity_limit: int, refresh_ms: int):
             if self._reject_unauthorized_host():
                 return
             parsed = urlparse(self.path)
+            self._mark_interactive(parsed, mutation=True)
             if parsed.path.startswith("/api/connectors/"):
                 try:
                     payload = _dispatch_connector_api_delete(parsed.path)
@@ -3281,6 +3295,17 @@ def ui(
             webbrowser.open_new_tab(url)
         except Exception:
             err_console.print("[yellow]Could not open a browser automatically.[/yellow]")
+    # Mark the process so request-log records carry the ui_server role and
+    # rate-limit thresholds default to "automated" (dashboard mutations are
+    # marked interactive per-request by the handler). Pre-warm the shared
+    # rate-limit window before browser polling starts.
+    gateway_auth._is_ui_server_process = True
+    try:
+        gateway_auth._gateway_rate_limit_state.warm(
+            gateway_auth._load_gateway_user_client(request_logger=_ui_request_logger)
+        )
+    except Exception:
+        pass  # best-effort — don't block UI startup on a warm failure
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -3293,6 +3318,7 @@ def ui(
 
 # Deferred cross-module imports (bottom-of-file to avoid import cycles; bound
 # into module globals after defs, resolved at call time).
+from . import gateway_auth  # noqa: E402
 from .gateway_agents import (  # noqa: E402
     _ack_managed_agent_message,
     _hide_managed_agents,

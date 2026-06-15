@@ -145,7 +145,11 @@ def annotate_runtime_health(
     presence = _derive_presence(mode=mode, liveness=liveness, work_state=work_state)
     reply = _derive_reply(profile["reply_mode"])
     reachability = _derive_reachability(
-        snapshot=enriched, mode=mode, liveness=liveness, activation=profile["activation"]
+        snapshot=enriched,
+        mode=mode,
+        liveness=liveness,
+        activation=profile["activation"],
+        last_seen_age=last_seen_age,
     )
     confidence, confidence_reason, confidence_detail = _derive_confidence(
         enriched,

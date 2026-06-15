@@ -30,6 +30,11 @@ class TestExtractKeyId:
     def test_dot_at_start(self):
         assert _extract_key_id("axp_u_.JustSecret") is None
 
+    def test_offline_token_has_no_key_id(self):
+        # Offline-mode synthetic tokens (axp_a_offline_<uuid>) have no `.` separator,
+        # so there is no key_id to extract — get_token surfaces this as a clear error.
+        assert _extract_key_id("axp_a_offline_deadbeef") is None
+
 
 class TestCacheKey:
     def test_deterministic(self):
@@ -55,6 +60,22 @@ class TestCacheKey:
     def test_key_length(self):
         k = _cache_key("key1", "user_access", None, "ax-api", "messages")
         assert len(k) == 24  # truncated SHA-256
+
+
+class TestOfflineTokenExchange:
+    def test_offline_token_get_token_raises_clear_error(self, tmp_path, monkeypatch):
+        # Defense-in-depth: even if an offline token reaches the exchanger (e.g. the
+        # upstream gateway_storage guard is bypassed), get_token must fail with an
+        # actionable message naming the offline format, not the cryptic
+        # "Cannot extract key_id from PAT — invalid format".
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".ax").mkdir()
+        (tmp_path / ".ax" / "config.toml").write_text("")
+
+        exchanger = TokenExchanger("https://example.com", "axp_a_offline_deadbeef")
+        with pytest.raises(ValueError, match="Offline-mode agent token") as excinfo:
+            exchanger.get_token("agent_access")
+        assert "AX_OFFLINE=1" in str(excinfo.value)
 
 
 class TestTokenExchanger:

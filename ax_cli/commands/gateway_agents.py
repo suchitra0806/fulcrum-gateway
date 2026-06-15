@@ -380,7 +380,11 @@ def _register_managed_agent(
         max_retries=INTERACTIVE_429_MAX_RETRIES,
         base_wait=INTERACTIVE_429_BASE_WAIT,
     )
-    token_file = _save_agent_token(name, token)
+    # Saves the token to the canonical <gateway_dir>/agents/<name>/token. The
+    # return path is intentionally not captured: recovery derives it from the
+    # agent name (agent_token_path / agent_token_relpath), so it is neither
+    # stored in the registry as an absolute path nor recorded in the event.
+    _save_agent_token(name, token)
 
     requires_approval = bool((template or {}).get("requires_approval", False))
     entry_payload = {
@@ -444,7 +448,6 @@ def _register_managed_agent(
         "managed_agent_added",
         entry=entry,
         space_id=selected_space,
-        token_file=str(token_file),
     )
     return annotate_runtime_health(entry, registry=registry)
 
@@ -706,6 +709,7 @@ def _update_managed_agent(
     allowed_users: str | object = _UNSET,
     connector_ref: str | object = _UNSET,
     agent_client: str | object = _UNSET,
+    python_path: str | object = _UNSET,
     desired_state: str | None = None,
 ) -> dict:
     name = name.strip()
@@ -801,6 +805,13 @@ def _update_managed_agent(
             entry["client"] = sdk_clean
         else:
             entry.pop("client", None)
+
+    if python_path is not _UNSET:
+        py_clean = str(python_path or "").strip()
+        if py_clean:
+            entry["python"] = py_clean
+        else:
+            entry.pop("python", None)
 
     if template_effective_id == "langgraph_composio" and not str(entry.get("connector_ref") or "").strip():
         raise ValueError(
@@ -1020,9 +1031,12 @@ def _read_recovery_evidence(name: str) -> dict | None:
 
     - Activity log: most recent managed_agent_added for ``name`` →
       agent_id, asset_id, install_id, gateway_id, runtime_type,
-      transport, space_id, token_file, credential_source, ts.
+      transport, space_id, credential_source, ts.
     - Token directory: ``~/.ax/gateway/agents/<name>/token`` must exist
-      (we don't fabricate credentials).
+      (we don't fabricate credentials). The token path is derived from
+      ``name`` (agent_token_path / agent_token_relpath), never read from
+      the event — older records may still carry a ``token_file`` value,
+      but it is ignored.
     - Workdir ``.ax/AGENT_CONTEXT.md`` if present, for the workdir hint.
 
     Returns None if no managed_agent_added event is recorded or the
@@ -1714,6 +1728,11 @@ def update_agent(
         "--client",
         help="MCP host or inference SDK client (claude_cli for sentinel_cli; openai_sdk | gemini_sdk | groq_sdk | mistral_sdk | leapfrog_sdk | xai_sdk for sentinel_inference_sdk). Not accepted for claude_code_channel.",
     ),
+    python_path: str = typer.Option(
+        None,
+        "--python",
+        help="Path to the Python interpreter used by sentinel_inference_sdk agents. Pass an empty string to clear.",
+    ),
     desired_state: str = typer.Option(None, "--desired-state", help="running | stopped"),
     as_json: bool = JSON_OPTION,
 ):
@@ -1745,6 +1764,7 @@ def update_agent(
             allowed_users=allowed_users if allowed_users is not None else _UNSET,
             connector_ref=connector_ref if connector_ref is not None else _UNSET,
             agent_client=client if client is not None else _UNSET,
+            python_path=python_path if python_path is not None else _UNSET,
             desired_state=desired_state,
         )
     except (LookupError, ValueError) as exc:

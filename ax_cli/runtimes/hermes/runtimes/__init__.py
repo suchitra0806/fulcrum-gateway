@@ -6,11 +6,12 @@ The SSE listener is runtime-agnostic — it detects mentions, queues them, and
 delegates execution to whichever runtime is configured.
 
 Available runtimes:
-  - claude_cli:  Claude Code subprocess (claude -p), uses Max subscription
-  - openai_sdk:  OpenAI Python SDK via ChatGPT OAuth, uses Plus/Pro subscription
-  - groq_sdk:    Groq Python SDK, chat completions over GROQ_API_KEY
-  - hermes_sdk:  Hermes-agent wrapper with 90-turn agentic loop
-  - mistral_sdk: Mistral Python SDK, chat completions over MISTRAL_API_KEY
+  - claude_cli:     Claude Code subprocess (claude -p), uses Max subscription
+  - openai_sdk:     OpenAI Python SDK via ChatGPT OAuth, uses Plus/Pro subscription
+  - openrouter_sdk: OpenRouter meta-provider via openai SDK, OPENROUTER_API_KEY
+  - groq_sdk:       Groq Python SDK, chat completions over GROQ_API_KEY
+  - hermes_sdk:     Hermes-agent wrapper with 90-turn agentic loop
+  - mistral_sdk:    Mistral Python SDK, chat completions over MISTRAL_API_KEY
 
 Adding a new runtime:
   1. Create a module in runtimes/ (e.g., gemini_sdk.py)

@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 340" font-family="ui-monospace, 'Cascadia Code', Menlo, monospace" font-size="13">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#4ade80"/>
+    </marker>
+    <marker id="arrow-muted" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#5d7488"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="340" fill="#0f1923" rx="12"/>
+
+  <!-- ── Agent box ── -->
+  <rect x="20" y="60" width="220" height="220" rx="10" fill="#1a2535" stroke="#2d4a6b" stroke-width="1.5"/>
+  <text x="130" y="88" text-anchor="middle" fill="#94a3b8" font-size="11" letter-spacing="0.12em" text-decoration="none" font-weight="600">AGENT</text>
+  <text x="130" y="106" text-anchor="middle" fill="#64748b" font-size="10" letter-spacing="0.08em">(runtime process)</text>
+
+  <text x="36" y="134" fill="#64748b" font-size="11">Signals reported:</text>
+  <text x="36" y="154" fill="#4ade80" font-size="11">  effective_state</text>
+  <text x="36" y="171" fill="#4ade80" font-size="11">  last_seen_at</text>
+  <text x="36" y="188" fill="#4ade80" font-size="11">  sse_connected</text>
+  <text x="36" y="205" fill="#4ade80" font-size="11">  external_runtime_state</text>
+  <text x="36" y="222" fill="#4ade80" font-size="11">  backlog_depth</text>
+  <text x="36" y="239" fill="#94a3b8" font-size="10" font-style="italic">  ... (per ADR-007 contract)</text>
+
+  <!-- ── Daemon / Registry box ── -->
+  <rect x="340" y="60" width="220" height="220" rx="10" fill="#1a2535" stroke="#2d4a6b" stroke-width="1.5"/>
+  <text x="450" y="88" text-anchor="middle" fill="#94a3b8" font-size="11" letter-spacing="0.12em" font-weight="600">GATEWAY DAEMON</text>
+  <text x="450" y="106" text-anchor="middle" fill="#64748b" font-size="10" letter-spacing="0.08em">(registry owner)</text>
+
+  <text x="356" y="134" fill="#64748b" font-size="11">Derives and stores:</text>
+  <text x="356" y="154" fill="#fbbf24" font-size="11">  liveness</text>
+  <text x="356" y="171" fill="#fbbf24" font-size="11">  presence</text>
+  <text x="356" y="188" fill="#fbbf24" font-size="11">  confidence</text>
+  <text x="356" y="205" fill="#fbbf24" font-size="11">  reachability</text>
+  <text x="356" y="222" fill="#fbbf24" font-size="11">  mode</text>
+  <text x="356" y="239" fill="#94a3b8" font-size="10" font-style="italic">  (written to registry)</text>
+
+  <!-- ── UI box ── -->
+  <rect x="660" y="60" width="220" height="220" rx="10" fill="#1a2535" stroke="#2d4a6b" stroke-width="1.5"/>
+  <text x="770" y="88" text-anchor="middle" fill="#94a3b8" font-size="11" letter-spacing="0.12em" font-weight="600">UI / CLI</text>
+  <text x="770" y="106" text-anchor="middle" fill="#64748b" font-size="10" letter-spacing="0.08em">(read-only consumer)</text>
+
+  <text x="676" y="134" fill="#64748b" font-size="11">Reads and renders:</text>
+  <text x="676" y="154" fill="#94a3b8" font-size="11">  operator intent</text>
+  <text x="676" y="171" fill="#94a3b8" font-size="11">  tone / label</text>
+  <text x="676" y="188" fill="#94a3b8" font-size="11">  send availability</text>
+  <text x="676" y="205" fill="#94a3b8" font-size="11">  doctor checks</text>
+  <text x="676" y="222" fill="#94a3b8" font-size="10" font-style="italic">  (no health computation)</text>
+
+  <!-- ── Arrow: Agent → Daemon ── -->
+  <line x1="242" y1="170" x2="336" y2="170" stroke="#4ade80" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ── Arrow: Daemon → UI ── -->
+  <line x1="562" y1="170" x2="656" y2="170" stroke="#5d7488" stroke-width="1.5" marker-end="url(#arrow-muted)"/>
+
+  <!-- ── ADR-007 label ── -->
+  <rect x="255" y="136" width="70" height="22" rx="6" fill="#0f2d1f" stroke="#4ade80" stroke-width="1"/>
+  <text x="290" y="151" text-anchor="middle" fill="#4ade80" font-size="10" font-weight="700">ADR-007</text>
+
+  <!-- ── ADR-008 label ── -->
+  <rect x="575" y="136" width="70" height="22" rx="6" fill="#1a1f2e" stroke="#5d7488" stroke-width="1"/>
+  <text x="610" y="151" text-anchor="middle" fill="#94a3b8" font-size="10" font-weight="700">ADR-008</text>
+
+  <!-- ── Bottom captions ── -->
+  <text x="130" y="305" text-anchor="middle" fill="#4ade80" font-size="10">Signaling contract</text>
+  <text x="130" y="320" text-anchor="middle" fill="#4ade80" font-size="10">(what agents report)</text>
+
+  <text x="450" y="305" text-anchor="middle" fill="#fbbf24" font-size="10">Health derivation</text>
+  <text x="450" y="320" text-anchor="middle" fill="#fbbf24" font-size="10">(daemon is the authority)</text>
+
+  <text x="770" y="305" text-anchor="middle" fill="#94a3b8" font-size="10">Status display</text>
+  <text x="770" y="320" text-anchor="middle" fill="#94a3b8" font-size="10">(reads, never computes)</text>
+</svg>

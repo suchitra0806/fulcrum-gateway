@@ -1,7 +1,7 @@
 # ADR-006: `use`/`admin` Tier Model for Proxy Methods
 
-**Status:** Partially implemented (tier annotations landed in PR #215; per-agent
-tier enforcement is proposed in issue #146)
+**Status:** Partially implemented (tier annotations landed in commit `75b7f97`;
+per-agent tier enforcement is proposed in issue #146)
 
 ## Context
 

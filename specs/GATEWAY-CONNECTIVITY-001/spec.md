@@ -1,9 +1,9 @@
 # GATEWAY-CONNECTIVITY-001: Gateway Connectivity, Signal Model, and Sender Confidence
 
-**Status:** Draft  
-**Owner:** @madtank  
+**Status:** Draft — sections added 2026-06-10: *Daemon-to-UI Status Contract* (operator intent priority, UI tone semantics, reachability values, liveness escalation thresholds). Derivation pseudocode and confidence reason codes reconciled against the implementation (`ax_cli/gateway_state.py`) the same day.  
+**Owner:** @markgalpin (transferred from @madtank, 2026-06-03)  
 **Date:** 2026-04-22  
-**Related:** LISTENER-001, AGENT-CONTACT-001, MESH-SPAWN-001, [docs/mcp-remote-oauth.md](../../docs/mcp-remote-oauth.md)  
+**Related:** [LISTENER-001](../LISTENER-001/spec.md), [AGENT-CONTACT-001](../AGENT-CONTACT-001/spec.md), [MESH-SPAWN-001](../MESH-SPAWN-001/spec.md), [HEARTBEAT-001](../HEARTBEAT-001/spec.md) (source of the 30s registry signal cadence this spec's thresholds derive from), [GATEWAY-AGENT-REGISTRY-001](../GATEWAY-AGENT-REGISTRY-001/spec.md), [ADR-008](../../docs/adr/ADR-008-agent-status-model.md) (daemon-to-UI status contract decision), [docs/mcp-remote-oauth.md](../../docs/mcp-remote-oauth.md)  
 **Companion Mockups:** [mockups.md](mockups.md)
 
 ## Purpose
@@ -69,7 +69,7 @@ mistaken for a broken or disconnected live agent.
 
 `Pass-through` is the user-facing mailbox identity for agents that check
 Gateway when available instead of listening live. It is distinct from both live
-listeners and background workers; see **GATEWAY-PASS-THROUGH-MAILBOX-001** for
+listeners and background workers; see **[GATEWAY-PASS-THROUGH-MAILBOX-001](../GATEWAY-PASS-THROUGH-MAILBOX-001/spec.md)** for
 the approval, fingerprint, mailbox count, and last-activity contract.
 
 The user picks a template, sees its reply behavior and expected signals, runs a
@@ -204,6 +204,7 @@ and drill-ins:
 - `queue_available`
 - `launch_available`
 - `attach_required`
+- `sse_disconnected`
 - `unavailable`
 
 This is explanatory text, not a primary fleet chip.
@@ -234,19 +235,25 @@ if liveness == setup_error:
   presence = ERROR
 else if work_state == blocked:
   presence = BLOCKED
+else if liveness == stale:
+  presence = STALE
+else if liveness == offline and mode == LIVE:
+  presence = OFFLINE
 else if work_state == working:
   presence = WORKING
 else if work_state == queued:
   presence = QUEUED
-else if liveness == stale:
-  presence = STALE
-else if liveness == offline:
-  presence = OFFLINE
-else if liveness == connected:
-  presence = IDLE
 else:
-  presence = OFFLINE
+  presence = IDLE
 ```
+
+Signal freshness outranks work claims: a runtime whose registry signals have
+gone stale renders `STALE` even if its last write claimed `working` — the
+work claim is exactly as old as the stale signal, so it cannot be trusted
+over it. `OFFLINE` applies only to LIVE mode agents; INBOX and ON-DEMAND
+agents fall through to work-state evaluation and ultimately `IDLE`, because
+their availability is defined by queue access or launch capability, not a
+persistent connection (see Daemon-to-UI Status Contract below).
 
 #### Reply derivation
 
@@ -258,21 +265,41 @@ silent -> SILENT
 
 #### Confidence derivation
 
+Governance verdicts (identity, environment, space, attestation, approval —
+see [CONNECTED-ASSET-GOVERNANCE-001](../CONNECTED-ASSET-GOVERNANCE-001/spec.md))
+are evaluated before any health signal:
+a runtime the gateway refuses to route to is `BLOCKED` no matter how healthy
+its process looks.
+
 ```text
 if liveness == setup_error:
-  confidence = BLOCKED
-else if recent_test_failed or completion_rate_below_threshold:
-  confidence = LOW
+  confidence = BLOCKED (setup_blocked)
+else if identity unbound / mismatched / bootstrap-only:
+  confidence = BLOCKED (identity_unbound | identity_mismatch | bootstrap_only)
+else if environment mismatched or blocked:
+  confidence = BLOCKED (environment_mismatch)
+else if active space not allowed or unset:
+  confidence = BLOCKED (active_space_not_allowed | no_active_space)
+else if space allow-list unverifiable:
+  confidence = LOW (space_unknown)
+else if approval rejected:
+  confidence = BLOCKED (approval_denied)
+else if attestation blocked/unknown/drifted or approval pending:
+  confidence = BLOCKED (approval_required)
+else if doctor reported a failed send path:
+  confidence = LOW (recent_test_failed)
+else if completion_rate < 0.5:
+  confidence = LOW (completion_degraded)
+else if mode == INBOX:
+  confidence = HIGH (queue_available)
+else if mode == ON-DEMAND and reachability == launch_available:
+  confidence = MEDIUM (launch_available)
 else if liveness in {offline, stale}:
-  confidence = LOW
-else if placement == mailbox and queue_health == healthy:
-  confidence = HIGH
-else if activation == on_demand and launch_health == healthy:
-  confidence = MEDIUM
-else if recent_smoke_test_passed and heartbeat_recent and queue_or_listener_healthy:
-  confidence = HIGH
+  confidence = LOW (sse_disconnected | attach_required | unavailable)
+else if liveness == connected:
+  confidence = HIGH (live_now)
 else:
-  confidence = MEDIUM
+  confidence = MEDIUM (unknown)
 ```
 
 `confidence` is specifically about **safe to send now through Gateway**. For
@@ -282,30 +309,40 @@ immediate.
 
 #### Confidence reason
 
-Every derived confidence value must include a machine-readable reason code and
-human-readable explanation:
-
-- `confidence_reason`: short code such as `recent_smoke_test_passed`,
-  `queue_writable`, `cold_start_possible`, `session_stale`, `setup_missing_repo`
-- `confidence_detail`: short operator-facing string such as `Queue writable`,
-  `Cold start possible`, `Reconnect local session`, `Missing Hermes checkout`
+Every derived confidence value includes a machine-readable reason code
+(`confidence_reason`, parenthesised above) and a human-readable explanation
+(`confidence_detail`), e.g. `Gateway can safely accept and queue work now.`
+or `Start the attached session before sending.` The implemented vocabulary
+is the set shown in the derivation above plus `binding_drift` reasons
+supplied by governance; implementations must not invent display-only codes
+the daemon does not emit.
 
 #### Reachability derivation
 
 ```text
-if liveness == setup_error:
+if liveness == setup_error or any governance verdict blocks routing:
   reachability = unavailable
-else if placement == mailbox and queue_health == healthy:
+else if mode == INBOX:
   reachability = queue_available
-else if activation in {persistent, attach_only} and liveness == connected:
+else if activation == attach_only and liveness in {stale, offline}:
+  reachability = sse_disconnected if sse_connected == false
+                                     and registry signal is fresh (≤ 75s)
+                 else attach_required
+else if mode == LIVE and liveness == connected:
   reachability = live_now
-else if activation == on_demand and launch_health == healthy:
+else if mode == ON-DEMAND:
   reachability = launch_available
-else if activation == attach_only:
-  reachability = attach_required
 else:
   reachability = unavailable
 ```
+
+The `attach_only` branch is what lets attached sessions render an actionable
+red state without waiting for the offline threshold — see the escalation
+scope note in the Daemon-to-UI Status Contract below. The freshness gate on
+`sse_disconnected` exists because the channel bridge heartbeats every 30s
+while alive: a frozen `sse_connected=false` left behind by a session that
+died during an SSE outage must read as "process gone" (`attach_required`),
+not "SSE down".
 
 #### Invariants
 
@@ -380,6 +417,94 @@ Gateway may derive health from any of these sources depending on template:
 - `mailbox` agents may have `reachability=queue_available` even when no live
   worker is attached. They are not `OFFLINE` unless the queue path itself is
   unavailable.
+
+## Daemon-to-UI Status Contract
+
+### Operator Intent Takes Priority
+
+Before any health signal is evaluated, the daemon checks operator intent fields
+in the following priority order. These override observed runtime state:
+
+1. `lifecycle_phase == "hidden"` or `lifecycle_phase == "archived"` → agent is
+   intentionally out of active operation regardless of runtime signals. A common
+   reason is that the agent did not record shutdown properly and still appears
+   degraded. The operator's decision overrides the signal.
+2. `desired_state == "stopped"` AND `connected == false` → agent is stopped and
+   has actually stopped (gray).
+3. `desired_state == "stopped"` AND `connected == true` → agent is stopping but
+   not yet down (yellow — transitional).
+4. `desired_state == "running"` → apply health checks below.
+
+### UI Tone Semantics
+
+The product exposes four tones for agent status display. Implementations must
+honour these semantic boundaries:
+
+| Tone | Color | Meaning |
+| --- | --- | --- |
+| `muted` | gray | Operator has intentionally taken this agent out of active operation: stopped, hidden, or archived. |
+| `warning` | yellow | Agent needs attention: transitioning, pending approval, registry signals going stale, or degraded. |
+| `error` | red | Agent is desired=running but cannot function. |
+| `ok` | green | Agent is healthy and ready. |
+
+Gray is reserved exclusively for intentional-off states. Any agent that is
+`desired_state=running` but not working correctly renders red, not gray.
+
+### Reachability Values for Attached Sessions
+
+Two values of the `reachability` helper (see Reachability derivation above)
+carry the attached-session failure states:
+
+- `sse_disconnected` — attached channel agent is connected (process alive, MCP
+  pings active) but the SSE subscription to the platform is down. Messages
+  cannot be delivered. Operator should reconnect the ax-channel MCP server.
+- `attach_required` — attached channel agent process is not running. Operator
+  must start the session.
+
+Both render red immediately: an attached session cannot self-heal (the daemon
+does not own its lifecycle), so there is no transitional yellow phase to wait
+out.
+
+### Liveness Escalation Thresholds
+
+The daemon derives liveness from how fresh the registry signals are (primarily
+`last_seen_at`). Two thresholds apply to entries whose raw state remains
+`running` while signals age:
+
+| Threshold | Age of last registry signal | Liveness | UI tone | Notes |
+| --- | --- | --- | --- | --- |
+| Stale | > 75 seconds | `stale` | yellow | Transient; agent may self-heal |
+| Offline | > 300 seconds | `offline` | red (LIVE mode only) | Persistent; operator attention needed |
+
+The thresholds derive from the 30-second registry signal cadence
+(`RUNTIME_HEARTBEAT_INTERVAL_SECONDS`, see
+[HEARTBEAT-001](../HEARTBEAT-001/spec.md)) shared by every first-party signal
+writer — the runtime listener loop, the hermes platform adapter, and the
+channel bridge. 75s = 2.5 beats: it absorbs one missed beat plus a routine SSE
+reconnect window (45s idle timeout + backoff) without flapping yellow.
+300s = 10 beats. The thresholds are **not** derived from the platform
+heartbeat channel: the gateway never receives platform heartbeats — it
+observes the registry signals that agents write locally.
+
+An entry that has never written a signal (`last_seen_at` absent) is `offline`,
+not merely `stale`.
+
+`offline` liveness maps to presence `OFFLINE` only for LIVE mode agents.
+INBOX and ON-DEMAND agents fall through to `IDLE` on offline liveness because
+their availability is defined by queue access or launch capability, not a
+persistent connection.
+
+**Escalation scope.** The yellow-then-red ladder applies in practice to
+daemon-managed runtimes whose raw state stays `running` while signals age
+(e.g. a wedged listener loop). Attached sessions and external plugins are
+resolved by the daemon sweep into raw `stale` at the 75-second threshold and
+render red immediately via `reachability` / the external-plugin check — they
+cannot self-heal, so escalation would only delay the operator. See
+[ADR-008](../../docs/adr/ADR-008-agent-status-model.md) for the full
+rationale. Known gap: supervised sentinel subprocesses currently defeat the
+ladder because the daemon's PID monitor stamps `last_seen_at` while the
+process exists, even if it is wedged —
+[#295](https://github.com/FulcrumDefense/fulcrum-gateway/issues/295).
 
 ## Lifecycle and Protocol Invariants
 
@@ -657,7 +782,7 @@ For attached sessions:
 Current PR note: Ollama is still launched on demand. Conversation continuity is
 provided by fetching and shaping recent aX transcript history before each model
 call. Persistent live-listener Ollama is a follow-up in
-GATEWAY-RUNTIME-PERSISTENCE-001.
+[GATEWAY-RUNTIME-PERSISTENCE-001](../GATEWAY-RUNTIME-PERSISTENCE-001/spec.md).
 
 ### Pass-through Agent
 

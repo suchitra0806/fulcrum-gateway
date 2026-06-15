@@ -542,6 +542,64 @@ def _build_groq_chat_model(model: str, tools: list):
     return chat.bind_tools(tools)
 
 
+def _stream_chat_with_heartbeat(chat, messages: list, model_name: str, iteration: int, max_iter: int):
+    """Stream a LangChain chat model's response with throttled activity heartbeats.
+
+    Mirrors the single-node tier's ``_llm_node`` streaming pattern so the
+    multi-node tier no longer goes silent during long ``chat.invoke()``
+    iterations (#113). Accumulates ``AIMessageChunk`` instances via
+    LangChain's chunk-add into the final assistant message, while emitting
+    ``kind: activity`` events every ``ACTIVITY_HEARTBEAT_SECONDS`` with a
+    rolling preview of the response text so the aX activity feed stays
+    live for operators watching long tool-deciding iterations.
+
+    The returned object is the accumulated ``AIMessageChunk``, which is
+    structurally an ``AIMessage`` (carries content + tool_calls) and is
+    what LangGraph's ``StateGraph(MessagesState)`` expects in
+    ``{"messages": [response]}``.
+    """
+    full_chunk = None
+    preview_text = ""
+    first_chunk_seen = False
+    last_activity_at = 0.0
+
+    for chunk in chat.stream(messages):
+        # Accumulate chunks for the final return. LangChain's
+        # AIMessageChunk.__add__ merges content + tool_calls correctly.
+        full_chunk = chunk if full_chunk is None else full_chunk + chunk
+
+        # Track the rolling preview for heartbeat events. chunk.content may
+        # be a string (Groq) or a list of content blocks (other providers);
+        # only the string shape contributes to the operator-visible preview.
+        text = getattr(chunk, "content", None)
+        if isinstance(text, str) and text:
+            preview_text += text
+
+        now = time.monotonic()
+        if not first_chunk_seen:
+            first_chunk_seen = True
+            emit_event(
+                {
+                    "kind": "status",
+                    "status": "processing",
+                    "message": f"Iteration {iteration}/{max_iter}: Groq is responding ({model_name})",
+                }
+            )
+        if now - last_activity_at >= ACTIVITY_HEARTBEAT_SECONDS:
+            preview = preview_text.strip().replace("\n", " ")
+            if len(preview) > PREVIEW_MAX_CHARS:
+                preview = "..." + preview[-(PREVIEW_MAX_CHARS - 3) :]
+            emit_event(
+                {
+                    "kind": "activity",
+                    "activity": (f"{model_name}: {preview}" if preview else f"Streaming response from {model_name}..."),
+                }
+            )
+            last_activity_at = now
+
+    return full_chunk
+
+
 def _run_graph_with_tools(prompt: str, model_name: str, tools: list, workdir: str) -> RunResult:
     """Run the two-node llm_call <-> tool_node agentic loop.
 
@@ -601,7 +659,11 @@ def _run_graph_with_tools(prompt: str, model_name: str, tools: list, workdir: st
                 "message": f"Iteration {iteration_counter['n']}/{max_iter}: calling Groq ({model_name})",
             }
         )
-        response = chat.invoke(state["messages"])
+        # Stream the response so the activity feed gets token-level heartbeat
+        # events during long tool-deciding iterations, matching the single-node
+        # tier's UX (#113). Accumulated AIMessageChunk carries content +
+        # tool_calls and is what LangGraph's MessagesState expects.
+        response = _stream_chat_with_heartbeat(chat, state["messages"], model_name, iteration_counter["n"], max_iter)
         return {"messages": [response]}
 
     def should_continue(state):

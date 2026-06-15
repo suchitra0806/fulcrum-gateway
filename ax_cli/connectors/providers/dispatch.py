@@ -14,7 +14,7 @@ from ..activity import (
     record_connector_tool_failed,
     record_connector_tool_started,
 )
-from ..constants import MAX_CATALOG_PAGES, MAX_TOOLS_LIMIT
+from ..constants import CATALOG_PAGE_SIZE, MAX_CATALOG_PAGES
 from ..errors import ConnectorPolicyError, ConnectorProviderError
 from ..filtering import assert_tool_allowed, filter_tools, from_config, tool_sort_key
 from ..types import ConnectorRow

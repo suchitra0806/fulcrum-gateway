@@ -200,13 +200,14 @@ def test_gateway_ui_handler_serves_status_and_agent_detail(monkeypatch, tmp_path
             assert template_payload["templates"][2]["id"] == "langgraph"
             assert template_payload["templates"][3]["id"] == "langgraph_composio"
             assert template_payload["templates"][4]["id"] == "autogen"
-            assert template_payload["templates"][5]["id"] == "strands"
-            assert template_payload["templates"][7]["id"] == "service_account"
+            assert template_payload["templates"][5]["id"] == "pydantic_ai"
+            assert template_payload["templates"][6]["id"] == "strands"
+            assert template_payload["templates"][8]["id"] == "service_account"
             channel_template = next(
                 item for item in template_payload["templates"] if item["id"] == "claude_code_channel"
             )
             assert channel_template["runtime_type"] == "claude_code_channel"
-            assert template_payload["count"] == 11
+            assert template_payload["count"] == 12
 
             detail = client.get("/api/agents/echo-bot")
             assert detail.status_code == 200
