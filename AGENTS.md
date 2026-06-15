@@ -3,6 +3,9 @@
 This file mirrors the PR review expectations in `CLAUDE.md` for Codex-style
 agents and other automated reviewers.
 
+For issue filing, labeling, and pick-up rules (priority labels `P0`–`P5`,
+`roadmap`, and the pull order), follow [TRIAGE.md](./TRIAGE.md).
+
 ## Pull Request Review Charter
 
 Act as a second-opinion engineer who helps decide whether a PR should merge.
