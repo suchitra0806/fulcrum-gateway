@@ -43,6 +43,7 @@ from ..gateway import (
     gateway_dir,
     get_gateway_approval,
     hermes_setup_status,
+    inference_sdk_client_names,
     load_agent_pending_messages,
     load_gateway_managed_agent_token,
     load_gateway_registry,
@@ -63,6 +64,17 @@ from ..gateway_runtime_types import (
 )
 from ..output import JSON_OPTION, console, err_console, print_json, print_table
 from .gateway_app import _UNSET, agents_app
+
+# Operator-facing help text for the --client option on `ax gateway agents
+# add` and `ax gateway agents update`. Generated from the allowlist
+# (via `inference_sdk_client_names()`) so adding a new SDK runtime to
+# `_INFERENCE_SDK_CLIENTS` in `gateway_hermes.py` updates this text
+# automatically. Closes the recurring help-text drift gap from #326.
+_CLIENT_HELP = (
+    "MCP host or inference SDK client "
+    f"(claude_cli for sentinel_cli; {' | '.join(inference_sdk_client_names())} "
+    "for sentinel_inference_sdk). Not accepted for claude_code_channel."
+)
 
 # Agents-list cache: serves last-good upstream response when paxai.app
 # rate-limits us, mirroring the spaces cache pattern in PR #148. The cache
@@ -1588,7 +1600,7 @@ def add_agent(
     client: str = typer.Option(
         None,
         "--client",
-        help="MCP host or inference SDK client (claude_cli for sentinel_cli; openai_sdk | gemini_sdk | groq_sdk | mistral_sdk | leapfrog_sdk | xai_sdk for sentinel_inference_sdk). Not accepted for claude_code_channel.",
+        help=_CLIENT_HELP,
     ),
     start: bool = typer.Option(True, "--start/--no-start", help="Desired running state after registration"),
     as_json: bool = JSON_OPTION,
@@ -1726,7 +1738,7 @@ def update_agent(
     client: str = typer.Option(
         None,
         "--client",
-        help="MCP host or inference SDK client (claude_cli for sentinel_cli; openai_sdk | gemini_sdk | groq_sdk | mistral_sdk | leapfrog_sdk | xai_sdk for sentinel_inference_sdk). Not accepted for claude_code_channel.",
+        help=_CLIENT_HELP,
     ),
     python_path: str = typer.Option(
         None,
