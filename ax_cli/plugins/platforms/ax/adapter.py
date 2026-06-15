@@ -59,14 +59,14 @@ DEFAULT_BASE_URL = "https://paxai.app"
 DEFAULT_LOCAL_GATEWAY_URL = "http://127.0.0.1:8765"
 SSE_RECONNECT_BACKOFF_MAX = 60.0
 
-# Substrings that identify hermes's Codex gpt-5.5 compaction-autoraise lifecycle
-# notice. It is meant to fire once per session, but because each prompt rebuilds
-# the hermes agent it re-fires every turn; we suppress its text in the activity
-# stream (see _post_processing_status and NousResearch/hermes-agent#46786).
-_CODEX_AUTORAISE_NOTICE_MARKERS = (
-    "caps context at 272K",
-    "auto-compaction was raised",
-)
+# hermes's Codex gpt-5.5 compaction-autoraise lifecycle notice always begins
+# with this prefix ("ℹ Codex gpt-5.5 caps context at 272K, …"). It is meant to
+# fire once per session, but because each prompt rebuilds the hermes agent it
+# re-fires every turn; we suppress it in the activity stream. Anchor on the
+# leading prefix — NOT loose substrings — so a legitimate activity/detail that
+# merely mentions compaction is never nulled. (See _post_processing_status and
+# NousResearch/hermes-agent#46786.)
+_CODEX_AUTORAISE_NOTICE_PREFIX = "ℹ Codex"
 SSE_IDLE_TIMEOUT = 90.0
 JWT_REFRESH_BUFFER_SECONDS = 30
 HEARTBEAT_INTERVAL_SECONDS = 30.0
@@ -218,9 +218,9 @@ class AxAdapter(BasePlatformAdapter):
         whole POST so the status transition still lands and the bubble never
         gets stuck (per §177-180 above).
         """
-        if activity and any(m in activity for m in _CODEX_AUTORAISE_NOTICE_MARKERS):
+        if activity and activity.lstrip().startswith(_CODEX_AUTORAISE_NOTICE_PREFIX):
             activity = None
-        if detail and any(m in detail for m in _CODEX_AUTORAISE_NOTICE_MARKERS):
+        if detail and detail.lstrip().startswith(_CODEX_AUTORAISE_NOTICE_PREFIX):
             detail = None
         try:
             jwt = await self._get_jwt()

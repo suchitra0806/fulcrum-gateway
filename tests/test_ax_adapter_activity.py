@@ -615,7 +615,7 @@ def test_post_processing_status_strips_codex_autoraise_notice(monkeypatch):
 
 def test_post_processing_status_strips_codex_notice_from_detail(monkeypatch):
     """The notice is suppressed whether hermes delivers it as the activity
-    label or the detail line, and a genuine activity is left intact."""
+    label or the detail line."""
     adapter = _adapter()
     posts: list = []
 
@@ -630,16 +630,39 @@ def test_post_processing_status_strips_codex_notice_from_detail(monkeypatch):
         adapter._post_processing_status(
             "msg-root",
             "processing",
-            activity="Reading adapter.py",
-            detail="auto-compaction was raised to 85% (from 50%)",
+            detail="ℹ Codex gpt-5.5 caps context at 272K, so auto-compaction was raised to 85%.",
         )
     )
 
-    body = [
-        p for p in posts if p["url"].endswith("/api/v1/agents/processing-status")
-    ][0]["json"]
-    assert body["activity"] == "Reading adapter.py"  # genuine activity untouched
+    body = [p for p in posts if p["url"].endswith("/api/v1/agents/processing-status")][0]["json"]
     assert "detail" not in body  # notice text in detail is stripped
+
+
+def test_post_processing_status_keeps_legitimate_compaction_text(monkeypatch):
+    """Anchoring on the 'ℹ Codex' prefix (not loose substrings) means a genuine
+    activity/detail that merely mentions compaction is NOT nulled."""
+    adapter = _adapter()
+    posts: list = []
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", _capturing_client(posts))
+    monkeypatch.setattr(adapter, "_announce_local_gateway", lambda *a, **k: _noop())
+
+    asyncio.run(
+        adapter._post_processing_status(
+            "msg-root",
+            "processing",
+            activity="Summarizing: auto-compaction was raised to 85%",
+            detail="caps context at 272K reached",
+        )
+    )
+
+    body = [p for p in posts if p["url"].endswith("/api/v1/agents/processing-status")][0]["json"]
+    assert body["activity"] == "Summarizing: auto-compaction was raised to 85%"
+    assert body["detail"] == "caps context at 272K reached"
 
 
 async def _noop():
