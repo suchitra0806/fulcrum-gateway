@@ -1991,10 +1991,8 @@ def list_manifest_templates(
     """List discoverable agent manifest templates."""
     from ..commands.gateway_runtime_cmd import _agent_templates_payload
 
-    payload = _agent_templates_payload()
+    payload = _agent_templates_payload(include_advanced=include_advanced)
     templates = payload["templates"]
-    if not include_advanced:
-        templates = [item for item in templates if str(item.get("availability") or "") != "advanced"]
     payload = {"templates": templates, "count": len(templates)}
     if as_json:
         print_json(payload)

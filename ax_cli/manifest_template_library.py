@@ -218,7 +218,7 @@ def list_template_ids(*, include_advanced: bool = False) -> list[str]:
 def copy_template_manifest(template_id: str, *, suggested_name: str | None = None) -> str:
     """Return manifest text for *template_id*, optionally overriding ``name``."""
     path = template_manifest_path(template_id)
-    text = path.read_text(encoding="utf-8")
+    text = _resolve_template_string(path.read_text(encoding="utf-8"))
     if suggested_name:
         lines = []
         for line in text.splitlines():
@@ -226,5 +226,5 @@ def copy_template_manifest(template_id: str, *, suggested_name: str | None = Non
                 lines.append(f'name = "{suggested_name}"')
             else:
                 lines.append(line)
-        return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+        text = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
     return text

@@ -68,6 +68,24 @@ def test_copy_template_manifest_renames_agent():
     assert 'template = "hermes"' in text
 
 
+def test_copy_template_manifest_resolves_placeholders():
+    text = copy_template_manifest("langgraph")
+    assert "{{" not in text
+    assert "}}" not in text
+    repo_root = Path(__file__).resolve().parents[1]
+    assert str(repo_root) in text
+    assert "langgraph_bridge.py" in text
+
+
+def test_agent_templates_payload_include_advanced():
+    from ax_cli.commands.gateway_runtime_cmd import _agent_templates_payload
+
+    default_ids = [item["id"] for item in _agent_templates_payload()["templates"]]
+    advanced_ids = [item["id"] for item in _agent_templates_payload(include_advanced=True)["templates"]]
+    assert "inbox" not in default_ids
+    assert "inbox" in advanced_ids
+
+
 def test_template_manifest_path_resolves_bundled_file():
     path = template_manifest_path("hermes")
     assert path.name == "hermes.agent.toml"
