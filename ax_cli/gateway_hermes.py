@@ -169,6 +169,19 @@ _INFERENCE_SDK_CLIENTS = {
     "xai_sdk",
 }
 
+
+def inference_sdk_client_names() -> list[str]:
+    """Sorted list of valid inference SDK client values for sentinel_inference_sdk.
+
+    Single source of truth for both validation (via `_INFERENCE_SDK_CLIENTS`)
+    and operator-facing help text. Help strings in `ax gateway agents add`
+    plus `ax gateway agents update` and the `sentinel_inference_sdk`
+    runtime-type description are derived from this helper so they cannot
+    drift from the accepted set when a new SDK runtime lands (see #326).
+    """
+    return sorted(_INFERENCE_SDK_CLIENTS)
+
+
 # Valid MCP host clients for sentinel_cli. Maps client value → binary name.
 # claude_code_channel always uses claude_cli and sets it automatically — operators
 # do not supply --client for that runtime type.
