@@ -2707,7 +2707,7 @@ def test_doctor_upstream_existence_passes_when_agent_found(monkeypatch, tmp_path
 
     from ax_cli.commands import gateway_diagnostics as _gw_diag
 
-    monkeypatch.setattr(_gw_diag, "_load_managed_agent_client", lambda entry: _FoundClient())
+    monkeypatch.setattr(_gw_diag, "_load_gateway_user_client", lambda: _FoundClient())
 
     result = runner.invoke(app, ["gateway", "agents", "doctor", "scout", "--json"])
     assert result.exit_code == 0, result.output
@@ -2727,7 +2727,7 @@ def test_doctor_upstream_existence_fails_on_404(monkeypatch, tmp_path):
 
     from ax_cli.commands import gateway_diagnostics as _gw_diag
 
-    monkeypatch.setattr(_gw_diag, "_load_managed_agent_client", lambda entry: _NotFoundClient())
+    monkeypatch.setattr(_gw_diag, "_load_gateway_user_client", lambda: _NotFoundClient())
 
     result = runner.invoke(app, ["gateway", "agents", "doctor", "scout", "--json"])
     assert result.exit_code == 0, result.output
@@ -2746,7 +2746,7 @@ def test_doctor_upstream_existence_warns_on_connection_error(monkeypatch, tmp_pa
 
     from ax_cli.commands import gateway_diagnostics as _gw_diag
 
-    monkeypatch.setattr(_gw_diag, "_load_managed_agent_client", lambda entry: _UnreachableClient())
+    monkeypatch.setattr(_gw_diag, "_load_gateway_user_client", lambda: _UnreachableClient())
 
     result = runner.invoke(app, ["gateway", "agents", "doctor", "scout", "--json"])
     assert result.exit_code == 0, result.output
@@ -2762,6 +2762,58 @@ def test_doctor_upstream_existence_skipped_in_offline_mode(monkeypatch, tmp_path
     assert result.exit_code == 0, result.output
     check_names = [c["name"] for c in json.loads(result.stdout)["checks"]]
     assert "upstream_existence" not in check_names
+
+
+def test_doctor_upstream_existence_warns_on_non_404_http_error(monkeypatch, tmp_path):
+    _seed_doctor_agent(monkeypatch, tmp_path)
+
+    class _ServerErrorClient:
+        def get_agent(self, identifier):
+            req = httpx.Request("GET", f"https://paxai.app/api/v1/agents/manage/{identifier}")
+            resp = httpx.Response(500, request=req)
+            raise httpx.HTTPStatusError("500", request=req, response=resp)
+
+    from ax_cli.commands import gateway_diagnostics as _gw_diag
+
+    monkeypatch.setattr(_gw_diag, "_load_gateway_user_client", lambda: _ServerErrorClient())
+
+    result = runner.invoke(app, ["gateway", "agents", "doctor", "scout", "--json"])
+    assert result.exit_code == 0, result.output
+    checks = {c["name"]: c for c in json.loads(result.stdout)["checks"]}
+    assert checks["upstream_existence"]["status"] == "warning"
+    assert "500" in checks["upstream_existence"]["detail"]
+
+
+def test_doctor_upstream_existence_warns_when_no_agent_id(monkeypatch, tmp_path):
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("AX_CONFIG_DIR", str(config_dir))
+    gateway_core.save_gateway_session(
+        {"token": "axp_u_test.token", "base_url": "https://paxai.app", "space_id": "space-1", "username": "codex"}
+    )
+    token_file = tmp_path / "agent.token"
+    token_file.write_text("axp_a_agent.secret")
+    registry = gateway_core.load_gateway_registry()
+    registry["agents"] = [
+        {
+            "name": "orphan",
+            "space_id": "space-1",
+            "base_url": "https://paxai.app",
+            "runtime_type": "inbox",
+            "template_id": "inbox",
+            "desired_state": "running",
+            "effective_state": "stopped",
+            "token_file": str(token_file),
+            "transport": "gateway",
+            "credential_source": "gateway",
+        }
+    ]
+    gateway_core.save_gateway_registry(registry)
+
+    result = runner.invoke(app, ["gateway", "agents", "doctor", "orphan", "--json"])
+    assert result.exit_code == 0, result.output
+    checks = {c["name"]: c for c in json.loads(result.stdout)["checks"]}
+    assert checks["upstream_existence"]["status"] == "warning"
+    assert "agent_id" in checks["upstream_existence"]["detail"]
 
 
 # ---------------------------------------------------------------------------

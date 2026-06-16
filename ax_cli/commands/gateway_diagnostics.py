@@ -645,12 +645,12 @@ def _run_gateway_doctor(name: str, *, send_test: bool = False) -> dict:
         add_check("launch_ready", "passed", "Gateway can launch this runtime on send.")
 
     if not os.environ.get("AX_OFFLINE"):
+        import httpx as _httpx
+
         agent_id = str(entry.get("agent_id") or "").strip()
         if agent_id:
             try:
-                import httpx as _httpx
-
-                upstream_client = _load_managed_agent_client(entry)
+                upstream_client = _load_gateway_user_client()
                 upstream_client.get_agent(agent_id)
                 add_check("upstream_existence", "passed", "Agent record confirmed present on the platform.")
             except _httpx.HTTPStatusError as exc:
@@ -925,7 +925,8 @@ def deny_approval(
 
 # Deferred cross-module imports (bottom-of-file to avoid import cycles; bound
 # into module globals after defs, resolved at call time).
-from .gateway_agents import _load_managed_agent_client, _with_registry_refs  # noqa: E402
+from .gateway_agents import _with_registry_refs  # noqa: E402
+from .gateway_auth import _load_gateway_user_client  # noqa: E402
 from .gateway_messaging import _send_gateway_test_to_managed_agent  # noqa: E402
 from .gateway_ui import (  # noqa: E402
     _agent_output_label,
