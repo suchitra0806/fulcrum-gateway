@@ -1087,6 +1087,40 @@ def test_marker_section_replaces_in_place_on_rerun(tmp_path):
     assert "First role." not in final
 
 
+def test_render_agent_persona_includes_connector_block_when_connector_ref_set(tmp_path):
+    """Regression: AGENTS.md must include connector instructions when connector_ref
+    is set, so sentinel agents find their connector after a restart (which regenerates
+    AGENTS.md from the registry entry, discarding the --system-prompt arg)."""
+    from ax_cli.commands.gateway_agents import _render_agent_persona_markdown
+
+    entry = {
+        "name": "slack-output",
+        "runtime_type": "sentinel_inference_sdk",
+        "system_prompt": "Send Slack messages.",
+        "connector_ref": "composio-main",
+    }
+    output = _render_agent_persona_markdown(entry, workdir=str(tmp_path))
+
+    assert "CONNECTORS: composio-main" in output
+    assert "connector='composio-main'" in output
+    assert "connector_call" in output
+
+
+def test_render_agent_persona_omits_connector_block_when_no_connector_ref(tmp_path):
+    """Agents without a connector_ref must not get connector instructions."""
+    from ax_cli.commands.gateway_agents import _render_agent_persona_markdown
+
+    entry = {
+        "name": "echo",
+        "runtime_type": "sentinel_inference_sdk",
+        "system_prompt": "Echo messages.",
+    }
+    output = _render_agent_persona_markdown(entry, workdir=str(tmp_path))
+
+    assert "CONNECTORS:" not in output
+    assert "connector_call" not in output
+
+
 def test_channel_received_signal_fires_on_enqueue():
     """_signal_received must emit 'received' processing status immediately."""
 

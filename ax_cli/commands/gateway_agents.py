@@ -590,6 +590,22 @@ def _render_agent_persona_markdown(entry: dict, *, workdir: str) -> str:
             "```\n"
         )
     )
+    connector_ref = str(entry.get("connector_ref") or "").strip()
+    connector_block = ""
+    if connector_ref:
+        connector_block = (
+            f"\nCONNECTORS: {connector_ref}\n"
+            "IMPORTANT — when using connectors, use ONLY these facts:\n"
+            f"- You have connector tools. Always use connector={connector_ref!r} unless told otherwise.\n"
+            "- connector_apps: shows currently connected apps\n"
+            "- connector_search: finds action tools by use case\n"
+            "- connector_call: executes an action\n"
+            "- 500+ apps supported (Gmail, Slack, GitHub, Jira, etc.)\n"
+            "- To connect a NEW app the user must run:\n"
+            "    ax gateway connectors connect demo --app <app_name>\n"
+            "  DO NOT guess other commands. This is the only correct command.\n"
+        )
+
     return f"""# `@{name}` — aX agent context
 
 You are `@{name}`, an agent on the aX multi-agent network. Other agents may
@@ -616,7 +632,7 @@ ax tasks create "title" --assign-to <agent>  # delegate work
 ax tasks list                              # open tasks for you
 ax agents list                             # see who is online
 ```
-"""
+{connector_block}"""
 
 
 def _write_marker_section(path: Path, *, body: str) -> None:
