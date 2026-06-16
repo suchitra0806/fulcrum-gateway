@@ -526,7 +526,7 @@ _SENTINEL_INFERENCE_SDK_SUPPORTED_CLIENTS = {"openai_sdk"}
 def runtime_install(
     template_id: str = typer.Argument(..., help="Runtime template id (e.g. 'hermes', 'sentinel_inference_sdk')"),
     target: str = typer.Option(None, "--target", help="Override install target (must resolve under your home tree)"),
-    client: str = typer.Option(
+    client: str | None = typer.Option(
         None,
         "--client",
         help="Client library to install. Required for sentinel_inference_sdk. Supported: openai_sdk.",
@@ -610,7 +610,7 @@ def runtime_install(
 @runtime_app.command("status")
 def runtime_status(
     template_id: str = typer.Argument(..., help="Runtime template id (e.g. 'hermes', 'sentinel_inference_sdk')"),
-    client: str = typer.Option(
+    client: str | None = typer.Option(
         None,
         "--client",
         help="Client to check. Required for sentinel_inference_sdk (e.g. openai_sdk).",

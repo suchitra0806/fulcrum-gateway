@@ -249,7 +249,6 @@ def _build_sentinel_inference_sdk_env(entry: dict[str, Any]) -> dict[str, str]:
     token = load_gateway_managed_agent_token(entry)
     workdir = _sentinel_inference_sdk_workdir(entry)
     agents_dir = _agents_dir_for_entry(entry)
-    hermes_repo = str(entry.get("hermes_repo_path") or "").strip() or "/home/ax-agent/shared/repos/hermes-agent"
     repo_root = str(_gateway_repo_root())
 
     # Per-agent HERMES_HOME so each hermes agent gets its own memories/ dir
@@ -271,7 +270,6 @@ def _build_sentinel_inference_sdk_env(entry: dict[str, Any]) -> dict[str, str]:
             "HERMES_MAX_ITERATIONS": str(
                 entry.get("hermes_max_iterations") or os.environ.get("HERMES_MAX_ITERATIONS") or 60
             ),
-            "HERMES_REPO_PATH": hermes_repo,
         }
     )
     if hermes_home is not None:
@@ -280,15 +278,10 @@ def _build_sentinel_inference_sdk_env(entry: dict[str, Any]) -> dict[str, str]:
     env.setdefault("AGENT_RUNNER_API_KEY", "staging-dispatch-key")
     env.setdefault("INTERNAL_DISPATCH_API_KEY", env["AGENT_RUNNER_API_KEY"])
 
-    # PYTHONPATH order matters — see ax_cli/runtimes/hermes/README.md.
-    # The vendored ax_cli/runtimes/hermes/ directory MUST come before the
-    # public NousResearch/hermes-agent clone so `from tools import
-    # _check_read_path` resolves to our security shim, while
-    # `from tools.registry import registry` falls through to the public
-    # hermes-agent. Operator override: `agents_dir/tools/__init__.py` on
-    # the EC2 host preserves the live-fleet workflow when present.
-    vendored_hermes_dir = Path(__file__).resolve().parent / "runtimes" / "hermes"
-    python_paths = [str(vendored_hermes_dir), str(agents_dir), hermes_repo, repo_root]
+    # sentinel_inference_sdk only imports stdlib and ax_cli.mentions — no
+    # hermes-agent dependency. PYTHONPATH only needs agents_dir (for any
+    # operator-local tools module) and repo_root (for ax_cli itself).
+    python_paths = [str(agents_dir), repo_root]
     existing_pythonpath = env.get("PYTHONPATH")
     if existing_pythonpath:
         python_paths.append(existing_pythonpath)

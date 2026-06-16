@@ -373,6 +373,29 @@ def test_cli_status_unknown_template():
     assert "unknown runtime template" in result.output
 
 
+def test_cli_status_sentinel_inference_sdk_requires_client():
+    """`runtime status sentinel_inference_sdk` without --client exits non-zero."""
+    result = runner.invoke(app, ["gateway", "runtime", "status", "sentinel_inference_sdk"])
+    assert result.exit_code != 0
+    assert "--client" in result.output
+
+
+def test_sentinel_inference_sdk_python_returns_venv_when_client_set(tmp_path, monkeypatch):
+    """`_sentinel_inference_sdk_python` returns the client venv python when client
+    is set on the entry and the venv python exists."""
+    from ax_cli.gateway_hermes import _sentinel_inference_sdk_python
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    venv_bin = tmp_path / ".ax" / "runtimes" / "sentinel_inference_sdk" / "openai_sdk" / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    python = venv_bin / "python3"
+    python.write_text("#!/bin/sh\nexit 0\n")
+    python.chmod(0o755)
+
+    entry = {"client": "openai_sdk"}
+    assert _sentinel_inference_sdk_python(entry) == str(python)
+
+
 def test_proc_error_msg_uses_stdout_when_stderr_empty():
     """python -m venv writes the apt-install hint to stdout, not stderr.
 
