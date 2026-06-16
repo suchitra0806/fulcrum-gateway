@@ -848,8 +848,19 @@ def _update_managed_agent(
         sp_value = str(system_prompt).strip() if system_prompt else ""  # type: ignore[arg-type]
         upstream_fields["system_prompt"] = sp_value or None
     if upstream_fields:
+        import httpx as _httpx
+
         client = _load_gateway_user_client()
-        client.update_agent(name, **upstream_fields)
+        try:
+            client.update_agent(name, **upstream_fields)
+        except _httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise ValueError(
+                    f"Agent '{name}' was not found on the platform (404). "
+                    "The upstream registration may have been deleted or the gateway may be pointed at a different environment. "
+                    "Use `ax gateway agents remove` then `ax gateway agents add` to re-register."
+                ) from exc
+            raise
     if system_prompt is not _UNSET:
         sp_value = str(system_prompt).strip() if system_prompt else ""  # type: ignore[arg-type]
         if sp_value:

@@ -6,6 +6,7 @@ Extracted from ``ax_cli/commands/gateway.py`` (issue #28 Phase 1).
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 
 import typer
@@ -643,6 +644,39 @@ def _run_gateway_doctor(name: str, *, send_test: bool = False) -> dict:
     elif str(snapshot.get("mode") or "") == "ON-DEMAND" and not has_check("launch_ready"):
         add_check("launch_ready", "passed", "Gateway can launch this runtime on send.")
 
+    if not os.environ.get("AX_OFFLINE"):
+        agent_id = str(entry.get("agent_id") or "").strip()
+        if agent_id:
+            try:
+                import httpx as _httpx
+
+                upstream_client = _load_managed_agent_client(entry)
+                upstream_client.get_agent(agent_id)
+                add_check("upstream_existence", "passed", "Agent record confirmed present on the platform.")
+            except _httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    add_check(
+                        "upstream_existence",
+                        "failed",
+                        "Agent record not found on the platform (404). The upstream registration may have been "
+                        "deleted or the gateway may be pointed at a different environment. "
+                        "Use `ax gateway agents remove` then `ax gateway agents add` to re-register.",
+                    )
+                else:
+                    add_check(
+                        "upstream_existence",
+                        "warning",
+                        f"Could not verify upstream existence: HTTP {exc.response.status_code}.",
+                    )
+            except Exception as exc:
+                add_check(
+                    "upstream_existence", "warning", f"Could not reach platform to verify upstream existence: {exc}"
+                )
+        else:
+            add_check(
+                "upstream_existence", "warning", "No agent_id in registry entry — cannot verify upstream existence."
+            )
+
     if send_test:
         try:
             sent = _send_gateway_test_to_managed_agent(name)
@@ -891,7 +925,7 @@ def deny_approval(
 
 # Deferred cross-module imports (bottom-of-file to avoid import cycles; bound
 # into module globals after defs, resolved at call time).
-from .gateway_agents import _with_registry_refs  # noqa: E402
+from .gateway_agents import _load_managed_agent_client, _with_registry_refs  # noqa: E402
 from .gateway_messaging import _send_gateway_test_to_managed_agent  # noqa: E402
 from .gateway_ui import (  # noqa: E402
     _agent_output_label,
