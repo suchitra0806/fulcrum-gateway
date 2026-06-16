@@ -116,27 +116,11 @@ def _gateway_environment_context(entry: dict[str, Any]) -> str:
         "back to the values in your local .ax/config.toml.",
     ]
 
-    # Append connector context if any connectors are registered.
-    try:
-        from .connectors import list_connectors
+    from .connectors.guidance import connector_instruction_lines, connector_ref_for_agent
 
-        connectors = list_connectors()
-        enabled = [c for c in connectors if c.enabled]
-        if enabled:
-            names = ", ".join(c.name for c in enabled)
-            lines.append("")
-            lines.append(f"CONNECTORS: {names}")
-            lines.append("IMPORTANT — when users ask about connectors, use ONLY these facts:")
-            lines.append(f"- You have connector tools. Always use connector={enabled[0].name!r} unless told otherwise.")
-            lines.append("- connector_apps: shows currently connected apps")
-            lines.append("- connector_search: finds action tools by use case")
-            lines.append("- connector_call: executes an action")
-            lines.append("- 500+ apps supported (Gmail, Slack, GitHub, Jira, etc.)")
-            lines.append("- To connect a NEW app the user must run:")
-            lines.append("    ax gateway connectors connect demo --app <app_name>")
-            lines.append("  DO NOT guess other commands. This is the only correct command.")
-    except Exception:
-        pass
+    connector_ref = connector_ref_for_agent(entry)
+    if connector_ref:
+        lines.extend(connector_instruction_lines(connector_ref))
 
     return "\n".join(lines)
 
