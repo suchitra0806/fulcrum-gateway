@@ -96,7 +96,7 @@ def test_user_local_template_overrides_bundled(tmp_path, monkeypatch):
     user_dir = tmp_path / "templates"
     user_dir.mkdir()
     (user_dir / "echo_test.meta.toml").write_text(
-        '\n'.join(
+        "\n".join(
             [
                 'id = "echo_test"',
                 'label = "Custom Echo"',
@@ -110,7 +110,7 @@ def test_user_local_template_overrides_bundled(tmp_path, monkeypatch):
                 'suggested_name = "custom-echo"',
                 'operator_summary = "custom"',
                 'recommended_test_message = "ping"',
-                'what_you_need = []',
+                "what_you_need = []",
                 "",
                 "[advanced]",
                 'adapter_label = "custom"',

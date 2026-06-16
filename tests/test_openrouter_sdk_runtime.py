@@ -283,9 +283,7 @@ def test_openrouter_sdk_executes_tool_and_completes(monkeypatch):
     fake_tools_module.TOOL_DEFINITIONS = [
         {"name": "echo", "description": "echo back", "parameters": {"type": "object"}}
     ]
-    fake_tools_module.execute_tool = MagicMock(
-        return_value=types.SimpleNamespace(output="echo: ping", is_error=False)
-    )
+    fake_tools_module.execute_tool = MagicMock(return_value=types.SimpleNamespace(output="echo: ping", is_error=False))
     monkeypatch.setitem(sys.modules, "tools", fake_tools_module)
 
     fake_client = MagicMock()
@@ -329,9 +327,7 @@ def test_openrouter_sdk_returns_rate_limited_on_RateLimitError(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     fake_module = _install_fake_openai(monkeypatch, MagicMock())
     fake_client = fake_module.OpenAI.return_value
-    fake_client.chat.completions.create.side_effect = fake_module.RateLimitError(
-        "slow down", status_code=429
-    )
+    fake_client.chat.completions.create.side_effect = fake_module.RateLimitError("slow down", status_code=429)
 
     rt = get_runtime("openrouter_sdk")
     result = rt.execute("hi", workdir="/tmp")
@@ -345,9 +341,7 @@ def test_openrouter_sdk_returns_auth_error_on_AuthenticationError(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "bad")
     fake_module = _install_fake_openai(monkeypatch, MagicMock())
     fake_client = fake_module.OpenAI.return_value
-    fake_client.chat.completions.create.side_effect = fake_module.AuthenticationError(
-        "bad key", status_code=401
-    )
+    fake_client.chat.completions.create.side_effect = fake_module.AuthenticationError("bad key", status_code=401)
 
     rt = get_runtime("openrouter_sdk")
     result = rt.execute("hi", workdir="/tmp")
@@ -364,9 +358,7 @@ def test_openrouter_sdk_returns_auth_error_on_PermissionDeniedError(monkeypatch)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     fake_module = _install_fake_openai(monkeypatch, MagicMock())
     fake_client = fake_module.OpenAI.return_value
-    fake_client.chat.completions.create.side_effect = fake_module.PermissionDeniedError(
-        "no perms", status_code=403
-    )
+    fake_client.chat.completions.create.side_effect = fake_module.PermissionDeniedError("no perms", status_code=403)
 
     rt = get_runtime("openrouter_sdk")
     result = rt.execute("hi", workdir="/tmp")
@@ -394,9 +386,7 @@ def test_openrouter_sdk_returns_server_error_on_InternalServerError(monkeypatch)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     fake_module = _install_fake_openai(monkeypatch, MagicMock())
     fake_client = fake_module.OpenAI.return_value
-    fake_client.chat.completions.create.side_effect = fake_module.InternalServerError(
-        "upstream down", status_code=502
-    )
+    fake_client.chat.completions.create.side_effect = fake_module.InternalServerError("upstream down", status_code=502)
 
     rt = get_runtime("openrouter_sdk")
     result = rt.execute("hi", workdir="/tmp")
@@ -413,9 +403,7 @@ def test_openrouter_sdk_returns_api_error_on_other_APIStatusError(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     fake_module = _install_fake_openai(monkeypatch, MagicMock())
     fake_client = fake_module.OpenAI.return_value
-    fake_client.chat.completions.create.side_effect = fake_module.APIStatusError(
-        "model not found", status_code=404
-    )
+    fake_client.chat.completions.create.side_effect = fake_module.APIStatusError("model not found", status_code=404)
 
     rt = get_runtime("openrouter_sdk")
     result = rt.execute("hi", workdir="/tmp")
@@ -465,12 +453,8 @@ def test_openrouter_sdk_returns_iteration_limit_when_max_turns_exhausted(monkeyp
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
 
     fake_tools_module = types.ModuleType("tools")
-    fake_tools_module.TOOL_DEFINITIONS = [
-        {"name": "echo", "description": "echo", "parameters": {"type": "object"}}
-    ]
-    fake_tools_module.execute_tool = MagicMock(
-        return_value=types.SimpleNamespace(output="ok", is_error=False)
-    )
+    fake_tools_module.TOOL_DEFINITIONS = [{"name": "echo", "description": "echo", "parameters": {"type": "object"}}]
+    fake_tools_module.execute_tool = MagicMock(return_value=types.SimpleNamespace(output="ok", is_error=False))
     monkeypatch.setitem(sys.modules, "tools", fake_tools_module)
 
     def _tool_only_stream():
@@ -486,9 +470,7 @@ def test_openrouter_sdk_returns_iteration_limit_when_max_turns_exhausted(monkeyp
         )
 
     fake_client = MagicMock()
-    fake_client.chat.completions.create.side_effect = [
-        _tool_only_stream() for _ in range(openrouter_sdk.MAX_TURNS + 2)
-    ]
+    fake_client.chat.completions.create.side_effect = [_tool_only_stream() for _ in range(openrouter_sdk.MAX_TURNS + 2)]
     _install_fake_openai(monkeypatch, fake_client)
 
     rt = get_runtime("openrouter_sdk")
@@ -519,9 +501,7 @@ def test_openrouter_sdk_appends_truncation_marker_when_tool_output_exceeds_cap(m
     fake_tools_module.TOOL_DEFINITIONS = [
         {"name": "read_file", "description": "read", "parameters": {"type": "object"}}
     ]
-    fake_tools_module.execute_tool = MagicMock(
-        return_value=types.SimpleNamespace(output=big_output, is_error=False)
-    )
+    fake_tools_module.execute_tool = MagicMock(return_value=types.SimpleNamespace(output=big_output, is_error=False))
     monkeypatch.setitem(sys.modules, "tools", fake_tools_module)
 
     fake_client = MagicMock()
