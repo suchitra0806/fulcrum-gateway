@@ -2242,6 +2242,67 @@ class TestRecordAndLoadGatewayActivity:
         items = load_recent_gateway_activity(limit=10)
         assert items[0].get("phase") == "reply"
 
+    def test_chain_seq_and_prev_hash_are_set(self, monkeypatch, tmp_path):
+        from ax_cli.gateway import record_gateway_activity
+        from ax_cli.gateway_storage import activity_log_path
+
+        monkeypatch.setenv("AX_GATEWAY_DIR", str(tmp_path / "gw"))
+        r1 = record_gateway_activity("ev1")
+        r2 = record_gateway_activity("ev2")
+        assert r1["seq"] == 1
+        assert r1["prev_hash"] is None
+        assert r2["seq"] == 2
+        assert r2["prev_hash"] is not None
+        _ = activity_log_path()
+
+    def test_concurrent_writes_produce_unique_seqs(self, monkeypatch, tmp_path):
+        """Concurrent in-process writers must not produce duplicate seq numbers.
+
+        This exercises the _exclusive_activity_lock cross-process guard at the
+        threading level (same guarantee, lower test complexity than spawning
+        subprocesses). A duplicate seq is the exact symptom the lock prevents.
+        """
+        import threading as _threading
+
+        from ax_cli.gateway import record_gateway_activity
+
+        monkeypatch.setenv("AX_GATEWAY_DIR", str(tmp_path / "gw"))
+
+        results = []
+        errors = []
+
+        def _write():
+            try:
+                r = record_gateway_activity("concurrent_test")
+                results.append(r["seq"])
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [_threading.Thread(target=_write) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, errors
+        assert len(results) == 10
+        assert len(set(results)) == 10, f"Duplicate seqs found: {sorted(results)}"
+
+    def test_lock_file_created_alongside_activity_log(self, monkeypatch, tmp_path):
+        """A companion .lock file is created next to activity.jsonl on POSIX."""
+        import sys
+
+        from ax_cli.gateway import record_gateway_activity
+        from ax_cli.gateway_storage import activity_log_path
+
+        if sys.platform == "win32":
+            pytest.skip("fcntl not available on Windows")
+
+        monkeypatch.setenv("AX_GATEWAY_DIR", str(tmp_path / "gw"))
+        record_gateway_activity("lock_test")
+        lock_path = activity_log_path().with_suffix(".lock")
+        assert lock_path.exists()
+
 
 # ---------------------------------------------------------------------------
 # Gateway runtime timeout error
