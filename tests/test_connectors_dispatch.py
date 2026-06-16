@@ -441,4 +441,3 @@ class TestExecuteToolToolkitDerivation:
             )
             assert result == {"ok": True}
             mock_exec.assert_called_once()
-

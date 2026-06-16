@@ -101,10 +101,12 @@ def test_returns_warning_when_server_exposes_no_tools(monkeypatch):
 
 def test_multiple_servers_partial_failure_accumulates_warnings(monkeypatch):
     """A failing server adds a warning; a succeeding server still contributes tools."""
-    cfg = json.dumps({
-        "bad": {"command": []},
-        "good": {"command": ["python", "-m", "fake_ok"]},
-    })
+    cfg = json.dumps(
+        {
+            "bad": {"command": []},
+            "good": {"command": ["python", "-m", "fake_ok"]},
+        }
+    )
     monkeypatch.setenv("AX_BRIDGE_MCP_SERVERS", cfg)
 
     from ax_cli.runtimes.mcp_servers.mcp_client import McpToolSpec
