@@ -1,0 +1,5 @@
+name = "autogen-bot"
+template = "autogen"
+type = "exec"
+exec_command = "{{bridge_python}} {{repo_root}}/examples/gateway_autogen/autogen_bridge.py"
+workdir = "{{repo_root}}"

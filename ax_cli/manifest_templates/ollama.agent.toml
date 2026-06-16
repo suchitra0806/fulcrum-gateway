@@ -1,0 +1,5 @@
+name = "ollama-bot"
+template = "ollama"
+type = "exec"
+exec_command = "{{bridge_python}} {{repo_root}}/examples/gateway_ollama/ollama_bridge.py"
+workdir = "{{repo_root}}"

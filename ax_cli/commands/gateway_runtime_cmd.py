@@ -478,8 +478,8 @@ def _sentinel_inference_sdk_venv_status() -> dict:
     }
 
 
-def _agent_templates_payload() -> dict:
-    templates = [_annotate_template_taxonomy(item) for item in agent_template_list()]
+def _agent_templates_payload(*, include_advanced: bool = False) -> dict:
+    templates = [_annotate_template_taxonomy(item) for item in agent_template_list(include_advanced=include_advanced)]
     ollama_status = ollama_setup_status()
     for item in templates:
         template_id = str(item.get("id") or "").strip().lower()
@@ -659,7 +659,10 @@ def runtime_types(as_json: bool = JSON_OPTION):
 
 @app.command("templates")
 def templates(as_json: bool = JSON_OPTION):
-    """List Gateway agent templates and what signals they provide."""
+    """List Gateway agent templates and what signals they provide.
+
+    Prefer ``ax gateway agents templates list`` for the manifest-library view.
+    """
     payload = _agent_templates_payload()
     if as_json:
         print_json(payload)

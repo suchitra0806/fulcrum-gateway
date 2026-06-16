@@ -1,0 +1,18 @@
+id = "sentinel_cli"
+label = "Sentinel CLI"
+description = "Original aX sentinel runner pattern managed by Gateway."
+runtime_type = "sentinel_cli"
+asset_class = "interactive_agent"
+intake_model = "live_listener"
+trigger_sources = ["direct_message"]
+return_paths = ["inline_reply"]
+telemetry_shape = "rich"
+suggested_name = "dev-sentinel"
+operator_summary = "Best fit for long-lived coding sentinels that need session continuity and tool activity."
+recommended_test_message = "Remember the word cobalt, reply briefly, then I will ask you what word I gave you."
+what_you_need = ["Claude CLI or Codex CLI installed and authenticated on this machine.", "A workdir containing the sentinel's local instructions."]
+setup_skill = "gateway-agent-setup"
+
+[advanced]
+adapter_label = "Gateway sentinel CLI runner"
+supports_command_override = false

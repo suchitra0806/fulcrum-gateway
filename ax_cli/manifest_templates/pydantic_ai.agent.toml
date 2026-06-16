@@ -1,0 +1,5 @@
+name = "pydantic-ai-bot"
+template = "pydantic_ai"
+type = "exec"
+exec_command = "{{bridge_python}} {{repo_root}}/examples/gateway_pydantic_ai/pydantic_ai_bridge.py"
+workdir = "{{repo_root}}"

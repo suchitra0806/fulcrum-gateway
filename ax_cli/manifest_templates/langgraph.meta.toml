@@ -1,0 +1,21 @@
+id = "langgraph"
+label = "LangGraph"
+description = "LangGraph agent runtime managed by Gateway."
+runtime_type = "exec"
+asset_class = "interactive_agent"
+intake_model = "launch_on_send"
+trigger_sources = ["direct_message"]
+return_paths = ["inline_reply"]
+telemetry_shape = "basic"
+suggested_name = "langgraph-bot"
+operator_summary = "Gateway-managed LangGraph bridge. Initial cut ships with a stub graph; real graph wiring is a follow-up."
+recommended_test_message = "Reply with: LangGraph round trip OK."
+what_you_need = ["Python 3.11+ on this machine (the bridge runs as a Gateway-managed subprocess).", "For real graph execution, install langgraph in the bridge environment. The stub bridge runs without it."]
+setup_skill = "gateway-agent-setup"
+
+[defaults_extra]
+bridge_source = "{{repo_root}}/examples/gateway_langgraph/langgraph_bridge.py"
+
+[advanced]
+adapter_label = "Gateway-managed LangGraph bridge"
+supports_command_override = true

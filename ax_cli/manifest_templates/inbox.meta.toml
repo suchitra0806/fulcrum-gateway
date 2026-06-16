@@ -1,0 +1,20 @@
+id = "inbox"
+label = "Passive Inbox"
+description = "Passive receiver identity for queue demos, operator flows, and non-replying endpoints."
+availability = "advanced"
+runtime_type = "inbox"
+asset_class = "background_worker"
+intake_model = "queue_accept"
+worker_model = "queue_drain"
+trigger_sources = ["queued_job", "manual_trigger"]
+return_paths = ["summary_post"]
+telemetry_shape = "basic"
+suggested_name = "inbox-bot"
+operator_summary = "Advanced testing and operator-only flow."
+recommended_test_message = "Queue this test job, mark it received, and do not reply inline."
+what_you_need = []
+setup_skill = "gateway-agent-setup"
+
+[advanced]
+adapter_label = "Built-in passive inbox runtime"
+supports_command_override = false
