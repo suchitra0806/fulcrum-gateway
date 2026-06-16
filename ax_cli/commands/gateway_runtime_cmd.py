@@ -18,6 +18,7 @@ from ..gateway import (
     load_gateway_session,
     ollama_setup_status,
 )
+from ..gateway_hermes import sentinel_sdk_venv_root
 from ..gateway_runtime_types import (
     agent_template_list,
     runtime_type_definition,
@@ -172,10 +173,10 @@ _RUNTIME_INSTALL_RECIPES: dict[str, dict] = {
         "install_steps": ("clone", "venv", "pip_install", "verify"),
     },
     "sentinel_inference_sdk": {
-        # No clone — creates a dedicated venv and installs the openai package.
-        # Target matches the default python path resolved by
-        # _sentinel_inference_sdk_python() so agents pick it up automatically.
-        "target_relative": "hermes-agent",
+        # No clone — creates a client-scoped venv under
+        # ~/.ax/runtimes/sentinel_inference_sdk/<client> and installs the
+        # client package. Target is computed from sentinel_sdk_venv_root(client)
+        # at install time; target_relative is unused for this template.
         "packages": ["openai"],
         "install_steps": ("venv", "pip_install_packages", "pip_verify_packages"),
     },
@@ -188,8 +189,10 @@ def _resolve_install_target(template_id: str, override: str | None = None) -> Pa
         raise ValueError(f"unknown runtime template: {template_id!r}")
     if override:
         candidate = Path(override).expanduser().resolve()
-    else:
+    elif "target_relative" in recipe:
         candidate = (Path.home() / recipe["target_relative"]).resolve()
+    else:
+        raise ValueError(f"no default install target for {template_id!r} — pass --target or --client")
     home_resolved = Path.home().resolve()
     try:
         candidate.relative_to(home_resolved)
@@ -438,18 +441,20 @@ def _install_runtime_payload(
     }
 
 
-def _sentinel_inference_sdk_venv_status() -> dict:
-    """Check whether the sentinel_inference_sdk venv exists and openai is importable."""
+def _sentinel_inference_sdk_venv_status(client: str) -> dict:
+    """Check whether the sentinel_inference_sdk venv for ``client`` exists and the package is importable."""
     recipe = _RUNTIME_INSTALL_RECIPES["sentinel_inference_sdk"]
-    target = Path.home() / recipe["target_relative"]
+    target = sentinel_sdk_venv_root(client)
     venv_python = target / ".venv" / "bin" / "python3"
+    install_hint = f"ax gateway runtime install sentinel_inference_sdk --client {client}"
     if not venv_python.exists():
         return {
             "ready": False,
             "template_id": "sentinel_inference_sdk",
+            "client": client,
             "resolved_path": None,
             "expected_path": str(target / ".venv"),
-            "summary": f"venv not found at {target / '.venv'}. Run `ax gateway runtime install sentinel_inference_sdk`.",
+            "summary": f"venv not found at {target / '.venv'}. Run `{install_hint}`.",
         }
     packages = list(recipe.get("packages") or [])
     for pkg in packages:
@@ -464,14 +469,21 @@ def _sentinel_inference_sdk_venv_status() -> dict:
                 return {
                     "ready": False,
                     "template_id": "sentinel_inference_sdk",
+                    "client": client,
                     "resolved_path": str(venv_python),
-                    "summary": f"{pkg} not importable from {venv_python}. Run `ax gateway runtime install sentinel_inference_sdk`.",
+                    "summary": f"{pkg} not importable from {venv_python}. Run `{install_hint}`.",
                 }
         except Exception as exc:  # noqa: BLE001
-            return {"ready": False, "template_id": "sentinel_inference_sdk", "summary": f"verify failed: {exc}"}
+            return {
+                "ready": False,
+                "template_id": "sentinel_inference_sdk",
+                "client": client,
+                "summary": f"verify failed: {exc}",
+            }
     return {
         "ready": True,
         "template_id": "sentinel_inference_sdk",
+        "client": client,
         "resolved_path": str(venv_python),
         "summary": f"openai importable from {venv_python}.",
         "python_path": str(venv_python),
@@ -514,7 +526,7 @@ _SENTINEL_INFERENCE_SDK_SUPPORTED_CLIENTS = {"openai_sdk"}
 def runtime_install(
     template_id: str = typer.Argument(..., help="Runtime template id (e.g. 'hermes', 'sentinel_inference_sdk')"),
     target: str = typer.Option(None, "--target", help="Override install target (must resolve under your home tree)"),
-    client: str = typer.Option(
+    client: str | None = typer.Option(
         None,
         "--client",
         help="Client library to install. Required for sentinel_inference_sdk. Supported: openai_sdk.",
@@ -562,6 +574,8 @@ def runtime_install(
                 f"Only {sorted(_SENTINEL_INFERENCE_SDK_SUPPORTED_CLIENTS)} is supported for sentinel_inference_sdk today."
             )
             raise typer.Exit(1)
+        if not target:
+            target = str(sentinel_sdk_venv_root(client))
     try:
         payload = _install_runtime_payload(template_id, target_override=target, operator_session=operator_session)
     except (ValueError, PermissionError) as exc:
@@ -596,6 +610,11 @@ def runtime_install(
 @runtime_app.command("status")
 def runtime_status(
     template_id: str = typer.Argument(..., help="Runtime template id (e.g. 'hermes', 'sentinel_inference_sdk')"),
+    client: str | None = typer.Option(
+        None,
+        "--client",
+        help="Client to check. Required for sentinel_inference_sdk (e.g. openai_sdk).",
+    ),
     as_json: bool = JSON_OPTION,
 ):
     """Report whether a runtime template is ready (preflight check).
@@ -603,14 +622,20 @@ def runtime_status(
     Useful as an automation gate: exits non-zero when not ready.
 
         ax gateway runtime status hermes
-        ax gateway runtime status sentinel_inference_sdk
+        ax gateway runtime status sentinel_inference_sdk --client openai_sdk
     """
     tid = template_id.strip().lower()
     if tid not in _RUNTIME_INSTALL_RECIPES:
         err_console.print(f"[red]unknown runtime template:[/red] {template_id!r}")
         raise typer.Exit(1)
     if tid == "sentinel_inference_sdk":
-        status = _sentinel_inference_sdk_venv_status()
+        if not client:
+            err_console.print(
+                "[red]--client is required for sentinel_inference_sdk.[/red] "
+                "Example: ax gateway runtime status sentinel_inference_sdk --client openai_sdk"
+            )
+            raise typer.Exit(1)
+        status = _sentinel_inference_sdk_venv_status(client)
     else:
         from ..gateway import hermes_setup_status
 
