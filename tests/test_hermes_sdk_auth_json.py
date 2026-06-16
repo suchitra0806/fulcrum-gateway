@@ -8,6 +8,8 @@ when env vars are not set.
 from __future__ import annotations
 
 import json
+import logging
+import sys
 
 import pytest
 
@@ -177,6 +179,29 @@ class TestResolveCredentialFromAuthJson:
         monkeypatch.setenv("HERMES_HOME", home)
         result = hermes_sdk._resolve_credential_from_auth_json("anthropic")
         assert result["api_key"] == "sk-low"
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits only")
+    def test_warns_on_loose_file_permissions(self, auth_json_factory, monkeypatch, tmp_path, caplog):
+        home = auth_json_factory({"anthropic": [{"id": "a1", "priority": 0, "access_token": "sk-ant-loose"}]})
+        path = tmp_path / "auth.json"
+        path.chmod(0o644)
+        monkeypatch.setenv("HERMES_HOME", home)
+        monkeypatch.setattr(hermes_sdk, "HERMES_AUTH_PATH", tmp_path / "missing" / "auth.json")
+        with caplog.at_level(logging.WARNING, logger=hermes_sdk.log.name):
+            result = hermes_sdk._resolve_credential_from_auth_json("anthropic")
+        assert result["api_key"] == "sk-ant-loose"
+        assert any("loose permissions" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits only")
+    def test_no_warning_when_file_mode_is_0600(self, auth_json_factory, monkeypatch, tmp_path, caplog):
+        home = auth_json_factory({"anthropic": [{"id": "a1", "priority": 0, "access_token": "sk-ant-tight"}]})
+        (tmp_path / "auth.json").chmod(0o600)
+        monkeypatch.setenv("HERMES_HOME", home)
+        monkeypatch.setattr(hermes_sdk, "HERMES_AUTH_PATH", tmp_path / "missing" / "auth.json")
+        with caplog.at_level(logging.WARNING, logger=hermes_sdk.log.name):
+            result = hermes_sdk._resolve_credential_from_auth_json("anthropic")
+        assert result["api_key"] == "sk-ant-tight"
+        assert not any("loose permissions" in r.getMessage() for r in caplog.records)
 
 
 class TestResolveProviderConfigAuthJsonFallback:

@@ -144,6 +144,15 @@ def _resolve_codex_token() -> str:
 
 def _read_credential_pool_entry(path: Path, provider: str) -> dict | None:
     try:
+        if sys.platform != "win32":
+            st = path.stat()
+            if st.st_mode & 0o077:
+                log.warning(
+                    "Credential file %s has loose permissions (mode %o). Run: chmod 600 %s",
+                    path,
+                    st.st_mode & 0o777,
+                    path,
+                )
         data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return None
@@ -151,6 +160,7 @@ def _read_credential_pool_entry(path: Path, provider: str) -> dict | None:
     entries = pool.get(provider)
     if not entries:
         return None
+
     def _priority(e):
         try:
             return int(e.get("priority", 999))
