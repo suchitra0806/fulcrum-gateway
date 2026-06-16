@@ -284,6 +284,13 @@ def _dispatch_adapter(captured: list) -> "AxAdapter":
         captured.append(event)
 
     adapter.handle_message = _capture
+
+    # _dispatch_inbound posts an immediate "thinking" activity; that's
+    # surrounding I/O for these routing tests, so stub it to a no-op too.
+    async def _noop_status(*a, **k):
+        return None
+
+    adapter._post_processing_status = _noop_status
     return adapter
 
 
@@ -342,3 +349,41 @@ class TestDispatchInbound:
         assert len(captured) == 1
         # Fails closed: source stays on the command's own root (current behavior).
         assert captured[0].source.chat_id == "NEW"
+
+    def test_inline_bypass_command_skips_thinking_bubble(self, monkeypatch):
+        """Bypass commands (/stop, /new, /approve, /deny) are dispatched inline
+        and never produce a threaded reply, so the immediate 'thinking' bubble
+        would hang until the TTL. _dispatch_inbound must skip it for them while
+        still dispatching — and still post it for ordinary messages."""
+        captured: list = []
+        adapter = _dispatch_adapter(captured)
+
+        posts: list = []
+
+        async def _record_status(message_id, status, **k):
+            posts.append((message_id, status))
+
+        adapter._post_processing_status = _record_status
+
+        # The gateway bypass predicate lives in hermes_cli.commands, not
+        # importable in this stub env — inject it (same pattern as tools.approval).
+        fake_cmds = types.ModuleType("hermes_cli.commands")
+        fake_cmds.should_bypass_active_session = lambda cmd: cmd in {"stop", "new", "reset", "approve", "deny"}
+        monkeypatch.setitem(sys.modules, "hermes_cli", types.ModuleType("hermes_cli"))
+        monkeypatch.setitem(sys.modules, "hermes_cli.commands", fake_cmds)
+        monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
+        monkeypatch.setitem(sys.modules, "tools.approval", types.ModuleType("tools.approval"))
+
+        asyncio.run(
+            adapter._dispatch_inbound({"id": "S1", "conversation_id": "ROOT", "content": "/stop", "sender": "bob"})
+        )
+        assert len(captured) == 1, "bypass command must still be dispatched"
+        assert posts == [], "no immediate 'thinking' bubble for a bypass command"
+
+        # An ordinary message still gets the immediate thinking bubble.
+        asyncio.run(
+            adapter._dispatch_inbound(
+                {"id": "M2", "conversation_id": "ROOT2", "content": "do the thing", "sender": "bob"}
+            )
+        )
+        assert posts == [("ROOT2", "thinking")], "ordinary message still posts thinking"

@@ -35,6 +35,7 @@ def _adapter() -> AxAdapter:
     adapter.agent_name = "nova"
     adapter.agent_id = "agent-123"
     adapter.space_id = "space-123"
+    adapter.base_url = "https://paxai.app"
     adapter.local_gateway_url = "http://127.0.0.1:8765"
     import re as _re
 
@@ -43,6 +44,8 @@ def _adapter() -> AxAdapter:
         _re.IGNORECASE,
     )
     adapter._seen_message_ids = OrderedDict()
+    # _dispatch_inbound remembers each run's session root for approval redirect.
+    adapter._recent_roots = OrderedDict()
     return adapter
 
 
@@ -55,15 +58,25 @@ def test_send_typing_forwards_activity_metadata_to_processing_status(monkeypatch
     adapter = _adapter()
     calls = []
 
-    async def fake_post(message_id, status, *, activity=None):
-        calls.append({"message_id": message_id, "status": status, "activity": activity})
+    async def fake_post(message_id, status, *, activity=None, tool_name=None,
+                        progress=None, detail=None, error_message=None):
+        calls.append({
+            "message_id": message_id, "status": status, "activity": activity,
+            "tool_name": tool_name, "progress": progress, "detail": detail,
+        })
 
     monkeypatch.setattr(adapter, "_post_processing_status", fake_post)
 
     asyncio.run(
         adapter.send_typing(
             "msg-1",
-            metadata={"status": "tool_call", "activity": "🔍 read_file: adapter.py"},
+            metadata={
+                "status": "tool_call",
+                "activity": "🔍 read_file: adapter.py",
+                "tool_name": "read_file",
+                "progress": 0.5,
+                "detail": "reading line 1-80",
+            },
         )
     )
 
@@ -72,6 +85,9 @@ def test_send_typing_forwards_activity_metadata_to_processing_status(monkeypatch
             "message_id": "msg-1",
             "status": "tool_call",
             "activity": "🔍 read_file: adapter.py",
+            "tool_name": "read_file",
+            "progress": 0.5,
+            "detail": "reading line 1-80",
         }
     ]
 
@@ -126,11 +142,16 @@ def test_dispatch_inbound_uses_stable_thread_chat_type(monkeypatch):
     # plugin-registry scan picking up "ax" in this test process.
     adapter.platform = SimpleNamespace(value="ax")
     captured: list = []
+    status_posts: list = []
 
     async def fake_handle_message(event):
         captured.append(event)
 
+    async def fake_post(message_id, status, **kwargs):
+        status_posts.append({"message_id": message_id, "status": status})
+
     monkeypatch.setattr(adapter, "handle_message", fake_handle_message)
+    monkeypatch.setattr(adapter, "_post_processing_status", fake_post)
 
     first_mention = {
         "id": "msg-root",
@@ -155,6 +176,12 @@ def test_dispatch_inbound_uses_stable_thread_chat_type(monkeypatch):
     assert captured[1].source.chat_type == "thread"
     # Same thread root → same chat_id → same session key.
     assert captured[0].source.chat_id == captured[1].source.chat_id == "msg-root"
+    # A1: an immediate "thinking" is posted on pickup, keyed on the thread root
+    # chat_id (matching the anchor used by send_typing and the reply parent_id).
+    assert status_posts == [
+        {"message_id": "msg-root", "status": "thinking"},
+        {"message_id": "msg-root", "status": "thinking"},
+    ]
 
 
 def test_dispatch_inbound_dedupes_double_event(monkeypatch):
@@ -172,7 +199,11 @@ def test_dispatch_inbound_dedupes_double_event(monkeypatch):
     async def fake_handle_message(event):
         captured.append(event)
 
+    async def fake_post(message_id, status, **kwargs):
+        pass
+
     monkeypatch.setattr(adapter, "handle_message", fake_handle_message)
+    monkeypatch.setattr(adapter, "_post_processing_status", fake_post)
 
     payload = {
         "id": "msg-aaa",
@@ -201,7 +232,11 @@ def test_dispatch_inbound_strips_leading_agent_mention_before_command(monkeypatc
     async def fake_handle_message(event):
         captured.append(event)
 
+    async def fake_post(message_id, status, **kwargs):
+        pass
+
     monkeypatch.setattr(adapter, "handle_message", fake_handle_message)
+    monkeypatch.setattr(adapter, "_post_processing_status", fake_post)
 
     asyncio.run(
         adapter._dispatch_inbound(
@@ -389,3 +424,273 @@ def test_announce_local_gateway_posts_external_runtime_state(monkeypatch):
     assert posts[0]["json"]["activity"] == "Using search_docs"
     assert posts[0]["json"]["message_id"] == "msg-1"
     assert posts[0]["json"]["current_tool"] == "search_docs"
+
+
+def _capturing_client(posts, *, status_code=200):
+    """A monkeypatchable httpx.AsyncClient stub that records POST bodies."""
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, **kwargs):
+            posts.append({"url": url, **kwargs})
+            return type(
+                "Response",
+                (),
+                {
+                    "status_code": status_code,
+                    "headers": {"content-type": "application/json"},
+                    "text": "",
+                    "json": lambda self: {"id": "msg-out"},
+                },
+            )()
+
+    return FakeAsyncClient
+
+
+def test_post_processing_status_forwards_structured_fields(monkeypatch):
+    """A2: tool_name/progress/detail/error_message are forwarded to the aX
+    activity endpoint so the UI can render a rich, live bubble."""
+    adapter = _adapter()
+    posts: list = []
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", _capturing_client(posts))
+    # Local-gateway announce also fires; point it at the same recorder.
+    monkeypatch.setattr(adapter, "_announce_local_gateway", lambda *a, **k: _noop())
+
+    asyncio.run(
+        adapter._post_processing_status(
+            "msg-root",
+            "processing",
+            activity="Reading adapter.py",
+            tool_name="read_file",
+            progress=0.5,
+            detail="line 1-80",
+        )
+    )
+
+    ax_posts = [p for p in posts if p["url"].endswith("/api/v1/agents/processing-status")]
+    assert len(ax_posts) == 1
+    body = ax_posts[0]["json"]
+    assert body["message_id"] == "msg-root"
+    assert body["status"] == "processing"
+    assert body["activity"] == "Reading adapter.py"
+    assert body["tool_name"] == "read_file"
+    assert body["progress"] == 0.5
+    assert body["detail"] == "line 1-80"
+
+
+def test_post_processing_status_logs_failure_not_swallows(monkeypatch, caplog):
+    """A3 / spec §177-180: a failed POST must be logged, never silently
+    swallowed — a silent drop is the difference between a working bubble and a
+    stuck 'waiting' chip."""
+    adapter = _adapter()
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    class BoomClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, **kwargs):
+            raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", BoomClient)
+    monkeypatch.setattr(adapter, "_announce_local_gateway", lambda *a, **k: _noop())
+
+    import logging as _logging
+    with caplog.at_level(_logging.WARNING):
+        asyncio.run(adapter._post_processing_status("msg-1", "thinking"))
+
+    assert any("processing-status post failed" in r.message for r in caplog.records)
+
+
+def test_send_posts_terminal_error_on_non_retryable_failure(monkeypatch):
+    """A4: a non-retryable final-delivery failure emits a terminal 'error' so
+    the activity bubble clears instead of spinning forever."""
+    adapter = _adapter()
+    status_posts: list = []
+    posts: list = []
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    async def fake_post(message_id, status, **kwargs):
+        status_posts.append({"message_id": message_id, "status": status, **kwargs})
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(adapter, "_post_processing_status", fake_post)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", _capturing_client(posts, status_code=400))
+
+    result = asyncio.run(adapter.send("msg-root", "the answer"))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert len(status_posts) == 1
+    assert status_posts[0]["message_id"] == "msg-root"
+    assert status_posts[0]["status"] == "error"
+    assert "error_message" in status_posts[0]
+
+
+def test_send_omits_terminal_error_for_space_level_home_channel(monkeypatch):
+    """A home-channel send (chat_id == space_id) has no activity bubble, so a
+    non-retryable failure must NOT post a terminal 'error' anchored on the space
+    id — that would orphan a status on a non-message target."""
+    adapter = _adapter()
+    status_posts: list = []
+    posts: list = []
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    async def fake_post(message_id, status, **kwargs):
+        status_posts.append({"message_id": message_id, "status": status})
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(adapter, "_post_processing_status", fake_post)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", _capturing_client(posts, status_code=400))
+
+    result = asyncio.run(adapter.send(adapter.space_id, "proactive note"))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert status_posts == [], "no terminal error anchored on the space id"
+
+
+def test_send_does_not_post_error_on_retryable_failure(monkeypatch):
+    """Retryable failures (5xx/429) are left for Hermes to retry — emitting a
+    premature 'error' would clear the bubble even though work continues."""
+    adapter = _adapter()
+    status_posts: list = []
+    posts: list = []
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    async def fake_post(message_id, status, **kwargs):
+        status_posts.append({"message_id": message_id, "status": status})
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(adapter, "_post_processing_status", fake_post)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", _capturing_client(posts, status_code=503))
+
+    result = asyncio.run(adapter.send("msg-root", "the answer"))
+
+    assert result.success is False
+    assert result.retryable is True
+    assert status_posts == []
+
+
+def test_post_processing_status_strips_codex_autoraise_notice(monkeypatch):
+    """Hermes replays its Codex gpt-5.5 compaction-autoraise notice on every
+    prompt (the agent is rebuilt per turn), so its text must be stripped from
+    the activity stream instead of spamming a bubble each turn. The status
+    transition must still POST so the bubble never gets stuck (spec §177-180)."""
+    adapter = _adapter()
+    posts: list = []
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", _capturing_client(posts))
+    monkeypatch.setattr(adapter, "_announce_local_gateway", lambda *a, **k: _noop())
+
+    notice = (
+        "ℹ Codex gpt-5.5 caps context at 272K, so auto-compaction was raised "
+        "to 85% (from 50%) to use more of the window before summarizing.\n"
+        "  Opt back out: hermes config set compression.codex_gpt55_autoraise false"
+    )
+
+    asyncio.run(
+        adapter._post_processing_status(
+            "msg-root",
+            "thinking",
+            activity=notice,
+            tool_name="read_file",
+        )
+    )
+
+    ax_posts = [p for p in posts if p["url"].endswith("/api/v1/agents/processing-status")]
+    assert len(ax_posts) == 1, "status transition must still be POSTed"
+    body = ax_posts[0]["json"]
+    assert body["status"] == "thinking"
+    # The noisy notice text is stripped from the activity label...
+    assert "activity" not in body
+    # ...while unrelated structured fields ride through untouched.
+    assert body["tool_name"] == "read_file"
+
+
+def test_post_processing_status_strips_codex_notice_from_detail(monkeypatch):
+    """The notice is suppressed whether hermes delivers it as the activity
+    label or the detail line."""
+    adapter = _adapter()
+    posts: list = []
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", _capturing_client(posts))
+    monkeypatch.setattr(adapter, "_announce_local_gateway", lambda *a, **k: _noop())
+
+    asyncio.run(
+        adapter._post_processing_status(
+            "msg-root",
+            "processing",
+            detail="ℹ Codex gpt-5.5 caps context at 272K, so auto-compaction was raised to 85%.",
+        )
+    )
+
+    body = [p for p in posts if p["url"].endswith("/api/v1/agents/processing-status")][0]["json"]
+    assert "detail" not in body  # notice text in detail is stripped
+
+
+def test_post_processing_status_keeps_legitimate_compaction_text(monkeypatch):
+    """Anchoring on the 'ℹ Codex' prefix (not loose substrings) means a genuine
+    activity/detail that merely mentions compaction is NOT nulled."""
+    adapter = _adapter()
+    posts: list = []
+
+    async def fake_get_jwt():
+        return "jwt-1"
+
+    monkeypatch.setattr(adapter, "_get_jwt", fake_get_jwt)
+    monkeypatch.setattr(_MODULE.httpx, "AsyncClient", _capturing_client(posts))
+    monkeypatch.setattr(adapter, "_announce_local_gateway", lambda *a, **k: _noop())
+
+    asyncio.run(
+        adapter._post_processing_status(
+            "msg-root",
+            "processing",
+            activity="Summarizing: auto-compaction was raised to 85%",
+            detail="caps context at 272K reached",
+        )
+    )
+
+    body = [p for p in posts if p["url"].endswith("/api/v1/agents/processing-status")][0]["json"]
+    assert body["activity"] == "Summarizing: auto-compaction was raised to 85%"
+    assert body["detail"] == "caps context at 272K reached"
+
+
+async def _noop():
+    return None

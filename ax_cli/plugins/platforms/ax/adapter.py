@@ -60,6 +60,15 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://paxai.app"
 DEFAULT_LOCAL_GATEWAY_URL = "http://127.0.0.1:8765"
 SSE_RECONNECT_BACKOFF_MAX = 60.0
+
+# hermes's Codex gpt-5.5 compaction-autoraise lifecycle notice always begins
+# with this prefix ("ℹ Codex gpt-5.5 caps context at 272K, …"). It is meant to
+# fire once per session, but because each prompt rebuilds the hermes agent it
+# re-fires every turn; we suppress it in the activity stream. Anchor on the
+# leading prefix — NOT loose substrings — so a legitimate activity/detail that
+# merely mentions compaction is never nulled. (See _post_processing_status and
+# NousResearch/hermes-agent#46786.)
+_CODEX_AUTORAISE_NOTICE_PREFIX = "ℹ Codex"
 SSE_IDLE_TIMEOUT = 90.0
 JWT_REFRESH_BUFFER_SECONDS = 30
 HEARTBEAT_INTERVAL_SECONDS = 30.0
@@ -255,8 +264,11 @@ class AxAdapter(BasePlatformAdapter):
                     json=body,
                     headers={"Content-Type": "application/json"},
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            # Local Gateway is optional (a hosted plugin may run without one),
+            # so this is expected-down and only logged at debug — but never
+            # silently swallowed.
+            logger.debug("local-gateway announce failed: status=%s err=%s", status, exc)
 
     async def _post_processing_status(
         self,
@@ -264,14 +276,45 @@ class AxAdapter(BasePlatformAdapter):
         status: str,
         *,
         activity: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        progress: Optional[Any] = None,
+        detail: Optional[str] = None,
+        error_message: Optional[str] = None,
     ) -> None:
-        """Best-effort POST to aX's original-message activity stream."""
+        """Best-effort POST to aX's original-message activity stream.
+
+        Honors GATEWAY-ACTIVITY-VISIBILITY-001: forwards the lifecycle status
+        plus optional structured fields (``tool_name``, ``progress``, ``detail``)
+        so the aX UI can render a live "thinking…" bubble. Failures are logged,
+        never silently swallowed (spec §177-180) — a silent drop here is the
+        difference between a working activity bubble and a stuck "waiting" chip.
+
+        Carve-out: hermes replays a one-time Codex gpt-5.5 compaction-autoraise
+        notice ("ℹ Codex gpt-5.5 caps context at 272K, so auto-compaction was
+        raised to 85% …") through this lifecycle channel. Because each prompt
+        rebuilds the hermes agent, that "once per session" notice re-fires on
+        every turn and renders as a noisy activity bubble. We can't change the
+        upstream cadence (NousResearch/hermes-agent#46786), so we strip just
+        that text here. We null the offending field rather than dropping the
+        whole POST so the status transition still lands and the bubble never
+        gets stuck (per §177-180 above).
+        """
+        if activity and activity.lstrip().startswith(_CODEX_AUTORAISE_NOTICE_PREFIX):
+            activity = None
+        if detail and detail.lstrip().startswith(_CODEX_AUTORAISE_NOTICE_PREFIX):
+            detail = None
         try:
             jwt = await self._get_jwt()
-        except Exception:
-            await self._announce_local_gateway(status, activity=activity, message_id=message_id)
+        except Exception as exc:
+            logger.warning(
+                "processing-status auth failed: msg=%s status=%s err=%s",
+                message_id,
+                status,
+                exc,
+            )
+            await self._announce_local_gateway(status, activity=activity, message_id=message_id, current_tool=tool_name)
             return
-        body = {
+        body: Dict[str, Any] = {
             "message_id": message_id,
             "agent_name": self.agent_name,
             "agent_id": self.agent_id,
@@ -280,9 +323,17 @@ class AxAdapter(BasePlatformAdapter):
         }
         if activity:
             body["activity"] = activity
+        if tool_name:
+            body["tool_name"] = tool_name
+        if progress is not None:
+            body["progress"] = progress
+        if detail:
+            body["detail"] = detail
+        if error_message:
+            body["error_message"] = error_message
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                await client.post(
+                resp = await client.post(
                     f"{self.base_url}/api/v1/agents/processing-status",
                     json=body,
                     headers={
@@ -290,9 +341,22 @@ class AxAdapter(BasePlatformAdapter):
                         "Content-Type": "application/json",
                     },
                 )
-        except Exception:
-            pass
-        await self._announce_local_gateway(status, activity=activity, message_id=message_id)
+            if resp.status_code >= 400:
+                logger.warning(
+                    "processing-status post failed: msg=%s status=%s http=%s body=%s",
+                    message_id,
+                    status,
+                    resp.status_code,
+                    resp.text[:200],
+                )
+        except Exception as exc:
+            logger.warning(
+                "processing-status post failed: msg=%s status=%s err=%s",
+                message_id,
+                status,
+                exc,
+            )
+        await self._announce_local_gateway(status, activity=activity, message_id=message_id, current_tool=tool_name)
 
     @property
     def name(self) -> str:
@@ -570,6 +634,31 @@ class AxAdapter(BasePlatformAdapter):
             self._seen_message_ids.popitem(last=False)
         return False
 
+    @staticmethod
+    def _is_inline_bypass_command(text: str) -> bool:
+        """True if ``text`` is an inline command the gateway dispatches WITHOUT
+        producing a threaded reply (`/stop`, `/new`, `/approve`, `/deny`, …).
+
+        Those bypass the active-session guard and never emit a reply that would
+        clear an activity bubble, so the immediate "thinking" must be skipped for
+        them — otherwise the spinner hangs until the 180s TTL. Parses the command
+        token straight from the cleaned text (mirroring :func:`_is_approval_command`,
+        so it doesn't depend on optional ``MessageEvent`` helpers) and delegates
+        the bypass decision to the gateway's canonical predicate to avoid drift.
+        """
+        stripped = (text or "").strip()
+        if not stripped.startswith("/"):
+            return False
+        cmd = stripped[1:].split(maxsplit=1)[0].split("@", 1)[0].lower()
+        if not cmd:
+            return False
+        try:
+            from hermes_cli.commands import should_bypass_active_session
+
+            return bool(should_bypass_active_session(cmd))
+        except Exception:
+            return False
+
     async def _dispatch_inbound(self, data: Dict[str, Any]) -> None:
         if self._is_self_authored(data):
             return
@@ -631,6 +720,19 @@ class AxAdapter(BasePlatformAdapter):
             message_id=message_id,
             reply_to_message_id=str(parent_id) if parent_id else None,
         )
+
+        # Surface the "thinking…" bubble the instant we pick up the message,
+        # rather than waiting for Hermes's first send_typing (which lags behind
+        # model spin-up). Keyed on chat_id (the thread root) so it matches the
+        # anchor used by send_typing/stop_typing and by the final reply's
+        # parent_id. Best-effort: failures are logged inside the helper.
+        #
+        # Skip it for inline bypass commands (/stop, /new, /approve, /deny):
+        # those are dispatched inline by handle_message and never produce a
+        # threaded reply, so a "thinking" bubble here would hang until the 180s
+        # TTL — a phantom spinner on the most common control commands.
+        if not self._is_inline_bypass_command(text):
+            await self._post_processing_status(chat_id, "thinking")
 
         # Dispatch through the base adapter so the level-1 active-session
         # guard (queue/interrupt) and inline command bypass (/stop, /new,
@@ -740,6 +842,20 @@ class AxAdapter(BasePlatformAdapter):
             )
 
         retryable = r.status_code in (429,) or 500 <= r.status_code < 600
+        if not retryable and thread_anchor:
+            # Final delivery failed and won't be retried — emit a terminal
+            # error so the aX activity bubble clears instead of spinning
+            # forever. Anchor on thread_anchor (the same target the reply body
+            # used): it already applies the chat_id != space_id guard, so a
+            # home-channel send (chat_id == space_id, no activity bubble) posts
+            # nothing instead of orphaning an error on the space itself.
+            # Retryable failures are left alone: Hermes retries and the eventual
+            # completed/error covers them.
+            await self._post_processing_status(
+                thread_anchor,
+                "error",
+                error_message=f"reply delivery failed: status {r.status_code}",
+            )
         return SendResult(
             success=False,
             error=f"status {r.status_code}: {r.text[:200]}",
@@ -757,10 +873,16 @@ class AxAdapter(BasePlatformAdapter):
         metadata = metadata or {}
         status = str(metadata.get("status") or "thinking")
         activity = metadata.get("activity")
+        tool_name = metadata.get("tool_name") or metadata.get("current_tool")
+        progress = metadata.get("progress")
+        detail = metadata.get("detail")
         await self._post_processing_status(
             chat_id,
             status,
             activity=str(activity) if activity else None,
+            tool_name=str(tool_name) if tool_name else None,
+            progress=progress,
+            detail=str(detail) if detail else None,
         )
 
     async def stop_typing(self, chat_id: str) -> None:
