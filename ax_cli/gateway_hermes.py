@@ -166,6 +166,7 @@ _INFERENCE_SDK_CLIENTS = {
     "gemini_sdk",
     "leapfrog_sdk",
     "mistral_sdk",
+    "together_sdk",
     "xai_sdk",
 }
 
