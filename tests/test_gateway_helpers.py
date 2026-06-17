@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -2210,6 +2211,20 @@ class TestFormatDaemonLogLine:
         assert len(line) > 0
 
 
+def _activity_writer(gw_dir: str, count: int) -> None:
+    """Worker run in a separate process: write `count` activity records.
+
+    It sets AX_GATEWAY_DIR and imports inside the function on purpose. Under the
+    'spawn' start method the child is a fresh interpreter that does not inherit
+    the parent's env, imports, or monkeypatches.
+    """
+    os.environ["AX_GATEWAY_DIR"] = gw_dir
+    from ax_cli.gateway import record_gateway_activity
+
+    for _ in range(count):
+        record_gateway_activity("cross_proc_test")
+
+
 class TestRecordAndLoadGatewayActivity:
     """record_gateway_activity / load_recent_gateway_activity round-trip."""
 
@@ -2302,6 +2317,50 @@ class TestRecordAndLoadGatewayActivity:
         record_gateway_activity("lock_test")
         lock_path = activity_log_path().with_suffix(".lock")
         assert lock_path.exists()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="flock cross-process guarantee is POSIX-only")
+    def test_concurrent_cross_process_writes_keep_chain_intact(self, monkeypatch, tmp_path):
+        """Real regression test for #288: separate processes must not fork the chain.
+
+        A threading-only test passes even with the old process-local threading.Lock,
+        so it cannot prove the cross-process fix. This spawns N processes writing to
+        the same log, then runs the actual chain verifier and asserts no breaks.
+        """
+        import json
+        import multiprocessing
+
+        from ax_cli.audit import verify_chain
+        from ax_cli.gateway_storage import activity_log_path
+
+        gw_dir = str(tmp_path / "gw")
+        writers, per_writer = 4, 25
+        total = writers * per_writer
+
+        ctx = multiprocessing.get_context("spawn")
+        procs = [
+            ctx.Process(target=_activity_writer, args=(gw_dir, per_writer))
+            for _ in range(writers)
+        ]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(30)
+            assert p.exitcode == 0, f"writer process exited with {p.exitcode}"
+
+        monkeypatch.setenv("AX_GATEWAY_DIR", gw_dir)
+        path = activity_log_path()
+        records = [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        seqs = sorted(r["seq"] for r in records)
+
+        assert len(records) == total, f"expected {total} records, got {len(records)}"
+        assert seqs == list(range(1, total + 1)), f"forked/duplicated seqs: {seqs}"
+
+        report = verify_chain(path)
+        assert report.ok, f"chain breaks under cross-process writes: {[b.kind for b in report.breaks]}"
 
 
 # ---------------------------------------------------------------------------

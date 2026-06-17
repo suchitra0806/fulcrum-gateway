@@ -36,21 +36,24 @@ def _exclusive_activity_lock(path: Path):
     Falls back to the in-process threading.Lock on platforms where fcntl is
     unavailable (Windows), which preserves the pre-existing within-process
     guarantee without crashing.
+
+    Note: on network filesystems where flock is a silent no-op (e.g. NFS
+    without lockd), the cross-process guarantee degrades to in-process only.
     """
     try:
         import fcntl as _fcntl
-
-        lock_path = path.with_suffix(".lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with lock_path.open("w") as _lf:
-            _fcntl.flock(_lf.fileno(), _fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                _fcntl.flock(_lf.fileno(), _fcntl.LOCK_UN)
     except ImportError:
         with _ACTIVITY_LOCK:
             yield
+        return
+    lock_path = path.with_suffix(".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("w") as _lf:
+        _fcntl.flock(_lf.fileno(), _fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            _fcntl.flock(_lf.fileno(), _fcntl.LOCK_UN)
 
 
 def _chmod_quiet(path: Path, mode: int) -> None:
