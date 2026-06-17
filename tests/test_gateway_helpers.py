@@ -2259,7 +2259,6 @@ class TestRecordAndLoadGatewayActivity:
 
     def test_chain_seq_and_prev_hash_are_set(self, monkeypatch, tmp_path):
         from ax_cli.gateway import record_gateway_activity
-        from ax_cli.gateway_storage import activity_log_path
 
         monkeypatch.setenv("AX_GATEWAY_DIR", str(tmp_path / "gw"))
         r1 = record_gateway_activity("ev1")
@@ -2268,7 +2267,6 @@ class TestRecordAndLoadGatewayActivity:
         assert r1["prev_hash"] is None
         assert r2["seq"] == 2
         assert r2["prev_hash"] is not None
-        _ = activity_log_path()
 
     def test_concurrent_writes_produce_unique_seqs(self, monkeypatch, tmp_path):
         """Concurrent in-process writers must not produce duplicate seq numbers.
@@ -2305,8 +2303,6 @@ class TestRecordAndLoadGatewayActivity:
 
     def test_lock_file_created_alongside_activity_log(self, monkeypatch, tmp_path):
         """A companion .lock file is created next to activity.jsonl on POSIX."""
-        import sys
-
         from ax_cli.gateway import record_gateway_activity
         from ax_cli.gateway_storage import activity_log_path
 

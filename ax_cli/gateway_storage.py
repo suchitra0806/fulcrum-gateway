@@ -47,7 +47,6 @@ def _exclusive_activity_lock(path: Path):
             yield
         return
     lock_path = path.with_suffix(".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("w") as _lf:
         _fcntl.flock(_lf.fileno(), _fcntl.LOCK_EX)
         try:
