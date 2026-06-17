@@ -14,6 +14,8 @@ import typer
 from ..gateway import (
     AX_PLUGIN_NAME,
     _hermes_plugin_home,
+    _is_hermes_plugin_runtime,
+    _is_supervised_subprocess_runtime,
     _is_system_agent,
     _plugin_source_dir,
     agent_dir,
@@ -487,6 +489,17 @@ def _run_gateway_doctor(name: str, *, send_test: bool = False) -> dict:
                     add_check("channel_sse", "passed", "Platform SSE subscription is active.")
                 else:
                     add_check("claude_code_session", "failed", "Gateway does not currently have Claude Code running.")
+            elif _is_supervised_subprocess_runtime(runtime_type):
+                # hermes_plugin and the sentinel SDK runtimes carry no
+                # exec_command: Gateway builds and supervises the launch command
+                # implicitly (see _is_supervised_subprocess_runtime). Treating a
+                # missing exec_command as a failure here is a false negative —
+                # issue #359.
+                if _is_hermes_plugin_runtime(runtime_type):
+                    launch_detail = "Gateway supervises `hermes gateway run` for this runtime."
+                else:
+                    launch_detail = "Gateway supervises this runtime directly; no exec command is required."
+                add_check("runtime_launch", "passed", launch_detail)
             elif runtime_type != "echo":
                 if exec_command:
                     add_check("runtime_launch", "passed", "Gateway has a launch command for this runtime.")
